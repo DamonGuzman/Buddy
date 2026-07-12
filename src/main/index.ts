@@ -14,7 +14,7 @@
  *   permission prompt (use-fake-ui-for-media-stream).
  */
 
-import { app, ipcMain } from 'electron';
+import { app, ipcMain, powerMonitor } from 'electron';
 import { captureAllDisplays } from './capture';
 import { Conversation } from './conversation';
 import { startDebugServer } from './debug-server';
@@ -100,6 +100,9 @@ async function main(): Promise<void> {
 
   hotkey.on('hold-start', () => conversation.holdStart());
   hotkey.on('hold-end', () => conversation.holdEnd());
+  // F1 fix (C1): forced release (max-hold watchdog / lock / suspend) cancels
+  // the hold — mic released, held audio cleared, NO turn committed.
+  hotkey.on('hold-cancel', () => conversation.cancelHold());
 
   // ---------------------------------------------------------------------
   // Boot
@@ -109,6 +112,14 @@ async function main(): Promise<void> {
 
   overlays.start();
   hotkey.start();
+
+  // F1 fix (C1 + sleep/resume): the secure desktop (Ctrl+Alt+Del) and lock
+  // screen swallow keyups — force-cancel any live hold and reset modifier
+  // state so the mic can never stay hot on a locked machine. On resume, the
+  // realtime socket may be half-open; reset it so the next turn reconnects.
+  powerMonitor.on('lock-screen', () => hotkey.forceCancel());
+  powerMonitor.on('suspend', () => hotkey.forceCancel());
+  powerMonitor.on('resume', () => conversation.onSystemResume());
 
   const tray = createTray({
     onTogglePanel: () => panel.toggle(),

@@ -67,7 +67,7 @@ function handleConnection(ws, server, options) {
 
   let turn = freshTurn();
   let appendedAudioBytes = 0;
-  let active = null; // { cancelled: boolean } for the streaming response
+  let active = null; // { cancelled, done } for the streaming response
 
   send({ type: 'session.created', session: { id: nextId('sess'), type: 'realtime' } });
 
@@ -75,6 +75,7 @@ function handleConnection(ws, server, options) {
     let msg;
     try {
       msg = JSON.parse(raw.toString());
+      if (msg && typeof msg.type === 'string') server.clientEvents.push(msg); // test hook
     } catch {
       send({
         type: 'error',
@@ -139,12 +140,27 @@ function handleConnection(ws, server, options) {
       }
 
       case 'response.create': {
+        // F1 fix (M4 hardening): the REAL API rejects response.create while a
+        // response is active — the mock must too, so tests catch that class
+        // of bug (continueResponse firing mid-response).
+        if (active && !active.cancelled && !active.done) {
+          log('[mock-realtime] rejected response.create: response already active');
+          send({
+            type: 'error',
+            error: {
+              type: 'invalid_request_error',
+              code: 'conversation_already_has_active_response',
+              message: 'Conversation already has an active response',
+            },
+          });
+          break;
+        }
         const thisTurn = turn;
         turn = freshTurn();
         const scenario = pickScenario(thisTurn);
         log(`[mock-realtime] response.create -> scenario "${scenario.name}"`);
         const responseId = nextId('resp');
-        const state = { cancelled: false };
+        const state = { cancelled: false, done: false };
         active = state;
         runResponse(scenario, thisTurn, responseId, state, send, options).catch((err) => {
           log(`[mock-realtime] scenario "${scenario.name}" crashed: ${err.stack || err}`);
@@ -229,7 +245,11 @@ async function runResponse(scenario, turn, responseId, state, send, options) {
       });
     },
 
-    /** Emit a function call: output_item.added + argument deltas + done. */
+    /**
+     * Emit a function call: output_item.added + argument deltas + done.
+     * Pass a STRING as `args` to stream it verbatim (e.g. deliberately
+     * malformed JSON for arg-rejection scenarios).
+     */
     async functionCall(name, args) {
       const callId = nextId('call');
       const itemId = nextId('fc');
@@ -239,7 +259,7 @@ async function runResponse(scenario, turn, responseId, state, send, options) {
         output_index: 1,
         item: { id: itemId, type: 'function_call', name, call_id: callId, arguments: '' },
       });
-      const json = JSON.stringify(args);
+      const json = typeof args === 'string' ? args : JSON.stringify(args);
       const mid = Math.ceil(json.length / 2);
       for (const delta of [json.slice(0, mid), json.slice(mid)]) {
         if (state.cancelled) return callId;
@@ -274,6 +294,7 @@ async function runResponse(scenario, turn, responseId, state, send, options) {
 
     async done(status) {
       doneSent = true;
+      state.done = true;
       send({
         type: 'response.done',
         response: {
@@ -316,6 +337,8 @@ function createMockServer(options = {}) {
       url: '',
       /** Every session.update received, newest last (test hook). */
       sessionUpdates: [],
+      /** Every parsed client event received, across connections (test hook). */
+      clientEvents: [],
       connectionCount: 0,
       /** Hard-kill all live sockets (reconnect testing). */
       dropAllConnections() {

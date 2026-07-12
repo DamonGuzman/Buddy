@@ -11,6 +11,21 @@
  *   barge-in), the text turn, tool-call -> pointer dispatch,
  * - the transcript ring buffer (last 50 entries) and the debug counters
  *   surfaced through GET /state.
+ *
+ * F1 fixes (review findings) concentrated here:
+ * - M1/m1: `turnToken` — every new turn (hold, ask, forced cancel) bumps it;
+ *   async continuations bail after every await if superseded.
+ * - M2: main-owned playback epoch — audio:output deltas carry the epoch of
+ *   the response they belong to; cancel/supersede bumps the epoch and the
+ *   renderer drops any older-epoch delta (a cancelled response's pre-cancel
+ *   burst can no longer play over the next turn).
+ * - M3/M5: pendingResponses counts ONLY from the session's
+ *   'response-requested' / 'response-done' events; idle is scheduled only
+ *   when the count settles at zero.
+ * - C1: cancelHold() force-releases a hold as a cancel (watchdog / lock /
+ *   suspend), clearing held audio, with no turn.
+ * - m5: voice turns get a placeholder user bubble at commit time, filled
+ *   in-place when the async ASR transcript arrives.
  */
 
 import { captureAllDisplays } from './capture';
@@ -85,6 +100,13 @@ export class Conversation {
   private acceptingAudio = false;
   private pendingCaptures: Promise<CaptureResult[]> | null = null;
 
+  /**
+   * F1 fix (M1/m1): bumped whenever a new turn supersedes the current one
+   * (hold-start, askText, forced cancel, settings rebuild). Every async
+   * continuation captures it and bails after each await if it moved on.
+   */
+  private turnToken = 0;
+
   /** Captures attached to the most recent committed turn (tool-call mapping). */
   private turnCaptures: CaptureResult[] = [];
   private lastCapture: CaptureMeta[] | null = null;
@@ -93,6 +115,18 @@ export class Conversation {
   private pendingResponses = 0;
   /** Bumped on any turn/response activity; guards the idle-grace timer. */
   private epoch = 0;
+
+  /**
+   * F1 fix (M2): main-owned playback epoch. `playbackEpoch` bumps on every
+   * cancel/supersede/session-rebuild; `deltaEpoch` is the epoch stamped onto
+   * forwarded audio deltas, locked in when a response is requested — so a
+   * cancelled response's late deltas always carry a stale epoch.
+   */
+  private playbackEpoch = 0;
+  private deltaEpoch = 0;
+
+  /** F1 fix (m5): placeholder user entry awaiting the async ASR transcript. */
+  private pendingVoiceEntryId: string | null = null;
 
   // Transcript + debug counters.
   private entries: TranscriptEntry[] = [];
@@ -159,7 +193,7 @@ export class Conversation {
 
   /** Playback passthrough (debug harness + barge-in share this path). */
   playback(command: PlaybackCommand): void {
-    this.panel.send('audio:playback', { command });
+    this.panel.send('audio:playback', { command, epoch: this.playbackEpoch });
   }
 
   // ---------------------------------------------------------------------
@@ -255,10 +289,14 @@ export class Conversation {
     // BARGE-IN: kill the in-flight response and its queued audio.
     if (this.pendingResponses > 0) this.cancelActiveResponse('stop');
     this.holding = true;
+    this.turnToken += 1; // F1 (M1): supersede any pending finishVoiceTurn/askText
     this.holdStartedAt = Date.now();
     this.chunksThisHold = 0;
     this.acceptingAudio = this.canReachServer();
     this.epoch += 1;
+    // F1 (M7): drop stale un-committed audio (a superseded hold's buffer,
+    // queued appends from a failed turn) BEFORE this hold's chunks arrive.
+    this.session.clearAudio();
     // M8.5: new voice turn timings (after barge-in, so the watch keeps the old turn).
     const turn = this.beginTurn('voice');
     turn.tHoldStart = this.holdStartedAt;
@@ -307,6 +345,24 @@ export class Conversation {
     void this.finishVoiceTurn();
   }
 
+  /**
+   * F1 fix (C1): force-release the current hold as a CANCEL — max-hold
+   * watchdog, screen lock, suspend, or a mid-hold settings rebuild. Stops the
+   * mic, clears the held audio, produces NO turn, and returns to idle.
+   */
+  cancelHold(): void {
+    if (this.closed || !this.holding) return;
+    this.holding = false;
+    this.turnToken += 1; // invalidate any in-flight continuation
+    this.acceptingAudio = false;
+    this.panel.send('audio:capture', { command: 'stop' });
+    this.setCaptureIndicator(false);
+    this.session.clearAudio();
+    this.pendingCaptures = null;
+    this.discardActiveTurn();
+    this.setState('idle');
+  }
+
   /** Mic PCM chunk from the panel renderer (ipcMain 'audio:chunk'). */
   handleAudioChunk(chunk: ArrayBuffer): void {
     this.chunksIn += 1;
@@ -321,8 +377,13 @@ export class Conversation {
   async askText(text: string): Promise<void> {
     const trimmed = text.trim();
     if (this.closed || trimmed.length === 0) return;
+    // A typed question while the hotkey is held supersedes the hold —
+    // never two concurrent turns (m1) / response.creates.
+    if (this.holding) this.cancelHold();
     // Supersede: cancel the current response and drop its queued audio.
     if (this.pendingResponses > 0) this.cancelActiveResponse('flush');
+    this.turnToken += 1; // F1 (m1): supersede any pre-commit turn
+    const token = this.turnToken;
     this.epoch += 1;
     // M8.5: new text turn timings.
     const turn = this.beginTurn('text');
@@ -347,6 +408,9 @@ export class Conversation {
     } finally {
       this.setCaptureIndicator(false);
     }
+    // F1 (m1): a newer ask/hold superseded this one while it was capturing —
+    // do not create a second concurrent response, do not stomp its state.
+    if (this.closed || token !== this.turnToken) return;
     // M8.5: capture completed.
     turn.tCaptureDone = Date.now();
     turn.captureMs = turn.tCaptureDone - tAsk;
@@ -356,9 +420,9 @@ export class Conversation {
     try {
       await this.session.askText(trimmed, captures, '');
       turn.tCommitSent = Date.now(); // M8.5
-      this.pendingResponses += 1;
+      // pendingResponses counted via 'response-requested' (M3).
     } catch (err) {
-      this.failTurn(err);
+      if (token === this.turnToken) this.failTurn(err);
     }
   }
 
@@ -367,11 +431,35 @@ export class Conversation {
     if (next.model === this.sessionModel && next.voice === this.sessionVoice) return;
     this.sessionModel = next.model;
     this.sessionVoice = next.voice;
+    // F1 fix (m3): a mid-turn rebuild must not leave debris.
+    if (this.holding) this.cancelHold(); // graceful: mic released, no turn
+    this.turnToken += 1;
+    // Flush playback under the new epoch so queued/in-flight audio of the
+    // dying session can never play into the rebuilt one.
+    this.playbackEpoch += 1;
+    this.panel.send('audio:playback', { command: 'flush', epoch: this.playbackEpoch });
+    // Finalize any transcript entries left mid-stream by the dying session.
+    for (const entry of this.entries) {
+      if (entry.streaming) this.pushTranscript({ ...entry, streaming: false });
+    }
+    this.resolveVoicePlaceholder('(voice message)');
     this.session.close();
     this.session.removeAllListeners();
     this.pendingResponses = 0;
     this.session = this.buildSession();
     this.panel.send('panel:session-status', this.session.status());
+    if (this.state !== 'idle' && this.state !== 'error') this.setState('idle');
+  }
+
+  /**
+   * F1 fix (sleep/resume): powerMonitor 'resume' — the socket may be
+   * half-open. Reset it; the next turn reconnects lazily. If a response was
+   * mid-flight the session synthesizes a failed response-done and the normal
+   * recovery path (failTurn -> error -> auto-recover) runs.
+   */
+  onSystemResume(): void {
+    if (this.closed) return;
+    this.session.notifySystemResume();
   }
 
   /** App shutdown. */
@@ -389,18 +477,36 @@ export class Conversation {
   // ---------------------------------------------------------------------
 
   private async finishVoiceTurn(): Promise<void> {
+    const token = this.turnToken; // F1 (M1)
     this.setState('thinking');
     const captures = (await (this.pendingCaptures ?? Promise.resolve([]))) ?? [];
+    // F1 fix (M1): a new hold/ask started while captureAllDisplays() was
+    // pending — this turn is superseded. Do NOT stomp the new turn's
+    // acceptingAudio/turnCaptures, do NOT commit its early chunks into this
+    // turn, do NOT commit an empty buffer.
+    if (this.closed || this.holding || token !== this.turnToken) return;
     this.pendingCaptures = null;
     this.turnCaptures = captures;
     // Stop appending: everything after this belongs to the next turn.
     this.acceptingAudio = false;
+    // F1 fix (m5): placeholder user bubble NOW, so the user's question can
+    // never appear below the assistant's answer (async ASR). Filled in-place
+    // by 'user-transcript'; falls back to "(voice message)" at turn end.
+    const placeholderId = `user_voice_${Date.now()}_${(this.entrySeq += 1)}`;
+    this.pendingVoiceEntryId = placeholderId;
+    this.pushTranscript({
+      id: placeholderId,
+      role: 'user',
+      text: '…',
+      streaming: true,
+      timestamp: Date.now(),
+    });
     try {
       await this.session.commitAudioAndRespond(captures, '');
       if (this.activeTurn) this.activeTurn.tCommitSent = Date.now(); // M8.5
-      this.pendingResponses += 1;
+      // pendingResponses counted via 'response-requested' (M3).
     } catch (err) {
-      this.failTurn(err);
+      if (token === this.turnToken) this.failTurn(err);
     }
   }
 
@@ -408,6 +514,9 @@ export class Conversation {
   private failTurn(err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[conversation] turn failed:', message);
+    // F1 (M7): the failed turn's audio must never leak into the next turn.
+    this.session.clearAudio();
+    this.resolveVoicePlaceholder('(voice message)');
     const noKey = message.includes('no API key');
     this.pushTranscript({
       id: `sys_${Date.now()}_${(this.entrySeq += 1)}`,
@@ -438,11 +547,28 @@ export class Conversation {
       };
     }
     this.session.cancelResponse();
-    this.playback(playback);
-    this.pendingResponses = 0;
+    // F1 fix (M2): bump the playback epoch and flush under it. The renderer
+    // drops any audio delta tagged with an older epoch, so the cancelled
+    // response's pre-cancel burst (whose first chunk may not have reached
+    // the renderer yet — nothing to mark stale by itemId) stays silent.
+    this.playbackEpoch += 1;
+    this.panel.send('audio:playback', { command: playback, epoch: this.playbackEpoch });
+    // NOTE (M3): pendingResponses is NOT zeroed here — the cancelled
+    // response's own response.done (status 'cancelled') decrements it, so
+    // the count stays a pure request/done ledger.
     for (const entry of this.entries) {
       if (entry.streaming) this.pushTranscript({ ...entry, streaming: false });
     }
+  }
+
+  /** F1 (m5): finalize the placeholder voice bubble in place. */
+  private resolveVoicePlaceholder(text: string): void {
+    if (this.pendingVoiceEntryId === null) return;
+    const id = this.pendingVoiceEntryId;
+    this.pendingVoiceEntryId = null;
+    const existing = this.entries.find((e) => e.id === id);
+    if (!existing) return;
+    this.pushTranscript({ ...existing, text, streaming: false });
   }
 
   // ---------------------------------------------------------------------
@@ -464,9 +590,35 @@ export class Conversation {
   private wireSession(session: RealtimeSession): void {
     session.on('status', (status) => this.panel.send('panel:session-status', status));
 
+    // F1 fix (M3): the ONLY place pendingResponses increments — fired for
+    // every response.create the session sends (turns, tool continues,
+    // internal tool-arg rejections alike).
+    session.on('response-requested', () => {
+      this.pendingResponses += 1;
+      this.epoch += 1;
+      // F1 (M2): deltas of the response being requested belong to the
+      // playback epoch that is current NOW.
+      this.deltaEpoch = this.playbackEpoch;
+      if (this.idleTimer !== null) {
+        clearTimeout(this.idleTimer);
+        this.idleTimer = null;
+      }
+    });
+
     session.on('user-transcript', ({ itemId, text }) => {
       if (this.activeTurn && this.activeTurn.tFirstUserTranscript === undefined) {
         this.activeTurn.tFirstUserTranscript = Date.now(); // M8.5
+      }
+      // F1 (m5): fill the placeholder bubble in place (keeps its position
+      // above the assistant's answer).
+      if (this.pendingVoiceEntryId !== null) {
+        const id = this.pendingVoiceEntryId;
+        this.pendingVoiceEntryId = null;
+        const existing = this.entries.find((e) => e.id === id);
+        if (existing) {
+          this.pushTranscript({ ...existing, text, streaming: false });
+          return;
+        }
       }
       this.pushTranscript({
         id: itemId,
@@ -506,7 +658,8 @@ export class Conversation {
         this.activeTurn.chunksOut += 1;
         this.turnAudioItems.add(itemId);
       }
-      this.panel.send('audio:output', { chunk, itemId });
+      // F1 (M2): tag the delta with its response's playback epoch.
+      this.panel.send('audio:output', { chunk, itemId, epoch: this.deltaEpoch });
     });
 
     session.on('tool-call', (call) => {
@@ -517,11 +670,26 @@ export class Conversation {
       this.handleToolCall(call);
     });
 
-    session.on('response-done', () => {
+    session.on('response-done', ({ status }) => {
       this.pendingResponses = Math.max(0, this.pendingResponses - 1);
+      // A cancelled response was superseded — the superseding turn owns the
+      // assistant state from here; nothing to settle.
+      if (status === 'cancelled') return;
+      // F1 fix (M5): only settle the turn when NO responses remain
+      // outstanding (a tool-call follow-up keeps the buddy speaking).
+      if (this.pendingResponses > 0) return;
       // M8.5: the LAST response.done of the turn (after tool continuations).
-      if (this.pendingResponses === 0 && this.activeTurn) {
-        this.activeTurn.tResponseDone = Date.now();
+      if (this.activeTurn) this.activeTurn.tResponseDone = Date.now();
+      // F1 (m5): ASR never arrived for this voice turn.
+      this.resolveVoicePlaceholder('(voice message)');
+      // F1 (retention): the turn settled — release the capture buffers now
+      // instead of holding multi-MB screenshots until the next turn.
+      this.turnCaptures = [];
+      if (status === 'failed' && this.state !== 'error' && !this.closed) {
+        // F1 fix (M6): a response failed without a server error event
+        // (socket drop, watchdog) — run the normal turn-failure recovery.
+        this.failTurn(new Error('the response was interrupted'));
+        return;
       }
       this.scheduleIdle();
     });
@@ -541,12 +709,17 @@ export class Conversation {
       clearTimeout(this.idleTimer);
       this.idleTimer = null;
     }
-    if (!this.holding && (this.state === 'thinking' || this.state === 'speaking')) {
+    if (this.holding) return;
+    if (this.state === 'thinking' || this.state === 'speaking') {
+      this.setState('speaking');
+    } else if (this.state === 'idle' && this.pendingResponses > 0) {
+      // F1 fix (M5): a follow-up response can start streaming after the
+      // buddy already dropped to idle — promote back to speaking.
       this.setState('speaking');
     }
   }
 
-  /** ~300ms after response.done with no new activity: back to idle. */
+  /** ~300ms after the turn settles with no new activity: back to idle. */
   private scheduleIdle(): void {
     const epochAtDone = this.epoch;
     if (this.idleTimer !== null) clearTimeout(this.idleTimer);
@@ -567,19 +740,19 @@ export class Conversation {
   private handleToolCall(call: ToolCall): void {
     if (call.name !== 'point_at') {
       this.session.sendToolOutput(call.callId, { error: `unknown tool: ${call.name}` });
-      this.continueAfterTool();
+      this.session.continueResponse(); // deferred until response.done (M4)
       return;
     }
     // Session pre-validated/clamped these (validatePointAtArgs).
     const args = call.args as PointAtArgs;
     const byIndex = this.turnCaptures.find((c) => c.meta.screenIndex === args.screen);
-    // Unknown screen index: clamp to the active screen's capture.
+    // Unknown screen index: fall back to the ACTIVE screen's capture (m2).
     const capture = byIndex ?? this.turnCaptures.find((c) => c.meta.isActive) ?? this.turnCaptures[0];
     if (!capture) {
       this.session.sendToolOutput(call.callId, {
         error: 'no screenshot available for that screen',
       });
-      this.continueAfterTool();
+      this.session.continueResponse();
       return;
     }
     const mapped = mapModelPoint(
@@ -604,12 +777,9 @@ export class Conversation {
       this.pointerHistory = this.pointerHistory.slice(-POINTER_HISTORY_LIMIT);
     }
     this.session.sendToolOutput(call.callId, { ok: true, pointed_at: args.label ?? '' });
-    this.continueAfterTool();
-  }
-
-  private continueAfterTool(): void {
+    // F1 fix (M4): the continue is deferred inside the session until the
+    // current response completes; accounting flows via 'response-requested'.
     this.session.continueResponse();
-    this.pendingResponses += 1;
   }
 
   // ---------------------------------------------------------------------

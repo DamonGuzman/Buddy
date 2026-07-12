@@ -8,6 +8,18 @@
  * stragglers are dropped; the next new itemId becomes current and plays.
  * 'stop' does the same but exists as an explicit halt.
  *
+ * F1 fix (M2): chunks also carry a main-owned playback `epoch`. The itemId
+ * stale list can't drop a cancelled response whose FIRST chunk never reached
+ * the renderer (no itemId known yet), so 'audio:playback' commands carry the
+ * new epoch floor and any delta tagged with an older epoch is dropped by the
+ * PlaybackEpochGate. The epoch part of the command is consumed by this
+ * module's own onPlayback subscription (the frozen App wiring only forwards
+ * the command string to control()).
+ *
+ * F1 fix (battery): the AudioContext is suspended shortly after the queue
+ * drains and resumed on the next enqueue — mirroring what mic capture does —
+ * so an idle Clicky doesn't keep the audio render thread spinning.
+ *
  * M8.5 addition (orchestrator-approved): playback tap. The worklet streams
  * back the samples it ACTUALLY rendered ('played' blocks); this class
  * accumulates per-item stats {samplesPlayed, rms, peak, underruns}, keeps a
@@ -17,10 +29,17 @@
  */
 
 import { clicky } from '../clicky';
+import { PlaybackEpochGate } from './epoch-gate';
 import type { AudioOutputDelta, PlaybackCommand, PlaybackStatsUpdate } from '../../../shared/types';
 import playerWorkletUrl from '../worklets/pcm-player.worklet.js?url&no-inline';
 
 const STALE_IDS_MAX = 64;
+/**
+ * Suspend the AudioContext this long after the queue drains. Longer than the
+ * worklet's done-silence window (~0.5s) so the final 'played' stats block
+ * flushes before the render thread stops.
+ */
+const SUSPEND_AFTER_DRAIN_MS = 1_500;
 /** Played-audio ring buffer length: 15s @ 24kHz mono. */
 const RING_SAMPLES = 15 * 24_000;
 /** Minimum interval between non-final stats IPC sends per item. */
@@ -53,6 +72,10 @@ export class AudioPlayer {
   private currentItemId: string | null = null;
   private staleItemIds: string[] = [];
   private onDrainedCb: (() => void) | null = null;
+  /** F1 (M2): drops deltas whose epoch predates the newest flush. */
+  private readonly gate = new PlaybackEpochGate();
+  /** F1 (battery): pending context-suspend after the queue drained. */
+  private suspendTimer: ReturnType<typeof setTimeout> | null = null;
 
   // ---- playback tap state (M8.5) ----
   private readonly ring = new Float32Array(RING_SAMPLES);
@@ -60,17 +83,33 @@ export class AudioPlayer {
   private ringFilled = 0;
   private readonly itemStats = new Map<string, ItemStatsAccum>();
 
-  /** Queue a model audio chunk (drops chunks from flushed/stale items). */
+  constructor() {
+    // F1 (M2): the App wiring (frozen panel component) forwards only the
+    // command string to control(); the epoch floor rides in here directly.
+    try {
+      clicky.onPlayback(({ epoch }) => this.gate.flush(epoch));
+    } catch (err) {
+      console.warn('[playback] epoch subscription unavailable:', err);
+    }
+  }
+
+  /** Queue a model audio chunk (drops stale-item and stale-epoch chunks). */
   enqueue(delta: AudioOutputDelta): void {
+    if (!this.gate.admitDelta(delta.epoch)) return; // F1 (M2): cancelled response
     if (this.staleItemIds.includes(delta.itemId)) return;
     if (delta.itemId !== this.currentItemId) {
       // A new response item supersedes the old one.
       this.currentItemId = delta.itemId;
     }
+    this.cancelSuspend();
     const pcm = new Int16Array(delta.chunk);
     const samples = new Float32Array(pcm.length);
     for (let i = 0; i < pcm.length; i++) samples[i] = (pcm[i] ?? 0) / 32768;
     void this.withNode((node) => {
+      // F1 (battery): wake the render thread back up for the new audio.
+      if (this.ctx !== null && this.ctx.state === 'suspended') {
+        void this.ctx.resume().catch(() => undefined);
+      }
       node.port.postMessage(
         { type: 'chunk', samples: samples.buffer, itemId: delta.itemId },
         [samples.buffer],
@@ -78,9 +117,14 @@ export class AudioPlayer {
     });
   }
 
-  /** 'stop' = halt immediately + clear queue; 'flush' = drop queued audio. */
-  control(command: PlaybackCommand): void {
+  /**
+   * 'stop' = halt immediately + clear queue; 'flush' = drop queued audio.
+   * The optional epoch raises the stale-delta floor (M2) — App's wiring calls
+   * this without it; the internal onPlayback subscription covers that path.
+   */
+  control(command: PlaybackCommand, epoch?: number): void {
     void command; // both commands clear the queue and staleify the current item
+    this.gate.flush(epoch);
     if (this.currentItemId !== null) {
       this.markStale(this.currentItemId);
       this.currentItemId = null;
@@ -209,6 +253,23 @@ export class AudioPlayer {
     if (this.staleItemIds.length > STALE_IDS_MAX) this.staleItemIds.shift();
   }
 
+  // ---- F1 (battery): suspend the context while nothing is queued ----
+
+  private scheduleSuspend(): void {
+    this.cancelSuspend();
+    this.suspendTimer = setTimeout(() => {
+      this.suspendTimer = null;
+      void this.ctx?.suspend().catch(() => undefined);
+    }, SUSPEND_AFTER_DRAIN_MS);
+  }
+
+  private cancelSuspend(): void {
+    if (this.suspendTimer !== null) {
+      clearTimeout(this.suspendTimer);
+      this.suspendTimer = null;
+    }
+  }
+
   private async withNode(fn: (node: AudioWorkletNode) => void): Promise<void> {
     try {
       await this.ensure();
@@ -229,8 +290,12 @@ export class AudioPlayer {
           outputChannelCount: [1],
         });
         this.node.port.onmessage = (e: MessageEvent<{ type?: string }>) => {
-          if (e.data?.type === 'drained') this.onDrainedCb?.();
-          else if (e.data?.type === 'played') this.onPlayedBlock(e.data as PlayedBlock);
+          if (e.data?.type === 'drained') {
+            this.scheduleSuspend(); // F1 (battery)
+            this.onDrainedCb?.();
+          } else if (e.data?.type === 'played') {
+            this.onPlayedBlock(e.data as PlayedBlock);
+          }
         };
         this.node.connect(this.ctx.destination);
         if (this.ctx.state !== 'running') await this.ctx.resume();

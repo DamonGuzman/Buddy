@@ -57,8 +57,13 @@ export interface MainToPanelEvents {
   'panel:settings': Settings;
   /** Model audio output for the panel's playback queue. */
   'audio:output': AudioOutputDelta;
-  /** Playback control: 'stop' halts immediately; 'flush' drops queued audio. */
-  'audio:playback': { command: PlaybackCommand };
+  /**
+   * Playback control: 'stop' halts immediately; 'flush' drops queued audio.
+   * F1 fix (orchestrator-approved), M2: `epoch` is the new playback-epoch
+   * floor — subsequent audio:output deltas tagged with an older epoch are
+   * stale (they belong to a cancelled/superseded response) and are dropped.
+   */
+  'audio:playback': { command: PlaybackCommand; epoch?: number };
   // M5 addition (orchestrator-approved): main tells the panel renderer to
   // start/stop mic capture when the push-to-talk hotkey goes down/up.
   'audio:capture': { command: CaptureCommand };
@@ -135,7 +140,8 @@ export interface PanelApi {
   onAssistantState(cb: (state: AssistantState) => void): Unsubscribe;
   onSettings(cb: (settings: Settings) => void): Unsubscribe;
   onAudioOutput(cb: (delta: AudioOutputDelta) => void): Unsubscribe;
-  onPlayback(cb: (payload: { command: PlaybackCommand }) => void): Unsubscribe;
+  // F1 fix (orchestrator-approved), M2: payload gained the optional epoch.
+  onPlayback(cb: (payload: { command: PlaybackCommand; epoch?: number }) => void): Unsubscribe;
   // M5 addition (orchestrator-approved): mic capture start/stop from main.
   onCaptureCommand(cb: (payload: { command: CaptureCommand }) => void): Unsubscribe;
 

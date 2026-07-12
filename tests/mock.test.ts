@@ -190,6 +190,64 @@ describe('mock realtime server', () => {
     client.close();
   });
 
+  it('rejects response.create while a response is active (F1 M4 hardening)', async () => {
+    const client = await connect();
+    client.send({
+      type: 'conversation.item.create',
+      item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hello' }] },
+    });
+    client.send({ type: 'response.create' });
+    client.send({ type: 'response.create' }); // concurrent: the real API rejects this
+    const err = await client.waitFor(
+      (e) =>
+        e.type === 'error' &&
+        (e['error'] as { code?: string }).code === 'conversation_already_has_active_response',
+    );
+    expect((err['error'] as { message: string }).message).toContain('active response');
+    // Only ONE response ran, and it still completes normally.
+    const done = await client.waitFor((e) => e.type === 'response.done');
+    expect((done['response'] as { status: string }).status).toBe('completed');
+    expect(client.events.filter((e) => e.type === 'response.created')).toHaveLength(1);
+    // After response.done, response.create is accepted again.
+    client.send({
+      type: 'conversation.item.create',
+      item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'again' }] },
+    });
+    client.send({ type: 'response.create' });
+    await client.waitFor((e) => e.type === 'response.done' && e !== done);
+    expect(client.events.filter((e) => e.type === 'response.created')).toHaveLength(2);
+    client.close();
+  });
+
+  it('accepts response.create after cancelling the active response', async () => {
+    const client = await connect();
+    client.send({
+      type: 'conversation.item.create',
+      item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hello' }] },
+    });
+    client.send({ type: 'response.create' });
+    await client.waitFor((e) => e.type === 'response.created');
+    client.send({ type: 'response.cancel' });
+    client.send({
+      type: 'conversation.item.create',
+      item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'next' }] },
+    });
+    client.send({ type: 'response.create' }); // barge-in path: must be accepted
+    expect(
+      client.events.some(
+        (e) =>
+          e.type === 'error' &&
+          (e['error'] as { code?: string }).code === 'conversation_already_has_active_response',
+      ),
+    ).toBe(false);
+    await client.waitFor(
+      (e) =>
+        e.type === 'response.done' &&
+        (e['response'] as { status: string }).status === 'completed',
+    );
+    client.close();
+  });
+
   it('"error" turn emits an error event', async () => {
     const client = await connect();
     client.send({

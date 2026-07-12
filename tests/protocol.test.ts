@@ -170,9 +170,29 @@ describe('validatePointAtArgs', () => {
     });
   });
 
-  it('clamps an out-of-range screen index to the last known screen', () => {
-    const args = validatePointAtArgs({ x: 10, y: 10, screen: 7 }, capture);
-    expect(args?.screen).toBe(1);
+  it('maps an unknown screen index to the ACTIVE screen (F1 m2)', () => {
+    const args = validatePointAtArgs({ x: 99999, y: 10, screen: 7 }, capture);
+    expect(args?.screen).toBe(0); // screen 0 is the active one in `capture`
+    expect(args?.x).toBe(1279); // clamped against the ACTIVE screen's image
+  });
+
+  it('validates against screenIndex KEYS, not array positions (F1 m2)', () => {
+    // A skipped display: captures carry screenIndex 0 and 2, positions 0 and 1.
+    const skipped: CaptureMeta[] = [
+      { ...capture[0]!, isActive: false },
+      { ...capture[1]!, screenIndex: 2, isActive: true },
+    ];
+    // screen 2 exists (by key) and must clamp against ITS 1024x768 image —
+    // positional lookup would have rejected/clamped it to position 1's meta
+    // while the conversation later looks it up by key.
+    expect(validatePointAtArgs({ x: 5000, y: 5000, screen: 2 }, skipped)).toEqual({
+      x: 1023,
+      y: 767,
+      screen: 2,
+    });
+    // screen 1 does NOT exist in this batch: explicit active-screen fallback.
+    const fallback = validatePointAtArgs({ x: 10, y: 10, screen: 1 }, skipped);
+    expect(fallback?.screen).toBe(2);
   });
 
   it('clamps without capture metadata only at zero', () => {

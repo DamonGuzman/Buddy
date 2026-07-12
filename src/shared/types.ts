@@ -59,14 +59,16 @@ export interface SettingsPatch {
   micDeviceId?: string;
 }
 
-/** The renderer-safe defaults. `hotkeyLabel` mirrors constants.HOTKEY_LABEL. */
+/** The renderer-safe defaults. */
 export const DEFAULT_SETTINGS: Settings = {
   apiKeyPresent: false,
   model: 'gpt-realtime-2.1-mini',
   voice: 'marin',
   captionsEnabled: true,
   micDeviceId: '',
-  hotkeyLabel: 'Ctrl+Alt',
+  // F1 fix (orchestrator-approved), AltGr: only LEFT Alt participates in the
+  // hotkey (Right Alt = AltGr on international layouts), so say so.
+  hotkeyLabel: 'Ctrl+Alt (left alt)',
 };
 
 /**
@@ -170,6 +172,14 @@ export interface AudioOutputDelta {
   chunk: ArrayBuffer;
   /** Id of the response item, so stale chunks can be dropped after a flush. */
   itemId: string;
+  /**
+   * F1 fix (orchestrator-approved), M2: main-owned playback epoch of the
+   * response this delta belongs to. The renderer drops any delta whose epoch
+   * is older than the newest 'audio:playback' flush epoch — this silences a
+   * cancelled response whose first chunk never reached the renderer (no
+   * itemId to mark stale). Absent on dev/QA tones (always played).
+   */
+  epoch?: number;
 }
 
 export type PlaybackCommand = 'stop' | 'flush';

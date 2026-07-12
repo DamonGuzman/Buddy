@@ -5,6 +5,22 @@
  * with backoff. Speaks exactly the protocol subset in ./protocol.ts, which is
  * also what tools/mock-realtime implements (point it there with
  * CLICKY_MOCK_URL or `urlOverride`).
+ *
+ * F1 fixes (review findings):
+ * - M3: every response.create this session sends — external turn or internal
+ *   tool-rejection continue — emits 'response-requested', the single source
+ *   of truth for app-level response accounting.
+ * - M4: continueResponse() DEFERS its response.create while a response is
+ *   still streaming (the real API rejects concurrent responses with
+ *   'conversation_already_has_active_response'); the deferred continue fires
+ *   once, on response.done with status 'completed'.
+ * - M6: if the socket drops mid-response, a synthetic failed 'response-done'
+ *   is emitted so the app-level turn recovers instead of wedging.
+ * - M7: clearAudio() also drops QUEUED input_audio_buffer.append frames; a
+ *   failed connect drops queued appends; the send queue is capped.
+ * - sleep/resume: notifySystemResume() terminates a possibly half-open
+ *   socket; a per-response watchdog fails responses with no server activity
+ *   for ~30s; a WS ping runs while a response is active.
  */
 
 import { EventEmitter } from 'node:events';
@@ -63,6 +79,12 @@ export interface RealtimeSessionEvents {
   'audio-done': [{ itemId: string }];
   /** Complete tool call, arguments parsed and (for point_at) validated. */
   'tool-call': [ToolCall];
+  /**
+   * F1 fix (M3): a response.create was sent — EVERY one, whether requested by
+   * the app (askText / commit / continueResponse) or internally (tool-arg
+   * rejection continue). Response accounting must count from this event only.
+   */
+  'response-requested': [];
   /** Response finished streaming (onResponseDone). */
   'response-done': [ResponseDoneInfo];
   /** Transport or protocol error (onError). Never thrown across WS callbacks. */
@@ -85,12 +107,22 @@ export interface RealtimeSessionOptions {
   idleTimeoutMs?: number;
   /** Handshake timeout waiting for session.created. Default 10s. */
   connectTimeoutMs?: number;
+  /** Per-response watchdog: fail after this long with no server activity. */
+  responseWatchdogMs?: number;
 }
 
 const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 const BACKOFF_BASE_MS = 1_000;
 const BACKOFF_CAP_MS = 30_000;
+/** F1 (M7): hard cap on frames queued while disconnected. */
+const MAX_SEND_QUEUE = 256;
+/** F1 (churn): min gap between auto-connect attempts from appendAudio. */
+const CONNECT_RETRY_COOLDOWN_MS = 1_500;
+/** F1 (sleep/resume): fail a response after this long with zero activity. */
+const DEFAULT_RESPONSE_WATCHDOG_MS = 30_000;
+/** F1 (sleep/resume): WS ping cadence while a response is active. */
+const RESPONSE_PING_INTERVAL_MS = 15_000;
 
 const PCM_FORMAT = { type: 'audio/pcm', rate: 24000 } as const;
 
@@ -103,22 +135,31 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
   private readonly options: RealtimeSessionOptions;
   private readonly idleTimeoutMs: number;
   private readonly connectTimeoutMs: number;
+  private readonly responseWatchdogMs: number;
 
   private ws: WebSocket | null = null;
   private statusValue: SessionStatus;
   private connectPromise: Promise<void> | null = null;
   private closedByUser = false;
   private idleClosing = false;
+  /** Next socket close is deliberate (watchdog/resume): skip auto-reconnect. */
+  private suppressReconnectOnce = false;
 
   /** Outbound events queued while (re)connecting; flushed on ready. */
-  private sendQueue: string[] = [];
+  private sendQueue: ClientEvent[] = [];
 
   private idleTimer: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private backoffAttempt = 0;
+  /** F1 (churn): last failed connect attempt (cooldown for appendAudio). */
+  private lastConnectFailAt = 0;
 
   /** True between response.create and response.done/error. */
   private responseActive = false;
+  /** F1 (M4): a continue was requested mid-response; fire it after done. */
+  private continuePending = false;
+  private responseWatchdog: NodeJS.Timeout | null = null;
+  private pingTimer: NodeJS.Timeout | null = null;
 
   /** Full-text-so-far accumulation per output item (transcript semantics). */
   private transcripts = new Map<string, string>();
@@ -134,6 +175,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     this.options = options;
     this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     this.connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
+    this.responseWatchdogMs = options.responseWatchdogMs ?? DEFAULT_RESPONSE_WATCHDOG_MS;
     const endpoint = this.resolve();
     this.statusValue = {
       state: 'disconnected',
@@ -184,12 +226,22 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       audio: Buffer.from(chunk).toString('base64'),
     });
     // Fire-and-forget connect; failures surface via the 'error' event.
-    void this.connect().catch((err: unknown) => this.emitError(err));
+    // F1 (churn): after a failed attempt, back off — never one fresh socket
+    // per 60ms mic chunk against a dead endpoint.
+    if (Date.now() - this.lastConnectFailAt >= CONNECT_RETRY_COOLDOWN_MS) {
+      void this.connect().catch((err: unknown) => this.emitError(err));
+    }
   }
 
-  /** Drop any un-committed audio in the input buffer. */
+  /**
+   * Drop any un-committed audio — QUEUED append frames as well as the
+   * server-side input buffer (F1, M7). A fresh WebSocket connection is a
+   * fresh server session (empty buffer), so no deferred clear is needed for
+   * the disconnected case once the queued appends are gone.
+   */
   clearAudio(): void {
-    if (!this.isSocketOpen()) return; // nothing buffered server-side if we're not connected
+    this.dropQueuedAppends();
+    if (!this.isSocketOpen()) return;
     this.send({ type: 'input_audio_buffer.clear' });
   }
 
@@ -229,23 +281,64 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     });
   }
 
-  /** Ask the model to continue after tool output(s) were sent. */
+  /**
+   * Ask the model to continue after tool output(s) were sent.
+   *
+   * F1 fix (M4): function_call_arguments.done arrives while the response is
+   * still in_progress, and the real API rejects response.create while one is
+   * active. The continue is therefore DEFERRED until response.done arrives
+   * with status 'completed'; multiple requests (multi-point turns) coalesce
+   * into a single deferred response.create.
+   */
   continueResponse(): void {
+    if (this.responseActive) {
+      this.continuePending = true;
+      return;
+    }
     this.createResponse();
   }
 
   /** Cancel the in-progress response (no-op when disconnected). */
   cancelResponse(): void {
+    this.continuePending = false; // a cancelled turn must not auto-continue
     if (!this.isSocketOpen()) return;
     this.send({ type: 'response.cancel' });
-    this.responseActive = false;
+    this.setResponseActive(false);
+  }
+
+  /**
+   * F1 fix (sleep/resume): the machine woke from sleep — the socket may be
+   * half-open (writes vanish into a dead pipe, no FIN ever arrives).
+   * Terminate it and reset; the next turn reconnects lazily. If a response
+   * was mid-flight, synthesize a failed response-done so the app recovers.
+   */
+  notifySystemResume(): void {
+    if (this.closedByUser) return;
+    this.dropQueuedAppends();
+    this.failActiveResponse('system resumed from sleep');
+    this.backoffAttempt = 0;
+    const ws = this.ws;
+    if (ws !== null) {
+      this.suppressReconnectOnce = true;
+      try {
+        ws.terminate();
+      } catch {
+        /* already dead */
+      }
+    }
   }
 
   /** Clean shutdown (app quit). No reconnect after this. */
   close(): void {
     this.closedByUser = true;
     this.clearTimers();
+    this.setResponseActive(false);
+    this.continuePending = false;
     this.sendQueue = [];
+    // F1 (retention): release per-turn accumulation.
+    this.transcripts.clear();
+    this.toolArgs.clear();
+    this.lastTurnCapture = null;
     const ws = this.ws;
     this.ws = null;
     if (ws) {
@@ -292,6 +385,8 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       const key = this.options.getApiKey ? this.options.getApiKey() : (this.options.apiKey ?? null);
       if (key === null || key.length === 0) {
         const err = new Error('no API key configured');
+        this.lastConnectFailAt = Date.now();
+        this.dropQueuedAppends(); // F1 (M7): stale mic audio must not linger
         this.setStatus({ state: 'error', error: err.message });
         return Promise.reject(err);
       }
@@ -312,6 +407,10 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
+        // F1 (M7): a failed connect drops queued mic audio — it belongs to a
+        // turn that can no longer succeed and must not leak into the next.
+        this.lastConnectFailAt = Date.now();
+        this.dropQueuedAppends();
         if (this.ws === ws) {
           this.ws = null;
           this.setStatus({ state: 'error', error: err.message });
@@ -335,6 +434,8 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
             return;
           }
           this.resetIdleTimer();
+          // F1 (sleep/resume): any server activity feeds the response watchdog.
+          if (this.responseActive) this.armResponseWatchdog();
           this.handleServerEvent(evt);
         });
       });
@@ -359,9 +460,24 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
           this.ws = null;
           const wasIdleClose = this.idleClosing;
           this.idleClosing = false;
+          const suppress = this.suppressReconnectOnce;
+          this.suppressReconnectOnce = false;
+          const hadActiveResponse = this.responseActive;
           this.setStatus({ state: 'disconnected' });
+          // F1 fix (M6): a response died with the socket. Clear the active
+          // flag (it gated keep-warm + reconnect forever) and synthesize a
+          // failed response-done so the app-level turn recovers.
+          if (hadActiveResponse) this.failActiveResponse('connection dropped mid-response');
+          // F1 (retention): per-item accumulation dies with the connection.
+          this.transcripts.clear();
+          this.toolArgs.clear();
           // Reconnect with backoff ONLY when the session was mid-use.
-          if (!this.closedByUser && !wasIdleClose && (this.responseActive || this.sendQueue.length > 0)) {
+          if (
+            !this.closedByUser &&
+            !wasIdleClose &&
+            !suppress &&
+            (hadActiveResponse || this.sendQueue.length > 0)
+          ) {
             this.scheduleReconnect();
           }
         });
@@ -397,6 +513,67 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
     this.idleTimer = null;
     this.reconnectTimer = null;
+  }
+
+  // -------------------------------------------------------------------------
+  // Response lifecycle (watchdog + ping while active)
+  // -------------------------------------------------------------------------
+
+  private setResponseActive(active: boolean): void {
+    this.responseActive = active;
+    if (active) {
+      this.armResponseWatchdog();
+      if (this.pingTimer === null) {
+        this.pingTimer = setInterval(() => {
+          if (this.isSocketOpen()) {
+            try {
+              this.ws?.ping();
+            } catch {
+              /* a dead socket surfaces via its close event */
+            }
+          }
+        }, RESPONSE_PING_INTERVAL_MS);
+      }
+    } else {
+      if (this.responseWatchdog !== null) clearTimeout(this.responseWatchdog);
+      this.responseWatchdog = null;
+      if (this.pingTimer !== null) clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+  }
+
+  private armResponseWatchdog(): void {
+    if (this.responseWatchdog !== null) clearTimeout(this.responseWatchdog);
+    this.responseWatchdog = setTimeout(() => {
+      this.responseWatchdog = null;
+      if (!this.responseActive) return;
+      // F1 fix (sleep/resume): zero server activity for the whole window —
+      // classic half-open pipe (commit written into a dead socket). Fail the
+      // response so the app recovers, and terminate so the next turn starts
+      // from a clean reconnect.
+      this.failActiveResponse(
+        `response timed out (no server activity for ${this.responseWatchdogMs}ms)`,
+      );
+      if (this.ws !== null) {
+        this.suppressReconnectOnce = true;
+        try {
+          this.ws.terminate();
+        } catch {
+          /* already dead */
+        }
+      }
+    }, this.responseWatchdogMs);
+  }
+
+  /** Synthesize a failed response-done so app-level turn recovery runs. */
+  private failActiveResponse(reason: string): void {
+    if (!this.responseActive) return;
+    console.warn(`[realtime] failing active response: ${reason}`);
+    this.setResponseActive(false);
+    this.continuePending = false;
+    this.transcripts.clear();
+    this.toolArgs.clear();
+    this.emit('response-done', { responseId: '', status: 'failed' });
   }
 
   // -------------------------------------------------------------------------
@@ -459,17 +636,30 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
 
   private createResponse(): void {
     this.send({ type: 'response.create' });
-    this.responseActive = true;
+    this.setResponseActive(true);
+    this.emit('response-requested'); // F1 (M3): single source of truth
   }
 
   /** Serialize + send, queueing while not ready (flushed on session.created). */
   private send(evt: ClientEvent): void {
-    const frame = JSON.stringify(evt);
     if (this.isReady() && this.ws !== null) {
-      this.sendNowRaw(this.ws, frame);
-    } else {
-      this.sendQueue.push(frame);
+      this.sendNow(this.ws, evt);
+      return;
     }
+    // F1 (M7): cap the queue. Shed audio first — 60ms mic chunks dominate
+    // any backlog and are worthless once this stale — then the oldest frame.
+    if (this.sendQueue.length >= MAX_SEND_QUEUE) {
+      const appendIdx = this.sendQueue.findIndex((e) => e.type === 'input_audio_buffer.append');
+      if (appendIdx === -1 && evt.type === 'input_audio_buffer.append') return; // drop the newcomer
+      this.sendQueue.splice(appendIdx !== -1 ? appendIdx : 0, 1);
+    }
+    this.sendQueue.push(evt);
+  }
+
+  /** F1 (M7): drop queued mic-audio frames (stale-turn hygiene). */
+  private dropQueuedAppends(): void {
+    if (this.sendQueue.length === 0) return;
+    this.sendQueue = this.sendQueue.filter((evt) => evt.type !== 'input_audio_buffer.append');
   }
 
   private sendNow(ws: WebSocket, evt: ClientEvent): void {
@@ -489,7 +679,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     if (this.ws === null) return;
     const queue = this.sendQueue;
     this.sendQueue = [];
-    for (const frame of queue) this.sendNowRaw(this.ws, frame);
+    for (const evt of queue) this.sendNow(this.ws, evt);
   }
 
   // -------------------------------------------------------------------------
@@ -545,12 +735,19 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
         break;
 
       case 'response.done': {
-        this.responseActive = false;
+        this.setResponseActive(false);
         this.transcripts.clear();
         this.toolArgs.clear();
+        const status = evt.response.status ?? 'completed';
+        const wantContinue = this.continuePending && status === 'completed';
+        this.continuePending = false;
+        // F1 fix (M4): the deferred tool-output continue fires HERE — and
+        // BEFORE emitting response-done, so app-level response accounting
+        // never dips to zero in the middle of a multi-response turn (M5).
+        if (wantContinue) this.createResponse();
         this.emit('response-done', {
           responseId: evt.response.id ?? '',
-          status: evt.response.status ?? 'completed',
+          status,
           usage: evt.response.usage,
         });
         break;
@@ -592,7 +789,11 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     this.emit('tool-call', { callId, name, args });
   }
 
-  /** Garbage tool args: tell the model instead of pointing at nonsense. */
+  /**
+   * Garbage tool args: tell the model instead of pointing at nonsense.
+   * The continue defers like any other (M4) and is counted by the app via
+   * 'response-requested' when it eventually fires (M3).
+   */
   private rejectToolCall(callId: string, name: string, reason: string): void {
     console.warn(`[realtime] rejected ${name} call ${callId}: ${reason}`);
     this.sendToolOutput(callId, { error: `invalid ${name} arguments: ${reason}` });

@@ -53,6 +53,16 @@ const SCENARIOS = [
     },
   },
   {
+    name: 'garbage-args',
+    description: 'user text contains "garbage": point_at with non-JSON arguments',
+    matches: (turn) => /\bgarbage\b/.test(userTextOf(turn)),
+    async run(io) {
+      await io.speak('let me point at that.');
+      await io.functionCall('point_at', '{this is not valid json');
+      await io.done('completed');
+    },
+  },
+  {
     name: 'two-points',
     description: 'user text contains "two": two sequential point_at calls',
     matches: (turn) => /\btwo\b/.test(userTextOf(turn)),

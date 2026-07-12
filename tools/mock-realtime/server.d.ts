@@ -23,6 +23,8 @@ export interface MockServer {
   url: string;
   /** Every session.update received, newest last (test hook). */
   sessionUpdates: Array<{ type: 'session.update'; session: Record<string, unknown> }>;
+  /** Every parsed client event received, across connections (test hook). */
+  clientEvents: Array<{ type: string; [k: string]: unknown }>;
   connectionCount: number;
   /** Hard-kill all live sockets (reconnect testing). */
   dropAllConnections(): void;

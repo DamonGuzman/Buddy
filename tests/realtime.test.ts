@@ -280,4 +280,129 @@ describe('RealtimeSession against the mock server', () => {
     expect(status.state).toBe('disconnected');
     expect(status.error).toBeUndefined();
   });
+
+  // -------------------------------------------------------------------------
+  // F1 fixes
+  // -------------------------------------------------------------------------
+
+  it('M4: tool outputs mid-response defer a SINGLE continue until response.done', async () => {
+    const session = makeSession();
+    const errors = collect<Error>(session, 'error');
+    const requested = collect<unknown>(session, 'response-requested');
+    const dones = collect<{ status: string }>(session, 'response-done');
+    // Emulate the conversation layer: output + continue per tool call. The
+    // two-points scenario delivers BOTH calls while the response is still
+    // in_progress — an immediate response.create would be rejected by the
+    // (now real-API-strict) mock with conversation_already_has_active_response.
+    session.on('tool-call', (call) => {
+      session.sendToolOutput(call.callId, { ok: true });
+      session.continueResponse();
+    });
+    const followUp = waitFor<{ text: string; done: boolean }>(
+      session,
+      'assistant-transcript',
+      (t) => t.done && t.text.includes('there it is'),
+      10_000,
+    );
+    await session.askText('show me two things', [IMAGE]);
+    await followUp;
+    await vi.waitFor(() => expect(dones).toHaveLength(2));
+    expect(errors).toHaveLength(0);
+    expect(dones.map((d) => d.status)).toEqual(['completed', 'completed']);
+    // Initial response + exactly ONE coalesced deferred continue.
+    expect(requested).toHaveLength(2);
+  });
+
+  it('M3: malformed tool args reject internally and the continue is counted via response-requested', async () => {
+    const session = makeSession();
+    const errors = collect<Error>(session, 'error');
+    const toolCalls = collect<ToolCall>(session, 'tool-call');
+    const requested = collect<unknown>(session, 'response-requested');
+    const dones = collect<{ status: string }>(session, 'response-done');
+    await session.askText('send me garbage arguments');
+    // Main response + the rejection's follow-up response both complete.
+    await vi.waitFor(() => expect(dones).toHaveLength(2), { timeout: 10_000 });
+    expect(toolCalls).toHaveLength(0); // never surfaced to the app
+    expect(errors).toHaveLength(0); // the deferred create was accepted
+    expect(dones.map((d) => d.status)).toEqual(['completed', 'completed']);
+    // The internal rejectToolCall continue MUST be visible to app-level
+    // accounting: initial create + internal continue = 2 requests.
+    expect(requested).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F1 fixes needing their own (slower / restartable) mock servers
+// ---------------------------------------------------------------------------
+
+describe('RealtimeSession resilience (F1)', () => {
+  function makeStandaloneSession(url: string): RealtimeSession {
+    const session = new RealtimeSession({
+      model: 'gpt-realtime-2.1-mini',
+      voice: 'marin',
+      instructions: getSessionInstructions(),
+      tools: getToolDefinitions(),
+      urlOverride: url,
+    });
+    session.on('error', () => {
+      /* asserted explicitly where relevant */
+    });
+    return session;
+  }
+
+  it('M6: a connection drop mid-response synthesizes a failed response-done, then recovers', async () => {
+    // Slow pacing so the response is reliably still streaming at the drop.
+    const server = await mock.createMockServer({ port: 0, wordDelayMs: 25, audioChunkDelayMs: 25 });
+    const session = makeStandaloneSession(server.url);
+    try {
+      const dones = collect<{ status: string }>(session, 'response-done');
+      await session.askText('hello there');
+      await waitFor(session, 'assistant-transcript'); // response is streaming
+      server.dropAllConnections();
+      // Without the fix: responseActive stays true forever (keep-warm dead,
+      // eternal reconnect) and no response-done ever arrives.
+      await vi.waitFor(() => expect(dones.at(-1)?.status).toBe('failed'), { timeout: 5_000 });
+      // The next turn reconnects lazily and completes.
+      await session.askText('hello again');
+      await vi.waitFor(() => expect(dones.at(-1)?.status).toBe('completed'), { timeout: 5_000 });
+    } finally {
+      session.close();
+      await server.close();
+    }
+  });
+
+  it('M7: mic audio queued while disconnected never leaks into the next turn', async () => {
+    const first = await mock.createMockServer({ port: 0, wordDelayMs: 1, audioChunkDelayMs: 1 });
+    const port = first.port;
+    const session = makeStandaloneSession(first.url);
+    let second: MockServer | null = null;
+    try {
+      await session.connect();
+      await first.close(); // server goes away entirely
+      await waitFor<SessionStatus>(session, 'status', (s) => s.state === 'disconnected');
+
+      // A hold streams chunks while the endpoint is unreachable: they queue,
+      // and the auto-connect attempt fails.
+      session.appendAudio(new ArrayBuffer(4800));
+      session.appendAudio(new ArrayBuffer(4800));
+      session.appendAudio(new ArrayBuffer(4800));
+      await waitFor<SessionStatus>(session, 'status', (s) => s.state === 'error');
+
+      // The turn fails -> the conversation clears the held audio.
+      session.clearAudio();
+
+      // The endpoint comes back; the NEXT turn must not deliver stale audio.
+      second = await mock.createMockServer({ port, wordDelayMs: 1, audioChunkDelayMs: 1 });
+      await session.askText('hello');
+      await waitFor(session, 'response-done');
+
+      const appends = second.clientEvents.filter((e) => e.type === 'input_audio_buffer.append');
+      expect(appends).toHaveLength(0); // repro delivered 3 stale appends here
+      const commits = second.clientEvents.filter((e) => e.type === 'input_audio_buffer.commit');
+      expect(commits).toHaveLength(0); // and no phantom commit either
+    } finally {
+      session.close();
+      await second?.close();
+    }
+  });
 });

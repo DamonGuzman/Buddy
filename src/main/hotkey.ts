@@ -1,11 +1,25 @@
 /**
  * Global hold-to-talk hotkey via uiohook-napi.
  *
- * State machine: idle -> holding (both Ctrl and Alt down) -> idle (either up).
+ * State machine: idle -> holding (Ctrl and LEFT Alt down) -> idle (either up).
  * `hold-start` fires on entry to holding (capture + listen), `hold-end` on
- * exit (commit + respond). Electron's globalShortcut has no keyup, hence the
- * low-level hook. Degrades gracefully: if the hook fails to start, the app
- * keeps running with `hookAlive === false` (text fallback still works).
+ * exit (commit + respond), and `hold-cancel` on any FORCED release — the hold
+ * is abandoned with no turn. Electron's globalShortcut has no keyup, hence
+ * the low-level hook. Degrades gracefully: if the hook fails to start, the
+ * app keeps running with `hookAlive === false` (text fallback still works).
+ *
+ * F1 fix (AltGr): on Windows international layouts AltGr arrives as a
+ * synthetic LEFT Ctrl press + RIGHT Alt press, so accepting either Alt key
+ * would fire hold-start (capture flash + mic blip) on every €/@/{ keystroke.
+ * Only LEFT Alt participates in the hotkey; Right Alt / AltGr never triggers.
+ *
+ * F1 fix (C1, stuck hold): keyups can be swallowed wholesale — Ctrl+Alt+Del /
+ * Win+L switch to the secure desktop and the hook never sees the release —
+ * which would latch the hold (and the mic) forever. Two guards:
+ *  - a max-hold watchdog force-cancels after MAX_HOLD_MS;
+ *  - index.ts calls forceCancel() on powerMonitor 'lock-screen'/'suspend'.
+ * Every forced release fully resets ctrl/alt/holding so a swallowed keyup
+ * can't leave a phantom modifier latched.
  */
 
 import { EventEmitter } from 'node:events';
@@ -13,6 +27,8 @@ import { EventEmitter } from 'node:events';
 export interface HotkeyEvents {
   'hold-start': [];
   'hold-end': [];
+  /** Forced release: watchdog / lock / suspend. Cancel the hold, no turn. */
+  'hold-cancel': [];
   error: [Error];
 }
 
@@ -22,36 +38,59 @@ interface HotkeyStatus {
   error?: string | undefined;
 }
 
-// uiohook keycodes (UiohookKey): both left/right variants of each modifier.
+/** Minimal surface of uiohook-napi's uIOhook (injectable for unit tests). */
+export interface UiohookLike {
+  on(event: 'keydown' | 'keyup', cb: (e: { keycode: number }) => void): unknown;
+  start(): void;
+  stop(): void;
+}
+
+export interface HotkeyOptions {
+  /** Test seam: the global hook implementation. Default: uiohook-napi. */
+  hook?: UiohookLike;
+  /** Max hold duration before the watchdog force-cancels. Default 30s. */
+  maxHoldMs?: number;
+}
+
+/** A hold longer than this is a swallowed keyup, not a question (C1). */
+export const MAX_HOLD_MS = 30_000;
+
+// uiohook keycodes (UiohookKey). Ctrl: both variants. Alt: LEFT ONLY —
+// Right Alt (3640) is AltGr on international layouts and must never trigger.
 const CTRL_KEYCODES = new Set<number>([29 /* L */, 3613 /* R */]);
-const ALT_KEYCODES = new Set<number>([56 /* L */, 3640 /* R */]);
+const ALT_LEFT_KEYCODE = 56;
 
 export class HotkeyManager extends EventEmitter<HotkeyEvents> {
+  private readonly options: HotkeyOptions;
   private ctrlDown = false;
   private altDown = false;
   private holding = false;
   private hookAlive = false;
   private lastError: string | undefined;
+  private watchdog: NodeJS.Timeout | null = null;
+
+  constructor(options: HotkeyOptions = {}) {
+    super();
+    this.options = options;
+  }
 
   /** Start the global hook. Never throws; check status().hookAlive. */
   start(): void {
     try {
-      // Lazy require so a broken native module can't crash app startup.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { uIOhook } = require('uiohook-napi') as typeof import('uiohook-napi');
+      const hook = this.options.hook ?? this.loadUiohook();
 
-      uIOhook.on('keydown', (e: { keycode: number }) => {
+      hook.on('keydown', (e: { keycode: number }) => {
         if (CTRL_KEYCODES.has(e.keycode)) this.ctrlDown = true;
-        if (ALT_KEYCODES.has(e.keycode)) this.altDown = true;
+        if (e.keycode === ALT_LEFT_KEYCODE) this.altDown = true;
         this.evaluate();
       });
-      uIOhook.on('keyup', (e: { keycode: number }) => {
+      hook.on('keyup', (e: { keycode: number }) => {
         if (CTRL_KEYCODES.has(e.keycode)) this.ctrlDown = false;
-        if (ALT_KEYCODES.has(e.keycode)) this.altDown = false;
+        if (e.keycode === ALT_LEFT_KEYCODE) this.altDown = false;
         this.evaluate();
       });
 
-      uIOhook.start();
+      hook.start();
       this.hookAlive = true;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
@@ -63,16 +102,40 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
   }
 
   stop(): void {
+    this.clearWatchdog();
+    this.ctrlDown = false;
+    this.altDown = false;
+    this.holding = false;
     if (!this.hookAlive) return;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { uIOhook } = require('uiohook-napi') as typeof import('uiohook-napi');
-      uIOhook.stop();
-    } catch (err) {
-      console.error('[hotkey] failed to stop uiohook:', err);
+    if (!this.options.hook) {
+      try {
+        this.loadUiohook().stop();
+      } catch (err) {
+        console.error('[hotkey] failed to stop uiohook:', err);
+      }
+    } else {
+      try {
+        this.options.hook.stop();
+      } catch (err) {
+        console.error('[hotkey] failed to stop hook:', err);
+      }
     }
     this.hookAlive = false;
-    this.holding = false;
+  }
+
+  /**
+   * Force-release the current hold as a CANCEL (no turn) and fully reset the
+   * modifier state, so swallowed keyups (secure desktop, lock screen, sleep)
+   * can never latch the hold or a phantom Ctrl/Alt. Safe to call anytime.
+   */
+  forceCancel(): void {
+    this.ctrlDown = false;
+    this.altDown = false;
+    this.clearWatchdog();
+    if (this.holding) {
+      this.holding = false;
+      this.emit('hold-cancel');
+    }
   }
 
   /** Debug-harness entry point: simulate a press/release without real keys. */
@@ -93,14 +156,36 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
 
   // -------------------------------------------------------------------------
 
+  private loadUiohook(): UiohookLike {
+    // Lazy require so a broken native module can't crash app startup.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return (require('uiohook-napi') as typeof import('uiohook-napi')).uIOhook;
+  }
+
   private evaluate(): void {
     const shouldHold = this.ctrlDown && this.altDown;
     if (shouldHold && !this.holding) {
       this.holding = true;
+      this.armWatchdog();
       this.emit('hold-start');
     } else if (!shouldHold && this.holding) {
       this.holding = false;
+      this.clearWatchdog();
       this.emit('hold-end');
     }
+  }
+
+  private armWatchdog(): void {
+    this.clearWatchdog();
+    this.watchdog = setTimeout(() => {
+      this.watchdog = null;
+      // Nobody asks a question for 30s straight: the keyup was swallowed.
+      this.forceCancel();
+    }, this.options.maxHoldMs ?? MAX_HOLD_MS);
+  }
+
+  private clearWatchdog(): void {
+    if (this.watchdog !== null) clearTimeout(this.watchdog);
+    this.watchdog = null;
   }
 }

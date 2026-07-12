@@ -12,7 +12,8 @@ describe('settings schema', () => {
     expect(DEFAULT_SETTINGS.model).toBe('gpt-realtime-2.1-mini');
     expect(DEFAULT_SETTINGS.captionsEnabled).toBe(true);
     expect(DEFAULT_SETTINGS.micDeviceId).toBe('');
-    expect(DEFAULT_SETTINGS.hotkeyLabel).toBe('Ctrl+Alt');
+    // F1 (AltGr): only LEFT Alt participates, and the label says so.
+    expect(DEFAULT_SETTINGS.hotkeyLabel).toBe('Ctrl+Alt (left alt)');
   });
 
   it('round-trips defaults through JSON unchanged', () => {
@@ -35,7 +36,7 @@ describe('settings schema', () => {
       voice: 'cedar',
       captionsEnabled: false,
       micDeviceId: 'mic-42',
-      hotkeyLabel: 'Ctrl+Alt',
+      hotkeyLabel: 'Ctrl+Alt (left alt)',
     });
     // the renderer-safe view must never contain the key itself
     expect(JSON.stringify(next)).not.toContain('sk-secret');

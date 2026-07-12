@@ -354,8 +354,11 @@ export interface PointAtArgs {
  *
  * - x/y must be finite numbers; rounded to integers, clamped to >= 0 and,
  *   when `capture` metadata for that screen is known, to the image bounds.
- * - screen must be a finite number; rounded, clamped to >= 0 and, when
- *   capture metadata is known, to a valid screen index.
+ * - screen must be a finite number; rounded, clamped to >= 0. F1 fix (m2):
+ *   captures are KEYED by meta.screenIndex — a display can be skipped, so
+ *   array position is NOT the screen index. The screen is validated against
+ *   the actual screenIndex values present; an unknown index falls back to
+ *   the ACTIVE screen's capture (matching the conversation's lookup).
  * - label is kept only if it's a non-empty string (trimmed, capped at 120).
  *
  * Returns null for fundamentally malformed input (missing/non-numeric x, y
@@ -370,10 +373,12 @@ export function validatePointAtArgs(raw: unknown, capture?: CaptureMeta[]): Poin
   if (xNum === null || yNum === null || screenNum === null) return null;
 
   let screen = Math.max(0, Math.round(screenNum));
-  if (capture && capture.length > 0 && screen >= capture.length) {
-    screen = capture.length - 1;
+  let meta = capture?.find((m) => m.screenIndex === screen);
+  if (meta === undefined && capture !== undefined && capture.length > 0) {
+    // Unknown screen index: explicit fallback to the active screen (m2).
+    meta = capture.find((m) => m.isActive) ?? capture[0];
+    if (meta !== undefined) screen = meta.screenIndex;
   }
-  const meta = capture?.[screen];
   const maxX = meta ? Math.max(0, meta.imageW - 1) : Number.MAX_SAFE_INTEGER;
   const maxY = meta ? Math.max(0, meta.imageH - 1) : Number.MAX_SAFE_INTEGER;
   const x = Math.min(Math.max(0, Math.round(xNum)), maxX);
