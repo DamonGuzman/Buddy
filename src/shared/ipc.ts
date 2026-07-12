@@ -13,6 +13,7 @@ import type {
   AssistantState,
   AudioOutputDelta,
   CaptionUpdate,
+  CaptureCommand,
   MicDevice,
   PlaybackCommand,
   PointerCommand,
@@ -57,6 +58,9 @@ export interface MainToPanelEvents {
   'audio:output': AudioOutputDelta;
   /** Playback control: 'stop' halts immediately; 'flush' drops queued audio. */
   'audio:playback': { command: PlaybackCommand };
+  // M5 addition (orchestrator-approved): main tells the panel renderer to
+  // start/stop mic capture when the push-to-talk hotkey goes down/up.
+  'audio:capture': { command: CaptureCommand };
 }
 
 // ===========================================================================
@@ -125,6 +129,8 @@ export interface PanelApi {
   onSettings(cb: (settings: Settings) => void): Unsubscribe;
   onAudioOutput(cb: (delta: AudioOutputDelta) => void): Unsubscribe;
   onPlayback(cb: (payload: { command: PlaybackCommand }) => void): Unsubscribe;
+  // M5 addition (orchestrator-approved): mic capture start/stop from main.
+  onCaptureCommand(cb: (payload: { command: CaptureCommand }) => void): Unsubscribe;
 
   getSettings(): Promise<Settings>;
   setSettings(patch: SettingsPatch): Promise<Settings>;

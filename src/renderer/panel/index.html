@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' mediastream:; img-src 'self' data:"
     />
     <title>Clicky</title>
     <style>
@@ -17,9 +17,14 @@
         height: 100%;
       }
       body {
-        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-        background: #0f172a;
-        color: #e2e8f0;
+        font-family:
+          'Segoe UI Variable Text',
+          'Segoe UI Variable',
+          'Segoe UI',
+          system-ui,
+          sans-serif;
+        background: #0f1115;
+        color: #e8eaf0;
         user-select: none;
         overflow: hidden;
       }
