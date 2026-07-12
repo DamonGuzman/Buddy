@@ -18,6 +18,7 @@ import type { Display } from 'electron';
 import { join } from 'node:path';
 import type { MainToOverlayChannel, MainToOverlayEvents } from '../../shared/ipc';
 import type { PointerCommand } from '../../shared/types';
+import { CrashLoopGuard, lockdownNavigation, recoverOnRenderProcessGone } from './harden';
 
 /**
  * Module-level handle to the started manager so sibling main modules (e.g.
@@ -35,6 +36,8 @@ export class OverlayManager {
   /** displayId -> screenIndex used in capture labeling. */
   private indexByDisplayId = new Map<number, number>();
   private started = false;
+  /** Crash recovery budget shared across ALL overlay windows. */
+  private crashGuard = new CrashLoopGuard(3, 5 * 60_000, 'overlay');
 
   /** Create overlays for all current displays and start watching hotplug. */
   start(): void {
@@ -162,10 +165,19 @@ export class OverlayManager {
         preload: join(__dirname, '../preload/overlay.js'),
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: false,
+        sandbox: true,
         // Keep animations running while the (never-focused) overlay is "unfocused".
         backgroundThrottling: false,
       },
+    });
+
+    lockdownNavigation(win);
+    // Crash recovery: a dead overlay renderer = invisible buddy. Drop the dead
+    // window and let syncDisplays build a fresh one (bounded by crashGuard).
+    recoverOnRenderProcessGone(win, this.crashGuard, `overlay(display ${display.id})`, () => {
+      if (!win.isDestroyed()) win.destroy();
+      if (this.windows.get(display.id) === win) this.windows.delete(display.id);
+      this.syncDisplays();
     });
 
     win.setAlwaysOnTop(true, 'screen-saver');
@@ -176,7 +188,18 @@ export class OverlayManager {
     // Belt-and-braces: bounds again after frameless quirks on scaled displays.
     win.setBounds(display.bounds);
 
-    const query = `?screenIndex=${screenIndex}&primary=${isPrimary ? '1' : '0'}`;
+    // Known limitation: ?screenIndex/?primary are creation-time snapshots and
+    // go stale if displays are re-ordered while the window lives. Harmless
+    // today — routing/residency are enforced main-side (routePointer +
+    // did-finish-load below); the renderer only uses ?primary as its
+    // pre-subscription default. A live update would need a new shared IPC
+    // channel (src/shared/ipc.ts is frozen), so it is documented instead.
+    // CLICKY_BOB_IDLE_MS: test hook to shrink the renderer's idle bob-pause
+    // timeout (default 5min) without a rebuild.
+    const bobIdleMs = Number(process.env['CLICKY_BOB_IDLE_MS']);
+    const query =
+      `?screenIndex=${screenIndex}&primary=${isPrimary ? '1' : '0'}` +
+      (Number.isFinite(bobIdleMs) && bobIdleMs > 0 ? `&bobIdleMs=${bobIdleMs}` : '');
     if (process.env['ELECTRON_RENDERER_URL']) {
       void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/overlay/index.html${query}`);
     } else {

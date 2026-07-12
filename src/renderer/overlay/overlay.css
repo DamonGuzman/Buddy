@@ -54,6 +54,12 @@
 .buddy-root[data-visible][data-mode='rest'] .buddy-bob {
   animation: buddy-bob 3.2s ease-in-out infinite;
 }
+/* battery saver: after ~5min fully idle, hold still (buddy stays visible;
+   any state change / pointer / caption resumes the bob). Must follow the bob
+   rule — same specificity, later wins. */
+.buddy-root[data-bob-paused][data-mode='rest'] .buddy-bob {
+  animation: none;
+}
 @keyframes buddy-bob {
   0%,
   100% {
@@ -296,6 +302,15 @@
   box-shadow: 0 5px 20px rgba(0, 0, 0, 0.45);
   animation: bubble-in 0.3s cubic-bezier(0.34, 1.4, 0.64, 1);
   transition: opacity 0.45s ease, transform 0.45s ease;
+  /* Long streamed captions: cap at ~40% of the display and clip from the TOP
+     so the newest (tail) words stay visible while text streams in. The
+     column + flex-end layout makes the single text item overflow upward,
+     where overflow:hidden clips it. */
+  max-height: 40vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
 }
 .caption-bubble[data-fading] {
   opacity: 0;
@@ -377,6 +392,12 @@
 .point-pulse[data-side='left'] .pp-chip {
   left: auto;
   right: 18px;
+}
+/* vertical mirror of the horizontal flip: points near the bottom edge would
+   clip the chip off-screen, so it flips above the point */
+.point-pulse[data-vside='above'] .pp-chip {
+  top: auto;
+  bottom: 12px;
 }
 
 /* ------------------------------------------------------------- shared bits */

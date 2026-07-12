@@ -24,6 +24,9 @@ import type {
 
 let prewarmStarted = false; // once per renderer, even under StrictMode
 
+/** Keep the renderer transcript bounded, mirroring main's 50-entry ring. */
+const MAX_TRANSCRIPT_ENTRIES = 50;
+
 async function enumerateMics(): Promise<MicDevice[]> {
   const seen = new Map<string, MicDevice>();
   try {
@@ -61,7 +64,13 @@ export function App(): React.JSX.Element {
   const upsertEntry = useCallback((entry: TranscriptEntry): void => {
     setEntries((prev) => {
       const idx = prev.findIndex((e) => e.id === entry.id);
-      if (idx === -1) return [...prev, entry];
+      if (idx === -1) {
+        const appended = [...prev, entry];
+        // Unbounded growth leak fix: drop the oldest entries past the ring size.
+        return appended.length > MAX_TRANSCRIPT_ENTRIES
+          ? appended.slice(appended.length - MAX_TRANSCRIPT_ENTRIES)
+          : appended;
+      }
       const next = prev.slice();
       next[idx] = entry;
       return next;
@@ -189,6 +198,7 @@ export function App(): React.JSX.Element {
             <Composer
               disabled={composerDisabled}
               disabledReason="add your openai key in settings so clicky can connect"
+              busy={assistantState === 'thinking'}
               onSend={(text) => void clicky.askText(text)}
             />
           </>

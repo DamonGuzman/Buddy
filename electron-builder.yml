@@ -13,8 +13,11 @@ win:
   target:
     - portable
     - nsis
-  # unsigned for MVP
-  signAndEditExecutable: false
+  # buddy icon — regenerate with `npm run icon` (build/make-icon.mjs)
+  icon: build/icon.ico
+  # Executable editing must stay ON so the icon/version resources get stamped
+  # into Clicky.exe; the build remains unsigned (no certificate configured).
+  signAndEditExecutable: true
 nsis:
   oneClick: true
   perMachine: false

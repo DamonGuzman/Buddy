@@ -6,7 +6,7 @@
 
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,31 @@ export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function newToken() {
   return randomBytes(12).toString('hex');
+}
+
+/**
+ * Debug-server auth is mandatory now: when the app isn't given an explicit
+ * CLICKY_DEBUG_TOKEN it generates one per launch and writes it to
+ * <userData>/debug-token.txt. For --attach runs (token env not exported in
+ * this shell) read it from there: CLICKY_USER_DATA first, then the default
+ * userData dirs (dev app name, then packaged productName). Returns null when
+ * no token file is found.
+ */
+export function readTokenFile() {
+  const candidates = [
+    process.env.CLICKY_USER_DATA,
+    process.env.APPDATA ? path.join(process.env.APPDATA, 'heyclicky') : null,
+    process.env.APPDATA ? path.join(process.env.APPDATA, 'Clicky') : null,
+  ].filter(Boolean);
+  for (const dir of candidates) {
+    try {
+      const token = readFileSync(path.join(dir, 'debug-token.txt'), 'utf8').trim();
+      if (token) return token;
+    } catch {
+      /* keep looking */
+    }
+  }
+  return null;
 }
 
 export function timestampSlug() {

@@ -3,22 +3,30 @@ import { useState } from 'react';
 interface ComposerProps {
   disabled: boolean;
   disabledReason: string | undefined;
+  /** True while a turn is pending ('thinking') — blocks double-submit. */
+  busy?: boolean;
   onSend: (text: string) => void;
 }
 
 /** Text-input fallback: typed question → same pipeline as voice. */
-export function Composer({ disabled, disabledReason, onSend }: ComposerProps): React.JSX.Element {
+export function Composer({
+  disabled,
+  disabledReason,
+  busy = false,
+  onSend,
+}: ComposerProps): React.JSX.Element {
   const [text, setText] = useState('');
 
   const send = (): void => {
     const trimmed = text.trim();
-    if (!trimmed || disabled) return;
+    if (!trimmed || disabled || busy) return;
     onSend(trimmed);
     setText('');
   };
 
   return (
     <div className="composer" title={disabled ? disabledReason : undefined}>
+      {busy && <span className="composer-hint">clicky is thinking…</span>}
       <input
         type="text"
         value={text}
@@ -35,8 +43,8 @@ export function Composer({ disabled, disabledReason, onSend }: ComposerProps): R
       <button
         type="button"
         className="send"
-        disabled={disabled || text.trim().length === 0}
-        title={disabled ? disabledReason : 'send'}
+        disabled={disabled || busy || text.trim().length === 0}
+        title={disabled ? disabledReason : busy ? 'clicky is thinking…' : 'send'}
         onClick={send}
       >
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">

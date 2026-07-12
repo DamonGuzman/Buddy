@@ -41,6 +41,7 @@ import {
   killTree,
   launchApp,
   newToken,
+  readTokenFile,
   sleep,
   startMock,
   timestampSlug,
@@ -63,7 +64,10 @@ const voice = has('--voice');
 const attach = has('--attach');
 const debugPort = Number(val('--debug-port', '8199'));
 const scenes = (val('--scenes', SCENES.join(',')) || '').split(',').filter(Boolean);
-const token = process.env.CLICKY_DEBUG_TOKEN || newToken();
+// Token resolution (auth is mandatory server-side): explicit env wins; for
+// --attach fall back to the running app's <userData>/debug-token.txt; when we
+// launch the app ourselves we mint a fresh token and hand it over via env.
+const token = process.env.CLICKY_DEBUG_TOKEN || (attach ? readTokenFile() : null) || newToken();
 
 const backend = live ? 'LIVE OPENAI API' : 'MOCK (tools/mock-realtime)';
 const banner = `\n${'='.repeat(72)}\n  POINTING EVAL — backend: ${backend}${live ? '' : '\n  NOTE: the mock points at screen center; this run validates PLUMBING,\n  not model accuracy. Only the calibration target is expected to HIT.'}\n${'='.repeat(72)}\n`;
@@ -200,7 +204,10 @@ try {
     await waitFor(() => api.alive(), { timeoutMs: 30_000, label: 'app boot' });
     await sleep(2000); // let overlays + panel renderer settle
   } else if (!(await api.alive())) {
-    throw new Error(`--attach: no app answering on port ${debugPort} with this token`);
+    throw new Error(
+      `--attach: no app answering on port ${debugPort} with this token ` +
+        '(set CLICKY_DEBUG_TOKEN or make sure <userData>/debug-token.txt is readable)',
+    );
   }
 
   for (const scene of scenes) {
