@@ -198,4 +198,13 @@ export interface DebugState {
   };
   session: SessionStatus;
   lastCapture: CaptureMeta[] | null;
+  // M6 additions (integration-approved): pipeline observability.
+  /** Last pointer command routed to the overlays (mapped, overlay-local DIP). */
+  lastPointer: PointerCommand | null;
+  /** Recent pointer commands, oldest first (capped). */
+  pointerHistory: PointerCommand[];
+  /** Mic chunks received from the panel / audio chunks sent to playback. */
+  audio: { chunksIn: number; chunksOut: number };
+  /** Whether the "capture in progress" indicator is currently shown. */
+  captureIndicatorActive: boolean;
 }

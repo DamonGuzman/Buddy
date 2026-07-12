@@ -15,18 +15,14 @@
  *                          (proves hidden-window mic capture end-to-end).
  * - CLICKY_USER_DATA=dir  → use a separate userData dir (settings + the
  *                          single-instance lock), so parallel dev instances
- *                          don't fight over the lock. Applied at module load,
- *                          which runs before index.ts requests the lock.
+ *                          don't fight over the lock. Applied in index.ts
+ *                          bootstrap, before the single-instance lock (M6).
  */
 
 import { app, BrowserWindow, screen } from 'electron';
 import { join } from 'node:path';
 import { PANEL_HEIGHT, PANEL_WIDTH } from '../../shared/constants';
 import type { MainToPanelChannel, MainToPanelEvents } from '../../shared/ipc';
-
-if (process.env['CLICKY_USER_DATA']) {
-  app.setPath('userData', process.env['CLICKY_USER_DATA']);
-}
 
 const MARGIN = 12;
 

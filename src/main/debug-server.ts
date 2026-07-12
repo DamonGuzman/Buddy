@@ -19,12 +19,29 @@
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { DEBUG_HOST, DEBUG_PORT, ENV_DEBUG } from '../shared/constants';
-import type { AssistantState, DebugState, PointerCommand, PointerPoint } from '../shared/types';
+import type {
+  AssistantState,
+  DebugState,
+  PlaybackCommand,
+  PointerCommand,
+  PointerPoint,
+  TranscriptEntry,
+} from '../shared/types';
 import { getOverlayManager } from './windows/overlay';
 import type { OverlayManager } from './windows/overlay';
 
+/** M6: hooks into the conversation pipeline (drive real code paths, not sims). */
+export interface PipelineDebugDeps {
+  pressHotkey: () => void;
+  releaseHotkey: () => void;
+  askText: (text: string) => Promise<void>;
+  getTranscript: () => TranscriptEntry[];
+  playback: (command: PlaybackCommand) => void;
+}
+
 export interface DebugServerDeps {
   getState: () => DebugState;
+  pipeline?: PipelineDebugDeps;
 }
 
 type RouteHandler = (
@@ -239,3 +256,77 @@ const OVERLAY_ROUTES: Record<string, RouteHandler> = {
 
 Object.assign(ROUTES, OVERLAY_ROUTES);
 // --- end overlay debug routes (M2) ---
+
+// ===========================================================================
+// --- M6 pipeline debug routes ---
+//
+// Drive the FULL production pipeline (same functions as real input, never
+// simulations):
+//
+//   POST /hotkey/press    -> the exact hold-start code path (hotkey FSM)
+//   POST /hotkey/release  -> the exact hold-end code path
+//   POST /ask             {text} -> the panel:ask-text path
+//   GET  /transcript      -> transcript entries array (ring buffer, last 50)
+//   POST /playback        {command: 'stop' | 'flush'} passthrough to the panel
+// ===========================================================================
+
+/** 503s when the pipeline isn't wired (pre-M6 boot); otherwise hands it over. */
+function withPipeline(
+  deps: DebugServerDeps,
+  res: ServerResponse,
+  use: (pipeline: PipelineDebugDeps) => void | Promise<void>,
+): void | Promise<void> {
+  if (!deps.pipeline) {
+    sendJson(res, 503, { error: 'conversation pipeline not wired' });
+    return;
+  }
+  return use(deps.pipeline);
+}
+
+const PIPELINE_ROUTES: Record<string, RouteHandler> = {
+  'POST /hotkey/press': (deps, _req, res) =>
+    withPipeline(deps, res, (pipeline) => {
+      pipeline.pressHotkey();
+      sendJson(res, 200, { ok: true });
+    }),
+
+  'POST /hotkey/release': (deps, _req, res) =>
+    withPipeline(deps, res, (pipeline) => {
+      pipeline.releaseHotkey();
+      sendJson(res, 200, { ok: true });
+    }),
+
+  'POST /ask': async (deps, req, res) => {
+    const body = asRecord(await readJsonBody(req));
+    const text = body?.['text'];
+    if (typeof text !== 'string' || text.trim().length === 0) {
+      sendJson(res, 400, { error: 'expected {text: string}' });
+      return;
+    }
+    await withPipeline(deps, res, async (pipeline) => {
+      await pipeline.askText(text);
+      sendJson(res, 200, { ok: true });
+    });
+  },
+
+  'GET /transcript': (deps, _req, res) =>
+    withPipeline(deps, res, (pipeline) => {
+      sendJson(res, 200, pipeline.getTranscript());
+    }),
+
+  'POST /playback': async (deps, req, res) => {
+    const body = asRecord(await readJsonBody(req));
+    const command = body?.['command'];
+    if (command !== 'stop' && command !== 'flush') {
+      sendJson(res, 400, { error: "expected {command: 'stop' | 'flush'}" });
+      return;
+    }
+    withPipeline(deps, res, (pipeline) => {
+      pipeline.playback(command);
+      sendJson(res, 200, { ok: true, sent: command });
+    });
+  },
+};
+
+Object.assign(ROUTES, PIPELINE_ROUTES);
+// --- end M6 pipeline debug routes ---
