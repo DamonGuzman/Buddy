@@ -31,6 +31,17 @@ const CAPTION_LINGER_MS = 4000;
 const CAPTION_FADE_MS = 500;
 /** Error flash duration (shake + red), then back to the idle look. */
 const ERROR_FLASH_MS = 650;
+/**
+ * Battery saver: after this long fully idle (state 'idle' and no pointer/
+ * caption/state activity) the rest bob animation pauses — the buddy stays
+ * visible, it just holds still. Any activity resumes it. The main process can
+ * shrink this via the CLICKY_BOB_IDLE_MS env (test hook; forwarded as the
+ * ?bobIdleMs query param).
+ */
+const BOB_IDLE_PAUSE_MS = (() => {
+  const q = Number(new URLSearchParams(window.location.search).get('bobIdleMs'));
+  return Number.isFinite(q) && q > 0 ? q : 5 * 60_000;
+})();
 
 /**
  * When settled at SETTLE_ROT (tip up-left, like a cursor) the triangle's tip
@@ -67,6 +78,8 @@ interface PulseView {
   y: number;
   label?: string;
   side: 'left' | 'right';
+  /** Chip flips above the point near the bottom screen edge (mirror of side). */
+  vside: 'above' | 'below';
 }
 
 interface Placement {
@@ -117,6 +130,7 @@ function App(): React.JSX.Element {
   const [caption, setCaption] = useState<CaptionView | null>(null);
   const [pulses, setPulses] = useState<PulseView[]>([]);
   const [placement, setPlacement] = useState<Placement>({ h: 'right', v: 'above' });
+  const [bobPaused, setBobPaused] = useState(false);
 
   useEffect(() => {
     // ------------------------------------------------------------- engine --
@@ -136,6 +150,21 @@ function App(): React.JSX.Element {
     let waitingIdleGen: number | null = null;
     const timers = new Set<ReturnType<typeof setTimeout>>();
     let captionTimer: ReturnType<typeof setTimeout> | null = null;
+    let bobTimer: ReturnType<typeof setTimeout> | null = null;
+
+    /**
+     * Battery saver: (re)arm the idle bob-pause timer. Called on every
+     * pointer/caption/capture/state event; pauses the bob only if still fully
+     * idle when the timer fires (state changes re-arm it, so a later return
+     * to idle restarts the countdown).
+     */
+    const bumpActivity = (): void => {
+      setBobPaused(false);
+      if (bobTimer !== null) clearTimeout(bobTimer);
+      bobTimer = setTimeout(() => {
+        if (currentState === 'idle') setBobPaused(true);
+      }, BOB_IDLE_PAUSE_MS);
+    };
 
     const after = (ms: number, fn: () => void): void => {
       const id = setTimeout(() => {
@@ -174,6 +203,9 @@ function App(): React.JSX.Element {
           x: p.x,
           y: p.y,
           side: p.x > window.innerWidth - 260 ? 'left' : 'right',
+          // Mirror of the horizontal flip: chips for points near the bottom
+          // edge would clip off-screen, so flip them above the point.
+          vside: p.y > window.innerHeight - 60 ? 'above' : 'below',
           ...(p.label !== undefined ? { label: p.label } : {}),
         },
       ]);
@@ -238,9 +270,18 @@ function App(): React.JSX.Element {
     const applyState = (s: AssistantState): void => {
       currentState = s;
       setAssistantState(s);
+      bumpActivity();
       if (s === 'error') {
         setErrorFlash(true);
         after(ERROR_FLASH_MS, () => setErrorFlash(false));
+        // A failed/cancelled turn must not leave a stale caption on screen:
+        // fade whatever is showing and drop it.
+        if (captionTimer !== null) {
+          clearTimeout(captionTimer);
+          captionTimer = null;
+        }
+        setCaption((c) => (c && !c.fading ? { ...c, fading: true } : c));
+        after(CAPTION_FADE_MS, () => setCaption(null));
       }
       if (s === 'idle' && waitingIdleGen !== null && waitingIdleGen === gen) {
         void goHome(gen);
@@ -250,12 +291,14 @@ function App(): React.JSX.Element {
     // --------------------------------------------------------------- init --
     flight.jumpTo(restPos(), REST_ROT);
     updatePlacement(restPos());
+    bumpActivity();
     void clicky.getAssistantState().then((s) => {
       currentState = s;
       setAssistantState(s);
     });
 
     const offPointer = clicky.onPointer((cmd) => {
+      bumpActivity();
       if (cmd.type === 'animate') {
         if (cmd.points.length > 0) void runPoints(cmd.points);
       } else if (cmd.type === 'idle') {
@@ -273,9 +316,13 @@ function App(): React.JSX.Element {
 
     const offState = clicky.onAssistantState(applyState);
 
-    const offCapture = clicky.onCaptureIndicator(({ active }) => setCapturing(active));
+    const offCapture = clicky.onCaptureIndicator(({ active }) => {
+      bumpActivity();
+      setCapturing(active);
+    });
 
     const offCaption = clicky.onCaption((update) => {
+      bumpActivity();
       if (captionTimer !== null) {
         clearTimeout(captionTimer);
         captionTimer = null;
@@ -326,6 +373,7 @@ function App(): React.JSX.Element {
       clearTimers();
       if (captionTimer !== null) clearTimeout(captionTimer);
       if (blinkTimer !== null) clearTimeout(blinkTimer);
+      if (bobTimer !== null) clearTimeout(bobTimer);
       flight.cancel();
     };
   }, []);
@@ -341,6 +389,7 @@ function App(): React.JSX.Element {
         data-visible={buddyVisible ? '' : undefined}
         data-flash={errorFlash ? '' : undefined}
         data-blink={blink ? '' : undefined}
+        data-bob-paused={bobPaused ? '' : undefined}
         data-h={placement.h}
         data-v={placement.v}
       >
@@ -374,6 +423,7 @@ function App(): React.JSX.Element {
           key={p.id}
           className="point-pulse"
           data-side={p.side}
+          data-vside={p.vside}
           style={{ left: p.x, top: p.y }}
         >
           <span className="pp-dot" />

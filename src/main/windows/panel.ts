@@ -20,25 +20,62 @@
  */
 
 import { app, BrowserWindow, screen } from 'electron';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { PANEL_HEIGHT, PANEL_WIDTH } from '../../shared/constants';
 import type { MainToPanelChannel, MainToPanelEvents } from '../../shared/ipc';
+import { CrashLoopGuard, lockdownNavigation, recoverOnRenderProcessGone } from './harden';
 
 const MARGIN = 12;
 
 const SHOW_ON_LAUNCH = process.env['CLICKY_SHOW_PANEL'] === '1';
 const TEST_CAPTURE = process.env['CLICKY_TEST_CAPTURE'] === '1';
 
+/** Delay before the first-run auto-show (lets the tray/overlays settle). */
+const FIRST_RUN_SHOW_DELAY_MS = 1500;
+
+/**
+ * Module-level handle so sibling main modules (e.g. conversation-side "show
+ * the panel when a turn fails with no API key") can surface the panel once
+ * without bootstrap wiring changes.
+ */
+let activePanel: PanelManager | null = null;
+let shownOnce = false;
+
+/**
+ * Show the panel at most once per app run. First-run discoverability + hidden
+ * -failure surfacing: the panel otherwise only ever opens via a tray click.
+ * Uses the focus-less show — this fires while the user may be mid-typing
+ * elsewhere, and Windows' focus-steal prevention would otherwise demote the
+ * window (drop topmost + bury it at the bottom of the z-order).
+ */
+export function showPanelOnce(): void {
+  if (shownOnce || !activePanel) return;
+  shownOnce = true;
+  activePanel.showInactive();
+}
+
 export class PanelManager {
   private win: BrowserWindow | null = null;
+  private crashGuard = new CrashLoopGuard(3, 5 * 60_000, 'panel');
 
   constructor() {
+    activePanel = this;
     // Pre-create the (hidden) window as soon as the app is ready so the
     // renderer is alive for hotkey-driven mic capture and permission pre-warm.
     void app.whenReady().then(() => {
+      // First run: no settings file yet (SettingsStore only writes on first
+      // save). Deliberately a bare fs check — settings.ts internals stay
+      // private. Auto-show the panel shortly after boot so a brand-new user
+      // discovers the UI (it otherwise hides behind a tray icon).
+      const firstRun = !existsSync(join(app.getPath('userData'), 'settings.json'));
       const win = this.ensureWindow();
       if (SHOW_ON_LAUNCH) {
         win.webContents.once('did-finish-load', () => this.show());
+      } else if (firstRun) {
+        win.webContents.once('did-finish-load', () => {
+          setTimeout(() => showPanelOnce(), FIRST_RUN_SHOW_DELAY_MS);
+        });
       }
     });
   }
@@ -60,6 +97,33 @@ export class PanelManager {
     this.positionNearTray(win);
     win.show();
     win.focus();
+    this.reassertTopmost(win);
+  }
+
+  /** Show without stealing focus (first-run auto-show, background surfacing). */
+  showInactive(): void {
+    const win = this.ensureWindow();
+    this.positionNearTray(win);
+    win.showInactive();
+    this.reassertTopmost(win);
+  }
+
+  /**
+   * Windows silently drops the real HWND topmost bit when a background
+   * process shows a window (focus-steal prevention / fullscreen-app
+   * protection), while Electron's cached always-on-top state still says true
+   * — so a plain setAlwaysOnTop(true) no-ops. Toggle it off and re-assert at
+   * the same elevated z-band the overlay uses (which observably survives
+   * those demotions), then verify once more a beat later.
+   */
+  private reassertTopmost(win: BrowserWindow): void {
+    win.setAlwaysOnTop(false);
+    win.setAlwaysOnTop(true, 'screen-saver');
+    setTimeout(() => {
+      if (!win.isDestroyed() && win.isVisible() && !win.isAlwaysOnTop()) {
+        win.setAlwaysOnTop(true, 'screen-saver');
+      }
+    }, 300);
   }
 
   hide(): void {
@@ -72,6 +136,7 @@ export class PanelManager {
   }
 
   destroy(): void {
+    if (activePanel === this) activePanel = null;
     if (this.win && !this.win.isDestroyed()) this.win.destroy();
     this.win = null;
   }
@@ -81,6 +146,9 @@ export class PanelManager {
   private ensureWindow(): BrowserWindow {
     if (this.win && !this.win.isDestroyed()) return this.win;
 
+    // Dev/unpacked runs: give the window the buddy icon (packaged builds get
+    // it from the exe resources via electron-builder's win.icon).
+    const icoPath = join(app.getAppPath(), 'build', 'icon.ico');
     const win = new BrowserWindow({
       width: PANEL_WIDTH,
       height: PANEL_HEIGHT,
@@ -92,15 +160,30 @@ export class PanelManager {
       skipTaskbar: true,
       show: false,
       alwaysOnTop: true,
+      ...(existsSync(icoPath) ? { icon: icoPath } : {}),
       webPreferences: {
         preload: join(__dirname, '../preload/panel.js'),
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: false,
+        sandbox: true,
         // Keep the renderer (and its AudioWorklets) running at full speed
         // while the window is hidden — mic capture must work unseen.
         backgroundThrottling: false,
       },
+    });
+
+    lockdownNavigation(win);
+    // Crash recovery: a dead panel renderer silently kills mic capture AND
+    // model-voice playback (both live in this renderer). Recreate, preserving
+    // visibility (bounded by crashGuard).
+    recoverOnRenderProcessGone(win, this.crashGuard, 'panel', () => {
+      const wasVisible = !win.isDestroyed() && win.isVisible();
+      if (!win.isDestroyed()) win.destroy();
+      if (this.win === win) this.win = null;
+      const fresh = this.ensureWindow();
+      if (wasVisible) {
+        fresh.webContents.once('did-finish-load', () => this.show());
+      }
     });
 
     win.on('blur', () => {

@@ -22,14 +22,28 @@
  *   POST /eval/ground-truth       eval scene pages report [data-target] rects
  *   GET  /eval/ground-truth       latest report per scene
  *
- * Light auth (M8.5, forward-compatible with later hardening): when the env
- * CLICKY_DEBUG_TOKEN is set, EVERY route requires the token via the
- * `X-Debug-Token` header or a `?token=` query param. No behavior change when
- * the env is unset.
+ * Auth (hardened — replaces the M8.5 optional-token scheme):
+ * - EVERY route requires a token via the `X-Debug-Token` header or a
+ *   `?token=` query param (the latter for eval scene pages, which POST from a
+ *   file:// origin with a simple no-cors request).
+ * - The token comes from CLICKY_DEBUG_TOKEN; when unset, a random per-launch
+ *   token is generated, logged once, and written to <userData>/debug-token.txt
+ *   so local tooling can pick it up with zero setup.
+ * - Requests carrying a cross-site Origin header (anything but the literal
+ *   "null" a local file:// page sends) are rejected — a browser CSRF POST from
+ *   a website always carries its Origin.
+ * - Requests whose Host isn't 127.0.0.1:<port> / localhost:<port> are
+ *   rejected — DNS-rebinding defense.
+ * - In packaged builds (app.isPackaged) the server refuses to start unless
+ *   BOTH CLICKY_DEBUG=1 and an explicit CLICKY_DEBUG_TOKEN are set.
  */
 
+import { app } from 'electron';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import { join } from 'node:path';
 import { DEBUG_HOST, DEBUG_PORT, ENV_DEBUG } from '../shared/constants';
 import type {
   AssistantState,
@@ -86,32 +100,110 @@ export function isDebugEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env[ENV_DEBUG] === '1';
 }
 
+/** Constant-time string comparison (length leak is fine for random tokens). */
+function tokenEquals(candidate: string, expected: string): boolean {
+  const a = Buffer.from(candidate, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 /**
- * M8.5: constant-shape token check. When CLICKY_DEBUG_TOKEN is unset this is
- * always true (no behavior change); when set, the request must carry the
- * token in the X-Debug-Token header or a ?token= query param (the latter for
- * eval scene pages, which POST from a file:// origin with a simple request).
+ * Mandatory token check: the request must carry the token in the
+ * X-Debug-Token header or a ?token= query param (the latter for eval scene
+ * pages, which POST from a file:// origin with a simple no-cors request).
  */
-function checkDebugToken(req: IncomingMessage): boolean {
-  const expected = process.env['CLICKY_DEBUG_TOKEN'];
-  if (expected === undefined || expected.length === 0) return true;
+function checkDebugToken(req: IncomingMessage, expected: string): boolean {
+  if (expected.length === 0) return false;
   const header = req.headers['x-debug-token'];
-  if (typeof header === 'string' && header === expected) return true;
+  if (typeof header === 'string' && tokenEquals(header, expected)) return true;
   try {
     const url = new URL(req.url ?? '/', 'http://localhost');
-    return url.searchParams.get('token') === expected;
+    const qp = url.searchParams.get('token');
+    return qp !== null && tokenEquals(qp, expected);
   } catch {
     return false;
   }
 }
 
-/** Start the debug server. Returns null when CLICKY_DEBUG !== '1'. */
+/**
+ * CSRF defense: any request a BROWSER makes cross-site carries an Origin
+ * header. We accept only requests without one (curl / node fetch / same-app
+ * tooling) or with the literal "null" (a local file:// eval scene page).
+ * Anything else is a web page doing a cross-site request — reject.
+ */
+function checkOrigin(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  return origin === undefined || origin === 'null';
+}
+
+/**
+ * DNS-rebinding defense: the Host header must be the loopback address (or
+ * localhost) with our port. A rebound hostname (attacker.com -> 127.0.0.1)
+ * shows up here as the attacker's hostname.
+ */
+function checkHost(req: IncomingMessage, port: number): boolean {
+  const host = req.headers.host;
+  if (typeof host !== 'string') return false;
+  return (
+    host === `127.0.0.1:${port}` ||
+    host === `localhost:${port}` ||
+    host === '127.0.0.1' ||
+    host === 'localhost'
+  );
+}
+
+/**
+ * Resolve the auth token: explicit CLICKY_DEBUG_TOKEN, or a random per-launch
+ * token persisted to <userData>/debug-token.txt for zero-setup local tooling.
+ */
+function resolveToken(): string {
+  const explicit = process.env['CLICKY_DEBUG_TOKEN'];
+  if (explicit !== undefined && explicit.length > 0) return explicit;
+  const token = randomBytes(24).toString('hex');
+  const tokenPath = join(app.getPath('userData'), 'debug-token.txt');
+  try {
+    writeFileSync(tokenPath, token, { encoding: 'utf8' });
+    console.log(`[debug] auth token generated for this launch: ${token} (also at ${tokenPath})`);
+  } catch (err) {
+    console.error(`[debug] could not write ${tokenPath}:`, err);
+    console.log(`[debug] auth token generated for this launch: ${token}`);
+  }
+  return token;
+}
+
+/**
+ * Start the debug server. Returns null when CLICKY_DEBUG !== '1', or when
+ * running packaged without BOTH CLICKY_DEBUG=1 and an explicit token.
+ */
 export function startDebugServer(deps: DebugServerDeps): Server | null {
   if (!isDebugEnabled()) return null;
+  if (app.isPackaged) {
+    const explicitToken = process.env['CLICKY_DEBUG_TOKEN'];
+    if (explicitToken === undefined || explicitToken.length === 0) {
+      console.error(
+        '[debug] refusing to start in a packaged build: set BOTH CLICKY_DEBUG=1 ' +
+          'and an explicit CLICKY_DEBUG_TOKEN to enable the debug server.',
+      );
+      return null;
+    }
+  }
+
+  const token = resolveToken();
+  // M8.5: CLICKY_DEBUG_PORT overrides the default port so parallel QA
+  // instances (other agents' dev apps hold 8199) can coexist.
+  const portEnv = Number(process.env['CLICKY_DEBUG_PORT']);
+  const port = Number.isInteger(portEnv) && portEnv > 0 ? portEnv : DEBUG_PORT;
 
   const server = createServer((req, res) => {
-    // M8.5: light token auth — active only when CLICKY_DEBUG_TOKEN is set.
-    if (!checkDebugToken(req)) {
+    if (!checkHost(req, port)) {
+      sendJson(res, 403, { error: 'bad Host header' });
+      return;
+    }
+    if (!checkOrigin(req)) {
+      sendJson(res, 403, { error: 'cross-origin requests are not allowed' });
+      return;
+    }
+    if (!checkDebugToken(req, token)) {
       sendJson(res, 401, { error: 'X-Debug-Token header (or ?token=) required' });
       return;
     }
@@ -126,10 +218,6 @@ export function startDebugServer(deps: DebugServerDeps): Server | null {
     });
   });
 
-  // M8.5: CLICKY_DEBUG_PORT overrides the default port so parallel QA
-  // instances (other agents' dev apps hold 8199) can coexist.
-  const portEnv = Number(process.env['CLICKY_DEBUG_PORT']);
-  const port = Number.isInteger(portEnv) && portEnv > 0 ? portEnv : DEBUG_PORT;
   server.listen(port, DEBUG_HOST, () => {
     console.log(`[debug] listening on http://${DEBUG_HOST}:${port}`);
   });

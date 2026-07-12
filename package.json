@@ -15,16 +15,17 @@
     "eval": "node eval/run.mjs",
     "eval:voice": "node eval/voice-roundtrip.mjs",
     "eval:tts": "node eval/tts.mjs",
+    "icon": "node build/make-icon.mjs",
     "dist": "npm run build && electron-builder --win"
   },
   "dependencies": {
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
     "uiohook-napi": "^1.5.5",
     "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.1",
