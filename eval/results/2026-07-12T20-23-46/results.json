@@ -1,0 +1,1361 @@
+{
+  "backend": "LIVE OPENAI API",
+  "mode": "text",
+  "startedAt": "2026-07-12T20:23:46.976Z",
+  "scenes": [
+    {
+      "scene": "calibration",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "calibration-center",
+          "desc": "the big green square in the center of the screen",
+          "rect": {
+            "x": 768,
+            "y": 475,
+            "width": 1024,
+            "height": 490
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the big green center square",
+            "snap": {
+              "rawPoint": {
+                "x": 1280,
+                "y": 720
+              },
+              "snappedPoint": null,
+              "snapScore": null,
+              "snapName": null,
+              "snapMs": 370,
+              "candidates": 1
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 0,
+          "snap": {
+            "snapped": false,
+            "name": null,
+            "score": null,
+            "ms": 370,
+            "candidates": 1,
+            "rawPoint": {
+              "x": 1280,
+              "y": 720
+            },
+            "rawVerdict": "hit",
+            "rawErrorPx": 0
+          },
+          "userText": "point at the big green square in the center of the screen",
+          "assistantText": "yep, that’s the one. if you want to be extra precise next, you could aim for the exact center of it before clicking, just to test your cursor alignment.",
+          "latency": {
+            "askToFirstToolCallMs": 1482,
+            "askToFirstAudioDeltaMs": 2024,
+            "askToDoneMs": 3872
+          },
+          "usage": {
+            "inputTokens": 2771,
+            "outputTokens": 273,
+            "totalTokens": 3044,
+            "inputTextTokens": 2125,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 646,
+            "cachedTokens": 1411,
+            "outputTextTokens": 91,
+            "outputAudioTokens": 182,
+            "responses": 2
+          }
+        }
+      ]
+    },
+    {
+      "scene": "app-toolbar",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "menu-file",
+          "desc": "the File menu",
+          "rect": {
+            "x": 24,
+            "y": 10,
+            "width": 30,
+            "height": 27
+          },
+          "pointed": {
+            "x": 39.333335876464844,
+            "y": 23.33333396911621,
+            "screenIndex": 0,
+            "label": "the File menu",
+            "snap": {
+              "rawPoint": {
+                "x": 48,
+                "y": 29
+              },
+              "snappedPoint": {
+                "x": 39,
+                "y": 23
+              },
+              "snapScore": 1,
+              "snapName": "File",
+              "snapMs": 86,
+              "candidates": 10
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 0,
+          "snap": {
+            "snapped": true,
+            "name": "File",
+            "score": 1,
+            "ms": 86,
+            "candidates": 10,
+            "rawPoint": {
+              "x": 48,
+              "y": 29
+            },
+            "rawVerdict": "hit",
+            "rawErrorPx": 11
+          },
+          "userText": "point at the File menu",
+          "assistantText": "there you go, that’s the file menu. if you want to keep going, you could open it and peek at what’s available, like import or recent files, and see what’s handy.",
+          "latency": {
+            "askToFirstToolCallMs": 1129,
+            "askToFirstAudioDeltaMs": 1749,
+            "askToDoneMs": 3306
+          },
+          "usage": {
+            "inputTokens": 3952,
+            "outputTokens": 266,
+            "totalTokens": 4218,
+            "inputTextTokens": 2660,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1292,
+            "cachedTokens": 3401,
+            "outputTextTokens": 90,
+            "outputAudioTokens": 176,
+            "responses": 2
+          }
+        },
+        {
+          "name": "save",
+          "desc": "the save button in the toolbar",
+          "rect": {
+            "x": 24,
+            "y": 66,
+            "width": 163,
+            "height": 73
+          },
+          "pointed": {
+            "x": 106,
+            "y": 102.66667175292969,
+            "screenIndex": 0,
+            "label": "the save button",
+            "snap": {
+              "rawPoint": {
+                "x": 71,
+                "y": 90
+              },
+              "snappedPoint": {
+                "x": 106,
+                "y": 103
+              },
+              "snapScore": 1,
+              "snapName": "💾 Save",
+              "snapMs": 40,
+              "candidates": 9
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 1,
+          "snap": {
+            "snapped": true,
+            "name": "💾 Save",
+            "score": 1,
+            "ms": 40,
+            "candidates": 9,
+            "rawPoint": {
+              "x": 71,
+              "y": 90
+            },
+            "rawVerdict": "hit",
+            "rawErrorPx": 37
+          },
+          "userText": "point at the save button in the toolbar",
+          "assistantText": "that’s the save button right there. after you click it, you could try export too, just to make sure you’ve got a shareable copy ready.",
+          "latency": {
+            "askToFirstToolCallMs": 1145,
+            "askToFirstAudioDeltaMs": 1824,
+            "askToDoneMs": 3169
+          },
+          "usage": {
+            "inputTokens": 5142,
+            "outputTokens": 235,
+            "totalTokens": 5377,
+            "inputTextTokens": 3204,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1938,
+            "cachedTokens": 4559,
+            "outputTextTokens": 82,
+            "outputAudioTokens": 153,
+            "responses": 2
+          }
+        },
+        {
+          "name": "open",
+          "desc": "the open button in the toolbar",
+          "rect": {
+            "x": 211,
+            "y": 66,
+            "width": 173,
+            "height": 73
+          },
+          "pointed": {
+            "x": 298,
+            "y": 102.66667175292969,
+            "screenIndex": 0,
+            "label": "the open button",
+            "snap": {
+              "rawPoint": {
+                "x": 185,
+                "y": 90
+              },
+              "snappedPoint": {
+                "x": 298,
+                "y": 103
+              },
+              "snapScore": 1,
+              "snapName": "📂 Open",
+              "snapMs": 49,
+              "candidates": 10
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 1,
+          "snap": {
+            "snapped": true,
+            "name": "📂 Open",
+            "score": 1,
+            "ms": 49,
+            "candidates": 10,
+            "rawPoint": {
+              "x": 185,
+              "y": 90
+            },
+            "rawVerdict": "near",
+            "rawErrorPx": 113
+          },
+          "userText": "point at the open button in the toolbar",
+          "assistantText": "that’s the open button. after you click it, you could try opening a recent file to compare versions, and then save a clean copy.",
+          "latency": {
+            "askToFirstToolCallMs": 1214,
+            "askToFirstAudioDeltaMs": 2299,
+            "askToDoneMs": 3639
+          },
+          "usage": {
+            "inputTokens": 6316,
+            "outputTokens": 231,
+            "totalTokens": 6547,
+            "inputTextTokens": 3732,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 2584,
+            "cachedTokens": 5717,
+            "outputTextTokens": 79,
+            "outputAudioTokens": 152,
+            "responses": 2
+          }
+        },
+        {
+          "name": "export",
+          "desc": "the export button in the toolbar",
+          "rect": {
+            "x": 408,
+            "y": 65,
+            "width": 161,
+            "height": 75
+          },
+          "pointed": {
+            "x": 488.66668701171875,
+            "y": 102.66667175292969,
+            "screenIndex": 0,
+            "label": "the export button",
+            "snap": {
+              "rawPoint": {
+                "x": 326,
+                "y": 90
+              },
+              "snappedPoint": {
+                "x": 489,
+                "y": 103
+              },
+              "snapScore": 1,
+              "snapName": "⇮ Export",
+              "snapMs": 51,
+              "candidates": 9
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 0,
+          "snap": {
+            "snapped": true,
+            "name": "⇮ Export",
+            "score": 1,
+            "ms": 51,
+            "candidates": 9,
+            "rawPoint": {
+              "x": 326,
+              "y": 90
+            },
+            "rawVerdict": "miss",
+            "rawErrorPx": 163
+          },
+          "userText": "point at the export button in the toolbar",
+          "assistantText": "that’s the export button. after you click it, you could try saving a version with a clear name like “final” or a date, so it’s easy to spot later.",
+          "latency": {
+            "askToFirstToolCallMs": 1270,
+            "askToFirstAudioDeltaMs": 2036,
+            "askToDoneMs": 3493
+          },
+          "usage": {
+            "inputTokens": 7484,
+            "outputTokens": 244,
+            "totalTokens": 7728,
+            "inputTextTokens": 4254,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 3230,
+            "cachedTokens": 6875,
+            "outputTextTokens": 87,
+            "outputAudioTokens": 157,
+            "responses": 2
+          }
+        },
+        {
+          "name": "settings",
+          "desc": "the settings button in the toolbar",
+          "rect": {
+            "x": 593,
+            "y": 66,
+            "width": 185,
+            "height": 73
+          },
+          "pointed": {
+            "x": 686,
+            "y": 102.66667175292969,
+            "screenIndex": 0,
+            "label": "the settings button",
+            "snap": {
+              "rawPoint": {
+                "x": 503,
+                "y": 90
+              },
+              "snappedPoint": {
+                "x": 686,
+                "y": 103
+              },
+              "snapScore": 1,
+              "snapName": "⚙ Settings",
+              "snapMs": 42,
+              "candidates": 6
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 1,
+          "snap": {
+            "snapped": true,
+            "name": "⚙ Settings",
+            "score": 1,
+            "ms": 42,
+            "candidates": 6,
+            "rawPoint": {
+              "x": 503,
+              "y": 90
+            },
+            "rawVerdict": "miss",
+            "rawErrorPx": 183
+          },
+          "userText": "point at the settings button in the toolbar",
+          "assistantText": "that’s the settings button. once you open it, you could tweak defaults like export format or autosave, so things are smoother next time.",
+          "latency": {
+            "askToFirstToolCallMs": 1363,
+            "askToFirstAudioDeltaMs": 2213,
+            "askToDoneMs": 3638
+          },
+          "usage": {
+            "inputTokens": 8668,
+            "outputTokens": 229,
+            "totalTokens": 8897,
+            "inputTextTokens": 4792,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 3876,
+            "cachedTokens": 8097,
+            "outputTextTokens": 79,
+            "outputAudioTokens": 150,
+            "responses": 2
+          }
+        },
+        {
+          "name": "share",
+          "desc": "the share button in the toolbar",
+          "rect": {
+            "x": 802,
+            "y": 66,
+            "width": 174,
+            "height": 73
+          },
+          "pointed": {
+            "x": 889.3333740234375,
+            "y": 102.66667175292969,
+            "screenIndex": 0,
+            "label": "the share button",
+            "snap": {
+              "rawPoint": {
+                "x": 660,
+                "y": 90
+              },
+              "snappedPoint": {
+                "x": 889,
+                "y": 103
+              },
+              "snapScore": 1,
+              "snapName": "🔗 Share",
+              "snapMs": 39,
+              "candidates": 5
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 0,
+          "snap": {
+            "snapped": true,
+            "name": "🔗 Share",
+            "score": 1,
+            "ms": 39,
+            "candidates": 5,
+            "rawPoint": {
+              "x": 660,
+              "y": 90
+            },
+            "rawVerdict": "miss",
+            "rawErrorPx": 229
+          },
+          "userText": "point at the share button in the toolbar",
+          "assistantText": "that’s the share button. after you click it, you could try sending a quick test link to yourself or a teammate to make sure the permissions look right.",
+          "latency": {
+            "askToFirstToolCallMs": 1382,
+            "askToFirstAudioDeltaMs": 2282,
+            "askToDoneMs": 3835
+          },
+          "usage": {
+            "inputTokens": 9836,
+            "outputTokens": 242,
+            "totalTokens": 10078,
+            "inputTextTokens": 5314,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 4522,
+            "cachedTokens": 9255,
+            "outputTextTokens": 82,
+            "outputAudioTokens": 160,
+            "responses": 2
+          }
+        }
+      ]
+    },
+    {
+      "scene": "form",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "email",
+          "desc": "the email address field",
+          "rect": {
+            "x": 1025,
+            "y": 622,
+            "width": 511,
+            "height": 64
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 654,
+            "screenIndex": 0,
+            "label": "the email address field",
+            "snap": {
+              "rawPoint": {
+                "x": 1280,
+                "y": 619
+              },
+              "snappedPoint": {
+                "x": 1280,
+                "y": 654
+              },
+              "snapScore": 1,
+              "snapName": "Email address",
+              "snapMs": 75,
+              "candidates": 8
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 1,
+          "snap": {
+            "snapped": true,
+            "name": "Email address",
+            "score": 1,
+            "ms": 75,
+            "candidates": 8,
+            "rawPoint": {
+              "x": 1280,
+              "y": 619
+            },
+            "rawVerdict": "near",
+            "rawErrorPx": 35
+          },
+          "userText": "point at the email address field",
+          "assistantText": "that’s the email field. after you fill it in, you could tab down to the password field and paste a strong one from your password manager.",
+          "latency": {
+            "askToFirstToolCallMs": 1462,
+            "askToFirstAudioDeltaMs": 2685,
+            "askToDoneMs": 3940
+          },
+          "usage": {
+            "inputTokens": 11009,
+            "outputTokens": 221,
+            "totalTokens": 11230,
+            "inputTextTokens": 5841,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 5168,
+            "cachedTokens": 10477,
+            "outputTextTokens": 82,
+            "outputAudioTokens": 139,
+            "responses": 2
+          }
+        },
+        {
+          "name": "password",
+          "desc": "the password field",
+          "rect": {
+            "x": 1025,
+            "y": 741,
+            "width": 511,
+            "height": 64
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 773.3333740234375,
+            "screenIndex": 0,
+            "label": "the password field",
+            "snap": {
+              "rawPoint": {
+                "x": 1280,
+                "y": 691
+              },
+              "snappedPoint": {
+                "x": 1280,
+                "y": 773
+              },
+              "snapScore": 1,
+              "snapName": "Password",
+              "snapMs": 36,
+              "candidates": 8
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 1,
+          "snap": {
+            "snapped": true,
+            "name": "Password",
+            "score": 1,
+            "ms": 36,
+            "candidates": 8,
+            "rawPoint": {
+              "x": 1280,
+              "y": 691
+            },
+            "rawVerdict": "miss",
+            "rawErrorPx": 82
+          },
+          "userText": "point at the password field",
+          "assistantText": "that’s the password field. after you set a good one, you could also tick the newsletter box if you want updates, then hit create account.",
+          "latency": {
+            "askToFirstToolCallMs": 1444,
+            "askToFirstAudioDeltaMs": 2407,
+            "askToDoneMs": 3731
+          },
+          "usage": {
+            "inputTokens": 12177,
+            "outputTokens": 233,
+            "totalTokens": 12410,
+            "inputTextTokens": 6363,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 5814,
+            "cachedTokens": 11635,
+            "outputTextTokens": 81,
+            "outputAudioTokens": 152,
+            "responses": 2
+          }
+        },
+        {
+          "name": "subscribe",
+          "desc": "the subscribe to newsletter checkbox",
+          "rect": {
+            "x": 1025,
+            "y": 835,
+            "width": 26,
+            "height": 26
+          },
+          "pointed": {
+            "x": 1038,
+            "y": 848,
+            "screenIndex": 0,
+            "label": "the newsletter checkbox",
+            "snap": {
+              "rawPoint": {
+                "x": 1074,
+                "y": 741
+              },
+              "snappedPoint": {
+                "x": 1038,
+                "y": 848
+              },
+              "snapScore": 0.7,
+              "snapName": "Send me the monthly product newsletter",
+              "snapMs": 45,
+              "candidates": 8
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 0,
+          "snap": {
+            "snapped": true,
+            "name": "Send me the monthly product newsletter",
+            "score": 0.7,
+            "ms": 45,
+            "candidates": 8,
+            "rawPoint": {
+              "x": 1074,
+              "y": 741
+            },
+            "rawVerdict": "miss",
+            "rawErrorPx": 113
+          },
+          "userText": "point at the subscribe to newsletter checkbox",
+          "assistantText": "that’s the newsletter checkbox. if you check it, you could also double-check later in settings so you can turn it off if it gets too chatty.",
+          "latency": {
+            "askToFirstToolCallMs": 1499,
+            "askToFirstAudioDeltaMs": 2592,
+            "askToDoneMs": 3763
+          },
+          "usage": {
+            "inputTokens": 13346,
+            "outputTokens": 214,
+            "totalTokens": 13560,
+            "inputTextTokens": 6886,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 6460,
+            "cachedTokens": 12793,
+            "outputTextTokens": 80,
+            "outputAudioTokens": 134,
+            "responses": 2
+          }
+        },
+        {
+          "name": "submit",
+          "desc": "the create account button",
+          "rect": {
+            "x": 1025,
+            "y": 899,
+            "width": 511,
+            "height": 67
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 932.6666870117188,
+            "screenIndex": 0,
+            "label": "the create account button",
+            "snap": {
+              "rawPoint": {
+                "x": 1280,
+                "y": 819
+              },
+              "snappedPoint": {
+                "x": 1280,
+                "y": 933
+              },
+              "snapScore": 1,
+              "snapName": "Create account",
+              "snapMs": 42,
+              "candidates": 6
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 1,
+          "snap": {
+            "snapped": true,
+            "name": "Create account",
+            "score": 1,
+            "ms": 42,
+            "candidates": 6,
+            "rawPoint": {
+              "x": 1280,
+              "y": 819
+            },
+            "rawVerdict": "miss",
+            "rawErrorPx": 114
+          },
+          "userText": "point at the create account button",
+          "assistantText": "that’s the create account button. after you click it, you could watch for any validation messages, like password strength or missing fields, and then fix those before trying again.",
+          "latency": {
+            "askToFirstToolCallMs": 1591,
+            "askToFirstAudioDeltaMs": 2701,
+            "askToDoneMs": 4504
+          },
+          "usage": {
+            "inputTokens": 14519,
+            "outputTokens": 293,
+            "totalTokens": 14812,
+            "inputTextTokens": 7413,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 7106,
+            "cachedTokens": 13951,
+            "outputTextTokens": 89,
+            "outputAudioTokens": 204,
+            "responses": 2
+          }
+        }
+      ]
+    },
+    {
+      "scene": "shop",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "search",
+          "desc": "the search box",
+          "rect": {
+            "x": 188,
+            "y": 25,
+            "width": 760,
+            "height": 55
+          },
+          "pointed": {
+            "x": 568,
+            "y": 52,
+            "screenIndex": 0,
+            "label": "the search box",
+            "snap": {
+              "rawPoint": {
+                "x": 1048,
+                "y": 69
+              },
+              "snappedPoint": {
+                "x": 568,
+                "y": 52
+              },
+              "snapScore": 0.7,
+              "snapName": "Search headphones, speakers, accessories…",
+              "snapMs": 85,
+              "candidates": 11
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 1,
+          "snap": {
+            "snapped": true,
+            "name": "Search headphones, speakers, accessories…",
+            "score": 0.7,
+            "ms": 85,
+            "candidates": 11,
+            "rawPoint": {
+              "x": 1048,
+              "y": 69
+            },
+            "rawVerdict": "miss",
+            "rawErrorPx": 480
+          },
+          "userText": "point at the search box",
+          "assistantText": "that’s the search box. after you type something in, you could try a more specific phrase, like a model name or feature, to narrow results faster.",
+          "latency": {
+            "askToFirstToolCallMs": 1644,
+            "askToFirstAudioDeltaMs": 2791,
+            "askToDoneMs": 4293
+          },
+          "usage": {
+            "inputTokens": 15696,
+            "outputTokens": 239,
+            "totalTokens": 15935,
+            "inputTextTokens": 7944,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 7752,
+            "cachedTokens": 15109,
+            "outputTextTokens": 82,
+            "outputAudioTokens": 157,
+            "responses": 2
+          }
+        },
+        {
+          "name": "cart",
+          "desc": "the shopping cart icon",
+          "rect": {
+            "x": 2427,
+            "y": 20,
+            "width": 85,
+            "height": 64
+          },
+          "pointed": {
+            "x": 2485,
+            "y": 68.75,
+            "screenIndex": 0,
+            "label": "the shopping cart icon",
+            "snap": {
+              "rawPoint": {
+                "x": 2485,
+                "y": 69
+              },
+              "snappedPoint": null,
+              "snapScore": null,
+              "snapName": null,
+              "snapMs": 81,
+              "candidates": 1
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 23,
+          "snap": {
+            "snapped": false,
+            "name": null,
+            "score": null,
+            "ms": 81,
+            "candidates": 1,
+            "rawPoint": {
+              "x": 2485,
+              "y": 69
+            },
+            "rawVerdict": "hit",
+            "rawErrorPx": 23
+          },
+          "userText": "point at the shopping cart icon",
+          "assistantText": "that’s the cart icon. after you open it, you could check the quantities and shipping options before you commit, just to avoid any surprises.",
+          "latency": {
+            "askToFirstToolCallMs": 1735,
+            "askToFirstAudioDeltaMs": 2952,
+            "askToDoneMs": 4118
+          },
+          "usage": {
+            "inputTokens": 16869,
+            "outputTokens": 216,
+            "totalTokens": 17085,
+            "inputTextTokens": 8471,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 8398,
+            "cachedTokens": 16267,
+            "outputTextTokens": 79,
+            "outputAudioTokens": 137,
+            "responses": 2
+          }
+        },
+        {
+          "name": "reviews",
+          "desc": "the customer reviews link",
+          "rect": {
+            "x": 856,
+            "y": 235,
+            "width": 216,
+            "height": 28
+          },
+          "pointed": {
+            "x": 964.6666870117188,
+            "y": 249.33334350585938,
+            "screenIndex": 0,
+            "label": "the customer reviews link",
+            "snap": {
+              "rawPoint": {
+                "x": 1119,
+                "y": 290
+              },
+              "snappedPoint": {
+                "x": 965,
+                "y": 249
+              },
+              "snapScore": 0.8,
+              "snapName": "2,418 customer reviews",
+              "snapMs": 53,
+              "candidates": 7
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 1,
+          "snap": {
+            "snapped": true,
+            "name": "2,418 customer reviews",
+            "score": 0.8,
+            "ms": 53,
+            "candidates": 7,
+            "rawPoint": {
+              "x": 1119,
+              "y": 290
+            },
+            "rawVerdict": "miss",
+            "rawErrorPx": 160
+          },
+          "userText": "point at the customer reviews link",
+          "assistantText": "that’s the customer reviews link. after you open it, you could sort by most recent or filter for low-star reviews to spot any patterns before buying.",
+          "latency": {
+            "askToFirstToolCallMs": 1671,
+            "askToFirstAudioDeltaMs": 2952,
+            "askToDoneMs": 4439
+          },
+          "usage": {
+            "inputTokens": 18038,
+            "outputTokens": 247,
+            "totalTokens": 18285,
+            "inputTextTokens": 8994,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 9044,
+            "cachedTokens": 17425,
+            "outputTextTokens": 82,
+            "outputAudioTokens": 165,
+            "responses": 2
+          }
+        },
+        {
+          "name": "price",
+          "desc": "the price of the headphones",
+          "rect": {
+            "x": 720,
+            "y": 289,
+            "width": 164,
+            "height": 59
+          },
+          "pointed": {
+            "x": 968.75,
+            "y": 337.5,
+            "screenIndex": 0,
+            "label": "the price",
+            "snap": {
+              "rawPoint": {
+                "x": 969,
+                "y": 338
+              },
+              "snappedPoint": null,
+              "snapScore": null,
+              "snapName": null,
+              "snapMs": 90,
+              "candidates": 13
+            }
+          },
+          "verdict": "miss",
+          "errorPx": 168,
+          "rectDistPx": 85,
+          "snap": {
+            "snapped": false,
+            "name": null,
+            "score": null,
+            "ms": 90,
+            "candidates": 13,
+            "rawPoint": {
+              "x": 969,
+              "y": 338
+            },
+            "rawVerdict": "miss",
+            "rawErrorPx": 168
+          },
+          "userText": "point at the price of the headphones",
+          "assistantText": "that’s the price right there. if you’re comparing, you could also peek at the original price and features, then decide if the discount feels worth it.",
+          "latency": {
+            "askToFirstToolCallMs": 1789,
+            "askToFirstAudioDeltaMs": 3069,
+            "askToDoneMs": 4429
+          },
+          "usage": {
+            "inputTokens": 19208,
+            "outputTokens": 232,
+            "totalTokens": 19440,
+            "inputTextTokens": 9518,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 9690,
+            "cachedTokens": 18647,
+            "outputTextTokens": 81,
+            "outputAudioTokens": 151,
+            "responses": 2
+          }
+        },
+        {
+          "name": "add-to-cart",
+          "desc": "the add to cart button",
+          "rect": {
+            "x": 720,
+            "y": 532,
+            "width": 220,
+            "height": 73
+          },
+          "pointed": {
+            "x": 830.6666870117188,
+            "y": 568.6666870117188,
+            "screenIndex": 0,
+            "label": "the add to cart button",
+            "snap": {
+              "rawPoint": {
+                "x": 969,
+                "y": 433
+              },
+              "snappedPoint": {
+                "x": 831,
+                "y": 569
+              },
+              "snapScore": 1,
+              "snapName": "Add to cart",
+              "snapMs": 46,
+              "candidates": 10
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 1,
+          "snap": {
+            "snapped": true,
+            "name": "Add to cart",
+            "score": 1,
+            "ms": 46,
+            "candidates": 10,
+            "rawPoint": {
+              "x": 969,
+              "y": 433
+            },
+            "rawVerdict": "miss",
+            "rawErrorPx": 194
+          },
+          "userText": "point at the add to cart button",
+          "assistantText": "that’s the add to cart button. after you click it, you could pop into the cart and make sure the quantity and shipping look right before you check out.",
+          "latency": {
+            "askToFirstToolCallMs": 1839,
+            "askToFirstAudioDeltaMs": 3228,
+            "askToDoneMs": 4608
+          },
+          "usage": {
+            "inputTokens": 20382,
+            "outputTokens": 233,
+            "totalTokens": 20615,
+            "inputTextTokens": 10046,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 10336,
+            "cachedTokens": 19805,
+            "outputTextTokens": 85,
+            "outputAudioTokens": 148,
+            "responses": 2
+          }
+        }
+      ]
+    },
+    {
+      "scene": "tricky",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "small-icon",
+          "desc": "the small bell notification icon",
+          "rect": {
+            "x": 2504,
+            "y": 22,
+            "width": 24,
+            "height": 24
+          },
+          "pointed": {
+            "x": 2512.5,
+            "y": 52.5,
+            "screenIndex": 0,
+            "label": "the bell notification icon",
+            "snap": {
+              "rawPoint": {
+                "x": 2513,
+                "y": 53
+              },
+              "snappedPoint": null,
+              "snapScore": null,
+              "snapName": null,
+              "snapMs": 69,
+              "candidates": 1
+            }
+          },
+          "verdict": "near",
+          "errorPx": 19,
+          "rectDistPx": 7,
+          "snap": {
+            "snapped": false,
+            "name": null,
+            "score": null,
+            "ms": 69,
+            "candidates": 1,
+            "rawPoint": {
+              "x": 2513,
+              "y": 53
+            },
+            "rawVerdict": "near",
+            "rawErrorPx": 19
+          },
+          "userText": "point at the small bell notification icon",
+          "assistantText": "that’s the bell notification icon. after you open it, you could clear old alerts so new ones stand out, or tweak notification settings if it gets noisy.",
+          "latency": {
+            "askToFirstToolCallMs": 1907,
+            "askToFirstAudioDeltaMs": 3663,
+            "askToDoneMs": 5220
+          },
+          "usage": {
+            "inputTokens": 21563,
+            "outputTokens": 263,
+            "totalTokens": 21826,
+            "inputTextTokens": 10581,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 10982,
+            "cachedTokens": 20963,
+            "outputTextTokens": 84,
+            "outputAudioTokens": 179,
+            "responses": 2
+          }
+        },
+        {
+          "name": "save",
+          "desc": "the save button (not save as)",
+          "rect": {
+            "x": 973,
+            "y": 291,
+            "width": 112,
+            "height": 59
+          },
+          "pointed": {
+            "x": 1029.3333740234375,
+            "y": 320.66668701171875,
+            "screenIndex": 0,
+            "label": "the save button",
+            "snap": {
+              "rawPoint": {
+                "x": 938,
+                "y": 280
+              },
+              "snappedPoint": {
+                "x": 1029,
+                "y": 321
+              },
+              "snapScore": 1,
+              "snapName": "Save",
+              "snapMs": 36,
+              "candidates": 3
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 0,
+          "snap": {
+            "snapped": true,
+            "name": "Save",
+            "score": 1,
+            "ms": 36,
+            "candidates": 3,
+            "rawPoint": {
+              "x": 938,
+              "y": 280
+            },
+            "rawVerdict": "near",
+            "rawErrorPx": 100
+          },
+          "userText": "point at the save button (not save as)",
+          "assistantText": "that’s the save button, not save as. after you use it, you could try save as next time to keep a separate version and avoid overwriting something important.",
+          "latency": {
+            "askToFirstToolCallMs": 1907,
+            "askToFirstAudioDeltaMs": 3354,
+            "askToDoneMs": 5080
+          },
+          "usage": {
+            "inputTokens": 22744,
+            "outputTokens": 263,
+            "totalTokens": 23007,
+            "inputTextTokens": 11116,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 11628,
+            "cachedTokens": 22185,
+            "outputTextTokens": 84,
+            "outputAudioTokens": 179,
+            "responses": 2
+          }
+        },
+        {
+          "name": "save-as",
+          "desc": "the save as button",
+          "rect": {
+            "x": 1105,
+            "y": 291,
+            "width": 140,
+            "height": 59
+          },
+          "pointed": {
+            "x": 1175.3333740234375,
+            "y": 320.66668701171875,
+            "screenIndex": 0,
+            "label": "the save as button",
+            "snap": {
+              "rawPoint": {
+                "x": 1045,
+                "y": 280
+              },
+              "snappedPoint": {
+                "x": 1175,
+                "y": 321
+              },
+              "snapScore": 1,
+              "snapName": "Save As",
+              "snapMs": 34,
+              "candidates": 4
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 0,
+          "snap": {
+            "snapped": true,
+            "name": "Save As",
+            "score": 1,
+            "ms": 34,
+            "candidates": 4,
+            "rawPoint": {
+              "x": 1045,
+              "y": 280
+            },
+            "rawVerdict": "miss",
+            "rawErrorPx": 136
+          },
+          "userText": "point at the save as button",
+          "assistantText": "that’s the save as button. after you click it, you could name the copy with a version or date so it’s easy to track over time.",
+          "latency": {
+            "askToFirstToolCallMs": 2058,
+            "askToFirstAudioDeltaMs": 3591,
+            "askToDoneMs": 4858
+          },
+          "usage": {
+            "inputTokens": 23920,
+            "outputTokens": 222,
+            "totalTokens": 24142,
+            "inputTextTokens": 11646,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 12274,
+            "cachedTokens": 23343,
+            "outputTextTokens": 82,
+            "outputAudioTokens": 140,
+            "responses": 2
+          }
+        },
+        {
+          "name": "edge-button",
+          "desc": "the help button in the bottom right corner of the screen",
+          "rect": {
+            "x": 2466,
+            "y": 1388,
+            "width": 86,
+            "height": 44
+          },
+          "pointed": {
+            "x": 2508.666748046875,
+            "y": 1410,
+            "screenIndex": 0,
+            "label": "the help button",
+            "snap": {
+              "rawPoint": {
+                "x": 2490,
+                "y": 1413
+              },
+              "snappedPoint": {
+                "x": 2509,
+                "y": 1410
+              },
+              "snapScore": 1,
+              "snapName": "? Help",
+              "snapMs": 35,
+              "candidates": 1
+            }
+          },
+          "verdict": "hit",
+          "errorPx": 0,
+          "snap": {
+            "snapped": true,
+            "name": "? Help",
+            "score": 1,
+            "ms": 35,
+            "candidates": 1,
+            "rawPoint": {
+              "x": 2490,
+              "y": 1413
+            },
+            "rawVerdict": "hit",
+            "rawErrorPx": 19
+          },
+          "userText": "point at the help button in the bottom right corner of the screen",
+          "assistantText": "that’s the help button in the bottom right. after you open it, you could search for “export” or “save” to find a quick guide, or peek at keyboard shortcuts to speed things up next time.",
+          "latency": {
+            "askToFirstToolCallMs": 1977,
+            "askToFirstAudioDeltaMs": 3531,
+            "askToDoneMs": 5420
+          },
+          "usage": {
+            "inputTokens": 25106,
+            "outputTokens": 306,
+            "totalTokens": 25412,
+            "inputTextTokens": 12186,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 12920,
+            "cachedTokens": 24501,
+            "outputTextTokens": 98,
+            "outputAudioTokens": 208,
+            "responses": 2
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "hit": 18,
+    "near": 1,
+    "miss": 1,
+    "error": 0
+  },
+  "snapAttribution": {
+    "targetsWithSnapInfo": 20,
+    "snapped": 16,
+    "rawCounts": {
+      "hit": 5,
+      "near": 4,
+      "miss": 11
+    },
+    "savedBySnap": 13,
+    "brokenBySnap": 0,
+    "medianSnapMs": 47.5
+  },
+  "finishedAt": "2026-07-12T20:25:38.655Z"
+}

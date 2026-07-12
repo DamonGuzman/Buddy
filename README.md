@@ -4,7 +4,9 @@ Clicky is a voice assistant that can *see your screen and point at things*. It l
 system tray. **Hold `Ctrl` + left `Alt` and talk** — while you hold, Clicky screenshots your
 monitors and streams your voice to a realtime speech-to-speech model (OpenAI Realtime API).
 Release, and it answers out loud while a friendly blue buddy flies across a transparent overlay
-to physically point at the buttons, fields, and menus it's describing. No chat window to manage:
+to physically point at the buttons, fields, and menus it's describing. Pointing is grounded in
+the Windows accessibility tree (UIA): the buddy snaps onto the real on-screen element matching
+what Clicky said, not just the model's raw pixel guess. No chat window to manage:
 ask "where do I turn on dark mode?" and Clicky tells you — and points. There's also a small
 control panel (tray icon) with a live transcript and a typed-question fallback for when you
 can't talk.

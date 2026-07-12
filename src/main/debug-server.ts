@@ -77,10 +77,16 @@ export interface AudioEvalDebugDeps {
   getTimings: () => { last: TurnTimings | null; history: TurnTimings[] };
 }
 
+/** M9: element-snap grounding hooks (drive the snapper without the model). */
+export interface GroundingDebugDeps {
+  query: (q: { x: number; y: number; label: string; radiusPx?: number }) => Promise<unknown>;
+}
+
 export interface DebugServerDeps {
   getState: () => DebugState;
   pipeline?: PipelineDebugDeps;
   audioEval?: AudioEvalDebugDeps;
+  grounding?: GroundingDebugDeps;
 }
 
 type RouteHandler = (
@@ -609,3 +615,51 @@ const AUDIO_EVAL_ROUTES: Record<string, RouteHandler> = {
 
 Object.assign(ROUTES, AUDIO_EVAL_ROUTES);
 // --- end M8.5 audio-experience eval routes ---
+
+// ===========================================================================
+// --- M9 grounding debug routes ---
+//
+//   POST /grounding/query   {x, y, label, radiusPx?}  (x/y in GLOBAL DIP)
+//     -> drives the UIA snapper daemon directly against whatever is on
+//        screen (no model, no cost): matched element, score, elapsed, and
+//        the full scored candidate list for diagnosis. Token-gated like
+//        every other route.
+// ===========================================================================
+
+const GROUNDING_ROUTES: Record<string, RouteHandler> = {
+  'POST /grounding/query': async (deps, req, res) => {
+    if (!deps.grounding) {
+      sendJson(res, 503, { error: 'grounding hooks not wired' });
+      return;
+    }
+    const body = asRecord(await readJsonBody(req));
+    const x = body?.['x'];
+    const y = body?.['y'];
+    const label = body?.['label'];
+    const radiusPx = body?.['radiusPx'];
+    if (
+      typeof x !== 'number' ||
+      !Number.isFinite(x) ||
+      typeof y !== 'number' ||
+      !Number.isFinite(y) ||
+      typeof label !== 'string' ||
+      label.length === 0 ||
+      (radiusPx !== undefined && typeof radiusPx !== 'number')
+    ) {
+      sendJson(res, 400, {
+        error: 'expected {x: number, y: number, label: string, radiusPx?: number} (global DIP)',
+      });
+      return;
+    }
+    const result = await deps.grounding.query({
+      x,
+      y,
+      label,
+      ...(typeof radiusPx === 'number' ? { radiusPx } : {}),
+    });
+    sendJson(res, 200, result);
+  },
+};
+
+Object.assign(ROUTES, GROUNDING_ROUTES);
+// --- end M9 grounding debug routes ---

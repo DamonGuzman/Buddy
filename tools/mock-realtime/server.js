@@ -101,6 +101,24 @@ function handleConnection(ws, server, options) {
         break;
 
       case 'input_audio_buffer.commit': {
+        // M9: real-API strictness — the live endpoint rejects commits under
+        // 100ms of audio (4800 bytes of pcm16@24kHz). Mirror it so the quick
+        // barge-in tap regression (docs/EVAL.md §8.3 follow-up) stays covered.
+        if (appendedAudioBytes < 4800) {
+          log(`[mock-realtime] rejected commit: only ${appendedAudioBytes} bytes buffered`);
+          send({
+            type: 'error',
+            error: {
+              type: 'invalid_request_error',
+              code: 'input_audio_buffer_commit_empty',
+              message:
+                'Error committing input audio buffer: buffer too small. ' +
+                `Expected at least 100ms of audio, but buffer only has ${(appendedAudioBytes / 48).toFixed(2)}ms of audio.`,
+            },
+          });
+          appendedAudioBytes = 0;
+          break;
+        }
         turn.committedAudio = true;
         const itemId = nextId('item');
         send({ type: 'input_audio_buffer.committed', item_id: itemId });

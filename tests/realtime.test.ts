@@ -313,6 +313,33 @@ describe('RealtimeSession against the mock server', () => {
     expect(requested).toHaveLength(2);
   });
 
+  it('M9: a rejected tiny commit (<100ms audio) synthesizes a failed response-done and recovers', async () => {
+    const session = makeSession();
+    const errors = collect<Error>(session, 'error');
+    const dones = collect<{ status: string }>(session, 'response-done');
+
+    // 2400 bytes of pcm16@24kHz = 50ms — under the server's 100ms minimum.
+    session.appendAudio(new ArrayBuffer(2400));
+    await session.commitAudioAndRespond([], '');
+
+    // Without the fix: the error event left responseActive stuck true and no
+    // response-done ever surfaced for the turn (the app-level ledger wedged).
+    await vi.waitFor(() => expect(dones.some((d) => d.status === 'failed')).toBe(true));
+    expect(errors.some((e) => /buffer too small/i.test(e.message))).toBe(true);
+
+    // The mock (like the real API) still runs the audio-less response.create
+    // to completion — let it drain so the next turn doesn't collide.
+    await vi.waitFor(() => expect(dones.some((d) => d.status === 'completed')).toBe(true));
+
+    // Clean recovery: the next turn completes normally on the same session.
+    const before = dones.length;
+    await session.askText('hello again');
+    await vi.waitFor(() =>
+      expect(dones.slice(before).some((d) => d.status === 'completed')).toBe(true),
+    );
+    expect(session.status().state).toBe('ready');
+  });
+
   it('M3: malformed tool args reject internally and the continue is counted via response-requested', async () => {
     const session = makeSession();
     const errors = collect<Error>(session, 'error');

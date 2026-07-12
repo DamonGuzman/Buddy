@@ -771,10 +771,24 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
         break;
       }
 
-      case 'error':
+      case 'error': {
+        // M9 fix: a rejected audio commit ("buffer too small" / "buffer is
+        // empty") means the requested response will never stream — without
+        // this, responseActive stayed true and app-level accounting wedged
+        // (pendingResponses stuck > 0, next turn cancelled a non-existent
+        // response). Synthesize a failed response-done FIRST so the normal
+        // turn-failure recovery (failTurn -> error -> idle) runs.
+        const code = evt.error.code ?? '';
+        const commitRejected =
+          code === 'input_audio_buffer_commit_empty' ||
+          /buffer (is )?(too small|empty)/i.test(evt.error.message);
+        if (commitRejected) {
+          this.failActiveResponse(`audio commit rejected: ${evt.error.message}`);
+        }
         this.setStatus({ state: 'error', error: evt.error.message });
         this.emitError(new Error(evt.error.message));
         break;
+      }
 
       default:
         this.logUnknown((evt as { type: string }).type);

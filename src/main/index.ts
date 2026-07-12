@@ -163,6 +163,10 @@ async function main(): Promise<void> {
         history: conversation.turnTimingsHistory(),
       }),
     },
+    // M9: drive the element-snap grounding daemon directly (no model).
+    grounding: {
+      query: (q) => conversation.debugGroundingQuery(q),
+    },
   });
 
   // Tray app: stay alive with zero visible windows.

@@ -169,11 +169,25 @@ try {
   // -------------------------------------------------------------------------
   console.log('--- phase A: voice round-trip x5 (hold 3.5s) ---');
   for (let i = 1; i <= 5; i++) {
-    const prev = (await api.get('/timings')).last?.turnId ?? null;
+    let prev = (await api.get('/timings')).last?.turnId ?? null;
     await api.post('/hotkey/press');
     await sleep(3500);
     await api.post('/hotkey/release');
-    const t = await waitTurnDone(prev);
+    let t;
+    try {
+      t = await waitTurnDone(prev);
+    } catch {
+      // M9: a hold whose mic spun up too late carries <200ms of appended
+      // audio and is CANCELLED by design (no commit — the live API would
+      // reject it and used to wedge; docs/EVAL.md §8.3/§9.5). No turn record
+      // appears in that case, so retry the turn once.
+      console.log(`  turn ${i}: no turn (guarded cancel) — retrying once`);
+      prev = (await api.get('/timings')).last?.turnId ?? null;
+      await api.post('/hotkey/press');
+      await sleep(3500);
+      await api.post('/hotkey/release');
+      t = await waitTurnDone(prev);
+    }
     // Live speech can drain for tens of seconds after response.done.
     await waitPlaybackFinished(live ? 90_000 : 20_000);
     const { analysis } = await fetchAndVerifyOutput();

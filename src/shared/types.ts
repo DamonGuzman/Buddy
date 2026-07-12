@@ -130,6 +130,26 @@ export interface PointerPoint {
   label?: string;
 }
 
+/**
+ * M9 addition (orchestrator-approved): element-snap grounding attribution.
+ * Recorded on pointer commands so the eval can attribute hits to the raw
+ * model point vs the UIA-snapped element (docs/EVAL.md §9).
+ */
+export interface PointerSnapInfo {
+  /** The model's own point after §6 mapping, global DIP (pre-snap). */
+  rawPoint: { x: number; y: number };
+  /** Center of the matched UIA element, global DIP — null when no match. */
+  snappedPoint: { x: number; y: number } | null;
+  /** Label↔Name text-similarity score of the match (0..1), null when none. */
+  snapScore: number | null;
+  /** UIA Name of the matched element, null when none. */
+  snapName: string | null;
+  /** Wall time spent querying the snapper (incl. timeout fallbacks). */
+  snapMs: number;
+  /** Candidates the snapper enumerated (diagnosis). */
+  candidates?: number;
+}
+
 /** Command from main driving the buddy pointer on one overlay. */
 export type PointerCommand =
   | {
@@ -137,6 +157,8 @@ export type PointerCommand =
       /** Points in overlay-window-local DIP coordinates (already mapped by coords.ts). */
       points: PointerPoint[];
       screenIndex: number;
+      /** M9: grounding attribution (absent when snapping was skipped). */
+      snap?: PointerSnapInfo;
     }
   | { type: 'idle' }
   | { type: 'hide' };
@@ -252,6 +274,13 @@ export interface TurnTimings {
   tFirstAudioPlayed?: number;
   /** First tool call (point_at) of the response arrived. */
   tFirstToolCall?: number;
+  /**
+   * M9: the pointer command actually reached the overlays (after the async
+   * element-snap query). The eval must gate on this, not tFirstToolCall.
+   */
+  tPointerDispatched?: number;
+  /** M9: wall time the first snap query of the turn took (incl. fallback). */
+  snapMs?: number;
   /** Final response.done for the turn (after tool continuations). */
   tResponseDone?: number;
   /** Mic chunks appended during this turn's hold. */

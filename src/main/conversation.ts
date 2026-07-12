@@ -28,10 +28,15 @@
  *   in-place when the async ASR transcript arrives.
  */
 
-import { AUDIO_SAMPLE_RATE } from '../shared/constants';
+import { app, screen } from 'electron';
+import { AUDIO_SAMPLE_RATE, AUDIO_BYTES_PER_SAMPLE } from '../shared/constants';
 import { captureAllDisplays } from './capture';
 import type { CaptureResult } from './capture';
-import { mapModelPoint } from './coords';
+import { clampToDisplay, mapModelPoint } from './coords';
+import type { MappedPoint } from './coords';
+import { GroundingService } from './grounding/snapper';
+import { dipToPhysicalViaMeta, physicalToDipViaMeta } from './grounding/convert';
+import type { Pt } from './grounding/convert';
 import { getSessionInstructions, getToolDefinitions } from './persona';
 import { RealtimeSession } from './realtime/session';
 import type { ToolCall } from './realtime/session';
@@ -46,6 +51,7 @@ import type {
   PlaybackCommand,
   PlaybackStatsUpdate,
   PointerCommand,
+  PointerSnapInfo,
   SessionStatus,
   Settings,
   TranscriptEntry,
@@ -54,6 +60,16 @@ import type {
 
 /** Holds shorter than this are treated as accidental taps (no turn). */
 const MIN_HOLD_MS = 250;
+/**
+ * M9 fix: minimum APPENDED mic audio for a commit. The live API rejects
+ * commits under 100ms ("buffer too small") and the rejected turn used to
+ * wedge the session. A hold can pass the 250ms guard yet carry almost no
+ * audio (mic spin-up after a barge-in tap), so the commit itself is gated on
+ * what was actually appended. 200ms = 2x the server minimum.
+ */
+export const MIN_COMMIT_AUDIO_MS = 200;
+/** PCM16 mono bytes per millisecond (24kHz * 2 bytes / 1000). */
+const AUDIO_BYTES_PER_MS = (AUDIO_SAMPLE_RATE * AUDIO_BYTES_PER_SAMPLE) / 1000;
 /** Grace after response.done before dropping back to idle. */
 const IDLE_GRACE_MS = 300;
 /** Error state auto-recovers to idle after this long. */
@@ -98,9 +114,18 @@ export class Conversation {
   private holding = false;
   private holdStartedAt = 0;
   private chunksThisHold = 0;
+  /** M9: milliseconds of mic audio actually APPENDED to the session this hold. */
+  private holdAudioMs = 0;
   /** Mic chunks are appended to the session only while this is true. */
   private acceptingAudio = false;
   private pendingCaptures: Promise<CaptureResult[]> | null = null;
+
+  // M9: element-snap grounding (docs/EVAL.md §9).
+  private grounding: GroundingService | null = null;
+  /** CLICKY_NO_SNAP=1 disables snapping (eval A/B attribution). */
+  private readonly snapDisabled = process.env['CLICKY_NO_SNAP'] === '1';
+  /** Serializes pointer dispatches so multi-point turns stay ordered. */
+  private pointerChain: Promise<void> = Promise.resolve();
 
   /**
    * F1 fix (M1/m1): bumped whenever a new turn supersedes the current one
@@ -165,6 +190,20 @@ export class Conversation {
     this.sessionModel = snapshot.model;
     this.sessionVoice = snapshot.voice;
     this.session = this.buildSession();
+    // M9: front-load the snapper daemon's ~1s PowerShell/assembly load so
+    // the very first point_at of a session can still snap within the timebox.
+    if (!this.snapDisabled) this.getGrounding().warmUp();
+  }
+
+  /** M9: lazy grounding service (spawned once, killed in close()). */
+  private getGrounding(): GroundingService {
+    if (this.grounding === null) {
+      this.grounding = new GroundingService({
+        scriptDir: app.getPath('userData'),
+        excludePid: process.pid, // never scope into our own overlay windows
+      });
+    }
+    return this.grounding;
   }
 
   // ---------------------------------------------------------------------
@@ -312,6 +351,7 @@ export class Conversation {
     this.turnToken += 1; // F1 (M1): supersede any pending finishVoiceTurn/askText
     this.holdStartedAt = Date.now();
     this.chunksThisHold = 0;
+    this.holdAudioMs = 0; // M9
     this.acceptingAudio = this.canReachServer();
     this.epoch += 1;
     // F1 (M7): drop stale un-committed audio (a superseded hold's buffer,
@@ -390,7 +430,11 @@ export class Conversation {
       this.chunksThisHold += 1;
       if (this.activeTurn?.kind === 'voice') this.activeTurn.chunksIn += 1; // M8.5
     }
-    if (this.acceptingAudio) this.session.appendAudio(chunk);
+    if (this.acceptingAudio) {
+      this.session.appendAudio(chunk);
+      // M9: track what will actually be committed (see MIN_COMMIT_AUDIO_MS).
+      this.holdAudioMs += chunk.byteLength / AUDIO_BYTES_PER_MS;
+    }
   }
 
   /** Typed question from the panel ('panel:ask-text') — same pipeline as voice. */
@@ -492,6 +536,7 @@ export class Conversation {
     if (this.idleTimer !== null) clearTimeout(this.idleTimer);
     this.errorTimer = null;
     this.idleTimer = null;
+    this.grounding?.dispose(); // M9: kill the snapper daemon
     this.session.close();
   }
 
@@ -512,6 +557,23 @@ export class Conversation {
     this.turnCaptures = captures;
     // Stop appending: everything after this belongs to the next turn.
     this.acceptingAudio = false;
+    // M9 fix: the hold passed the 250ms guard but almost no audio was
+    // actually appended (mic spin-up after a barge-in tap delivers the first
+    // chunk late). The live API rejects commits under 100ms of audio
+    // ("buffer too small") and the turn used to error-wedge — treat it like
+    // a short hold instead: clear, no commit, back to idle. holdAudioMs == 0
+    // means audio was never accepted (no key / unreachable): fall through so
+    // the commit path surfaces the real error ("add your openai key").
+    if (this.holdAudioMs > 0 && this.holdAudioMs < MIN_COMMIT_AUDIO_MS) {
+      console.warn(
+        `[conversation] hold carried only ${Math.round(this.holdAudioMs)}ms of audio ` +
+          `(< ${MIN_COMMIT_AUDIO_MS}ms) — cancelling instead of committing`,
+      );
+      this.session.clearAudio();
+      this.discardActiveTurn();
+      this.setState('idle');
+      return;
+    }
     // F1 fix (m5): placeholder user bubble NOW, so the user's question can
     // never appear below the assistant's answer (async ASR). Filled in-place
     // by 'user-transcript'; falls back to "(voice message)" at turn end.
@@ -832,16 +894,94 @@ export class Conversation {
       { x: args.x, y: args.y, ...(args.label !== undefined ? { label: args.label } : {}) },
       capture.meta,
     );
+    // M9: tool output + continue go back IMMEDIATELY (the model's answer is
+    // not gated on grounding); the pointer itself is dispatched async, after
+    // the element-snap query (<= its timebox). The chain keeps multi-point
+    // turns in call order.
+    this.session.sendToolOutput(call.callId, { ok: true, pointed_at: args.label ?? '' });
+    // F1 fix (M4): the continue is deferred inside the session until the
+    // current response completes; accounting flows via 'response-requested'.
+    this.session.continueResponse();
+    this.pointerChain = this.pointerChain.then(() => this.dispatchPointer(args, capture, mapped));
+  }
+
+  /**
+   * M9 element-snap grounding: ground the model's (already §6-mapped) point
+   * to the real on-screen element matching its spoken label, then fly the
+   * buddy. On no-match / timeout / error the raw model point is used
+   * unchanged — snapping is never worse than today. The label chip always
+   * shows the MODEL's label, not the element name.
+   */
+  private async dispatchPointer(
+    args: PointAtArgs,
+    capture: CaptureResult,
+    mapped: MappedPoint & { adjusted: boolean },
+  ): Promise<void> {
+    const token = this.turnToken;
+    const turn = this.activeTurn;
+    const meta = capture.meta;
+    let local = mapped.local;
+    let snap: PointerSnapInfo | undefined;
+    if (!this.snapDisabled && args.label !== undefined && args.label.length > 0) {
+      const t0 = Date.now();
+      const rawPoint = { x: Math.round(mapped.global.x), y: Math.round(mapped.global.y) };
+      try {
+        const phys = this.dipToPhysical(mapped.global, meta);
+        const outcome = await this.getGrounding().snap({ x: phys.x, y: phys.y, label: args.label });
+        if (outcome.matched && outcome.point !== null) {
+          const dip = this.physicalToDip(outcome.point, meta);
+          local = clampToDisplay(
+            { x: dip.x - meta.displayBounds.x, y: dip.y - meta.displayBounds.y },
+            meta,
+          );
+          snap = {
+            rawPoint,
+            snappedPoint: {
+              x: Math.round(meta.displayBounds.x + local.x),
+              y: Math.round(meta.displayBounds.y + local.y),
+            },
+            snapScore: outcome.score,
+            snapName: outcome.name,
+            snapMs: Date.now() - t0,
+            candidates: outcome.candidates,
+          };
+        } else {
+          if (outcome.timedOut) {
+            console.warn('[grounding] snap timed out — using the raw model point');
+          }
+          snap = {
+            rawPoint,
+            snappedPoint: null,
+            snapScore: null,
+            snapName: null,
+            snapMs: Date.now() - t0,
+            candidates: outcome.candidates,
+          };
+        }
+      } catch (err) {
+        console.warn('[grounding] snap failed — using the raw model point:', err);
+        snap = {
+          rawPoint,
+          snappedPoint: null,
+          snapScore: null,
+          snapName: null,
+          snapMs: Date.now() - t0,
+        };
+      }
+    }
+    // A newer turn superseded this one while grounding ran: don't fly the buddy.
+    if (this.closed || token !== this.turnToken) return;
     const cmd: PointerCommand = {
       type: 'animate',
       points: [
         {
-          x: mapped.local.x,
-          y: mapped.local.y,
+          x: local.x,
+          y: local.y,
           ...(mapped.label !== undefined ? { label: mapped.label } : {}),
         },
       ],
-      screenIndex: capture.meta.screenIndex,
+      screenIndex: meta.screenIndex,
+      ...(snap !== undefined ? { snap } : {}),
     };
     this.overlays.routePointer(cmd);
     this.lastPointer = cmd;
@@ -849,10 +989,91 @@ export class Conversation {
     if (this.pointerHistory.length > POINTER_HISTORY_LIMIT) {
       this.pointerHistory = this.pointerHistory.slice(-POINTER_HISTORY_LIMIT);
     }
-    this.session.sendToolOutput(call.callId, { ok: true, pointed_at: args.label ?? '' });
-    // F1 fix (M4): the continue is deferred inside the session until the
-    // current response completes; accounting flows via 'response-requested'.
-    this.session.continueResponse();
+    if (turn !== null) {
+      if (turn.tPointerDispatched === undefined) turn.tPointerDispatched = Date.now();
+      if (snap !== undefined && turn.snapMs === undefined) turn.snapMs = snap.snapMs;
+    }
+  }
+
+  /**
+   * M9: global DIP -> global physical px. Electron's screen module knows the
+   * true physical layout (mixed-DPI multi-monitor); the meta-derived math is
+   * the fallback (exact on single/origin displays).
+   */
+  private dipToPhysical(p: Pt, meta: CaptureMeta): Pt {
+    try {
+      const converted = screen.dipToScreenPoint({ x: Math.round(p.x), y: Math.round(p.y) });
+      if (converted && Number.isFinite(converted.x) && Number.isFinite(converted.y)) {
+        return converted;
+      }
+    } catch {
+      /* non-Windows or API unavailable */
+    }
+    return dipToPhysicalViaMeta(p, meta);
+  }
+
+  /** M9: global physical px -> global DIP (see dipToPhysical). */
+  private physicalToDip(p: Pt, meta: CaptureMeta): Pt {
+    try {
+      const converted = screen.screenToDipPoint({ x: Math.round(p.x), y: Math.round(p.y) });
+      if (converted && Number.isFinite(converted.x) && Number.isFinite(converted.y)) {
+        return converted;
+      }
+    } catch {
+      /* non-Windows or API unavailable */
+    }
+    return physicalToDipViaMeta(p, meta);
+  }
+
+  /**
+   * M9 debug surface (POST /grounding/query): drive the snapper directly
+   * against whatever is on screen — no model, no cost. Coordinates in/out
+   * are GLOBAL DIP (converted here); the full scored candidate list is
+   * returned for diagnosis.
+   */
+  async debugGroundingQuery(q: {
+    x: number;
+    y: number;
+    label: string;
+    radiusPx?: number;
+  }): Promise<unknown> {
+    const display = screen.getDisplayNearestPoint({ x: Math.round(q.x), y: Math.round(q.y) });
+    const geom = { displayBounds: display.bounds, scaleFactor: display.scaleFactor };
+    const phys = (() => {
+      try {
+        const p = screen.dipToScreenPoint({ x: Math.round(q.x), y: Math.round(q.y) });
+        if (p && Number.isFinite(p.x)) return p;
+      } catch {
+        /* fall through */
+      }
+      return dipToPhysicalViaMeta({ x: q.x, y: q.y }, geom);
+    })();
+    const outcome = await this.getGrounding().snap(
+      { x: phys.x, y: phys.y, label: q.label, ...(q.radiusPx !== undefined ? { radiusPx: q.radiusPx } : {}) },
+      { debug: true, timeboxMs: 2_500 },
+    );
+    let snappedDip: Pt | null = null;
+    if (outcome.matched && outcome.point !== null) {
+      try {
+        snappedDip = screen.screenToDipPoint({
+          x: Math.round(outcome.point.x),
+          y: Math.round(outcome.point.y),
+        });
+      } catch {
+        snappedDip = physicalToDipViaMeta(outcome.point, geom);
+      }
+    }
+    return {
+      query: { ...q, physical: phys },
+      matched: outcome.matched,
+      snappedDip,
+      name: outcome.name,
+      score: outcome.score,
+      elapsedMs: outcome.elapsedMs,
+      daemonMs: outcome.daemonMs,
+      timedOut: outcome.timedOut,
+      candidates: outcome.debug ?? [],
+    };
   }
 
   // ---------------------------------------------------------------------

@@ -74,6 +74,8 @@ src/
     hotkey.ts        uiohook hold-to-talk state machine (down→capture+listen, up→commit)
     capture.ts       multi-display screenshot pipeline (capture, resize, label, filter own windows)
     coords.ts        screenshot px → display DIP coord mapping (pure functions, unit-tested)
+    grounding/       M9 element-snap grounding: snapper.ps1 (UIA daemon, embedded at build),
+                     snapper.ts (daemon lifecycle + timebox), scoring.ts (pure label matching)
     realtime/
       session.ts     WS session: connect, session.update, audio append/commit, image input,
                      response streaming, tool-call events, reconnect
@@ -104,6 +106,25 @@ tests/               vitest unit tests (coords, protocol framing, settings, hotk
   display-local DIP → (+ displayBounds origin) → global DIP → overlay-window-local coords.
 - All pure functions in `coords.ts` with unit tests covering: 100%/150%/200% DPI, mixed-DPI dual
   monitor, negative-origin (left-of-primary) monitors.
+
+## 6b. Element-snap grounding (M9)
+
+The live evals (docs/EVAL.md §7-§8) proved the model names the right element essentially every
+time but its raw coordinates drift scene-dependently. `point_at` is therefore GROUNDED before the
+buddy flies: `src/main/grounding/` keeps a persistent PowerShell daemon (`snapper.ps1`, embedded
+at build time, spawned lazily, restarted on crash, killed on quit) that resolves the top-level
+window under the model's point via Win32 `WindowFromPoint` (mouse hit-test semantics — skips
+Clicky's own click-through overlays; the daemon makes itself Per-Monitor-V2 DPI-aware so user32
+and UIA agree on physical px) and enumerates nearby named UIA elements (rect-pruned DFS,
+CacheRequest-batched, node/time budgets). Selection is pure TS (`scoring.ts`, unit-tested):
+normalize the spoken label and element Names, fuzzy token similarity with a small proximity
+tie-break, threshold 0.55. The mapped point (§6) is converted DIP→physical
+(`screen.dipToScreenPoint`), snapped to the matched element's center, converted back, and
+dispatched; on no-match / 600ms timebox / daemon trouble the raw model point is used unchanged —
+snapping is never worse than no snapping. The label chip keeps the MODEL's words. `CLICKY_NO_SNAP=1`
+disables it (eval A/B); `POST /grounding/query` drives the snapper directly (debug server).
+Attribution (raw vs snapped point, score, name, ms) rides on `PointerCommand.snap` and
+`TurnTimings.tPointerDispatched`/`snapMs` for the eval harness.
 
 ## 7. Realtime protocol subset (v1 GA WS API)
 

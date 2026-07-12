@@ -38,8 +38,10 @@ import {
   debugApi,
   findChrome,
   findEdge,
+  focusWindowOfTree,
   killTree,
   launchApp,
+  median,
   newToken,
   readTokenFile,
   sleep,
@@ -62,6 +64,10 @@ const val = (f, d) => (argv.includes(f) ? argv[argv.indexOf(f) + 1] : d);
 const live = has('--live');
 const voice = has('--voice');
 const attach = has('--attach');
+// M9: element snapping is always-on in the app; --no-snap (or CLICKY_NO_SNAP=1
+// in the caller's env) launches the app with snapping disabled for A/B
+// attribution runs.
+const noSnap = has('--no-snap') || process.env.CLICKY_NO_SNAP === '1';
 const debugPort = Number(val('--debug-port', '8199'));
 const scenes = (val('--scenes', SCENES.join(',')) || '').split(',').filter(Boolean);
 // Token resolution (auth is mandatory server-side): explicit env wins; for
@@ -69,7 +75,7 @@ const scenes = (val('--scenes', SCENES.join(',')) || '').split(',').filter(Boole
 // launch the app ourselves we mint a fresh token and hand it over via env.
 const token = process.env.CLICKY_DEBUG_TOKEN || (attach ? readTokenFile() : null) || newToken();
 
-const backend = live ? 'LIVE OPENAI API' : 'MOCK (tools/mock-realtime)';
+const backend = (live ? 'LIVE OPENAI API' : 'MOCK (tools/mock-realtime)') + (noSnap ? ' — SNAP OFF' : '');
 const banner = `\n${'='.repeat(72)}\n  POINTING EVAL — backend: ${backend}${live ? '' : '\n  NOTE: the mock points at screen center; this run validates PLUMBING,\n  not model accuracy. Only the calibration target is expected to HIT.'}\n${'='.repeat(72)}\n`;
 console.log(banner);
 
@@ -106,6 +112,8 @@ function pointerToGlobal(state) {
     y: meta.displayBounds.y + p.y,
     screenIndex: cmd.screenIndex,
     label: p.label ?? '',
+    // M9: grounding attribution recorded by the app (absent when snap off).
+    snap: cmd.snap ?? null,
   };
 }
 
@@ -129,6 +137,10 @@ function openKiosk(sceneName) {
     `--user-data-dir=${profileDir}`,
     '--no-first-run',
     '--disable-session-crashed-bubble',
+    // M9: a machine-wide external extension (e.g. Power Automate) pops an
+    // "added to Microsoft Edge" bubble over fresh profiles — it overlays the
+    // scene toolbar in both screenshots and UIA grounding. Keep it out.
+    '--disable-extensions',
     '--new-window',
   ];
   const proc = spawn(browser, args, { stdio: 'ignore', detached: false });
@@ -156,6 +168,7 @@ async function relaunchAppWithMic(wavPath, mockUrl) {
     userDataDir: path.join(resultsDir, 'userdata'),
     debugPort: debugPort === 8199 ? undefined : debugPort,
     logFile: appLog,
+    extraEnv: noSnap ? { CLICKY_NO_SNAP: '1' } : {},
   });
   await waitFor(() => api.alive(), { timeoutMs: 30_000, label: 'app restart' });
   await sleep(2500); // renderer prewarm
@@ -202,6 +215,7 @@ try {
       userDataDir: path.join(resultsDir, 'userdata'),
       debugPort: debugPort === 8199 ? undefined : debugPort,
       logFile: appLog,
+      extraEnv: noSnap ? { CLICKY_NO_SNAP: '1' } : {},
     });
     console.log('waiting for app debug server...');
     await waitFor(() => api.alive(), { timeoutMs: 30_000, label: 'app boot' });
@@ -227,6 +241,9 @@ try {
       { timeoutMs: 25_000, intervalMs: 300, label: `ground truth from ${scene}` },
     );
     console.log(`ground truth: ${gt.targets.length} targets (window ${JSON.stringify(gt.window)})`);
+    // M9: if the user is actively working, the kiosk can open BEHIND their
+    // focused window — force it to the foreground before capturing/grounding.
+    focusWindowOfTree(kiosk.proc.pid);
     await sleep(500); // let the kiosk finish painting before captures
 
     const sceneResult = { scene, window: gt.window, targets: [] };
@@ -244,7 +261,10 @@ try {
         await waitFor(
           async () => {
             const { last } = await api.get('/timings');
-            return last && last.turnId !== prevTurnId && last.tFirstToolCall !== undefined
+            // M9: gate on tPointerDispatched — the pointer command now goes
+            // out AFTER the async element-snap query, so tFirstToolCall can
+            // fire several hundred ms before lastPointer is this turn's.
+            return last && last.turnId !== prevTurnId && last.tPointerDispatched !== undefined
               ? last
               : null;
           },
@@ -264,12 +284,29 @@ try {
         const assistantText =
           newEntries.filter((e) => e.role === 'assistant').map((e) => e.text).join(' ') || null;
         const tBase = t.tHoldEnd ?? t.tAsk;
+        // M9 snap attribution: what the verdict WOULD have been at the raw
+        // model point (recorded by the app pre-snap).
+        const rawScore = p.snap ? scorePoint(p.snap.rawPoint, target.rect) : null;
         sceneResult.targets.push({
           name: target.name,
           desc,
           rect: target.rect,
           pointed: p,
           ...score,
+          ...(p.snap
+            ? {
+                snap: {
+                  snapped: p.snap.snappedPoint !== null,
+                  name: p.snap.snapName,
+                  score: p.snap.snapScore,
+                  ms: p.snap.snapMs,
+                  candidates: p.snap.candidates ?? null,
+                  rawPoint: p.snap.rawPoint,
+                  rawVerdict: rawScore.verdict,
+                  rawErrorPx: rawScore.errorPx,
+                },
+              }
+            : {}),
           userText,
           assistantText,
           latency: {
@@ -282,7 +319,12 @@ try {
           },
           ...(t.usage ? { usage: t.usage } : {}),
         });
-        console.log(`${score.verdict.toUpperCase()} (pointed ${p.x},${p.y}; err ${score.errorPx}px; said "${(p.label || '').slice(0, 60)}")`);
+        const snapNote = p.snap
+          ? p.snap.snappedPoint !== null
+            ? `; snap->"${(p.snap.snapName || '').slice(0, 30)}" @${p.snap.snapScore} in ${p.snap.snapMs}ms (raw ${rawScore.verdict})`
+            : `; no snap match in ${p.snap.snapMs}ms (raw ${rawScore.verdict})`
+          : '';
+        console.log(`${score.verdict.toUpperCase()} (pointed ${p.x},${p.y}; err ${score.errorPx}px; said "${(p.label || '').slice(0, 60)}"${snapNote})`);
         // Live: spoken audio drains much longer than the response lifecycle —
         // silence it between targets (keeps runs quiet + turns independent).
         await api.post('/playback', { command: 'stop' });
@@ -330,6 +372,25 @@ const flat = results.scenes.flatMap((s) => s.targets.map((t) => ({ scene: s.scen
 const counts = { hit: 0, near: 0, miss: 0, error: 0 };
 for (const t of flat) counts[t.verdict] = (counts[t.verdict] ?? 0) + 1;
 results.summary = counts;
+// M9: snap attribution — how the final verdicts relate to the raw model
+// point's verdicts on the same turns.
+const withSnap = flat.filter((t) => t.snap);
+if (withSnap.length > 0) {
+  const attribution = {
+    targetsWithSnapInfo: withSnap.length,
+    snapped: withSnap.filter((t) => t.snap.snapped).length,
+    rawCounts: { hit: 0, near: 0, miss: 0 },
+    savedBySnap: 0, // raw missed/near, snap made it a hit
+    brokenBySnap: 0, // raw hit, snap moved it off the target
+    medianSnapMs: median(withSnap.map((t) => t.snap.ms).filter((v) => typeof v === 'number')),
+  };
+  for (const t of withSnap) {
+    attribution.rawCounts[t.snap.rawVerdict] = (attribution.rawCounts[t.snap.rawVerdict] ?? 0) + 1;
+    if (t.verdict === 'hit' && t.snap.rawVerdict !== 'hit') attribution.savedBySnap += 1;
+    if (t.verdict !== 'hit' && t.snap.rawVerdict === 'hit') attribution.brokenBySnap += 1;
+  }
+  results.snapAttribution = attribution;
+}
 results.finishedAt = new Date().toISOString();
 
 const jsonPath = path.join(resultsDir, 'results.json');
@@ -342,13 +403,19 @@ const md = [
   '',
   live ? '' : '> Mock run: validates plumbing only (mock always points at screen center). Only the calibration target is expected to hit.',
   '',
-  '| scene | target | verdict | error px | pointed (global DIP) | target rect |',
-  '|---|---|---|---:|---|---|',
+  '| scene | target | verdict | error px | raw verdict | snap (name @ score, ms) | pointed (global DIP) | target rect |',
+  '|---|---|---|---:|---|---|---|---|',
   ...flat.map((t) =>
-    `| ${t.scene} | ${t.name} | ${t.verdict} | ${t.errorPx ?? ''} | ${t.pointed ? `${t.pointed.x},${t.pointed.y}` : ''} | ${t.rect.x},${t.rect.y} ${t.rect.width}x${t.rect.height} |`,
+    `| ${t.scene} | ${t.name} | ${t.verdict} | ${t.errorPx ?? ''} | ${t.snap ? t.snap.rawVerdict : ''} | ${
+      t.snap ? (t.snap.snapped ? `"${t.snap.name}" @ ${t.snap.score}, ${t.snap.ms}ms` : `no match, ${t.snap.ms}ms`) : ''
+    } | ${t.pointed ? `${t.pointed.x},${t.pointed.y}` : ''} | ${t.rect.x},${t.rect.y} ${t.rect.width}x${t.rect.height} |`,
   ),
   '',
   `**Summary:** ${counts.hit} hit / ${counts.near} near / ${counts.miss} miss / ${counts.error} error (of ${flat.length})`,
+  '',
+  results.snapAttribution
+    ? `**Snap attribution:** ${results.snapAttribution.snapped}/${results.snapAttribution.targetsWithSnapInfo} snapped; raw would have been ${results.snapAttribution.rawCounts.hit} hit / ${results.snapAttribution.rawCounts.near} near / ${results.snapAttribution.rawCounts.miss} miss; snap saved ${results.snapAttribution.savedBySnap}, broke ${results.snapAttribution.brokenBySnap}; median snap ${Math.round(results.snapAttribution.medianSnapMs ?? 0)}ms`
+    : '',
   '',
 ].join('\n');
 const mdPath = path.join(resultsDir, 'results.md');

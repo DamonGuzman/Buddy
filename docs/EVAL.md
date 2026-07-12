@@ -427,3 +427,130 @@ label-matching does most of the work and the coordinate only breaks ties). Estim
 UIA provider + label matcher + overlay snap ≈ 1-2 weeks including tests; it also unlocks
 click-through "do it for me" later. Alternative/complement: a per-turn grounding call to a
 dedicated vision model with known-good localization, at +1 round-trip of latency.
+
+Executed as M9 — see §9.
+
+## 9. Element-snap grounding re-gate (M9, 2026-07-12)
+
+Same machine (4K@150%, 2560×1440 DIP), same scenes/gates as §7.3/§8. New under test:
+**UIA element snapping** — ground the model's point to the real on-screen element that
+matches its spoken label — plus the §8.3 quick-commit bug fix.
+
+### 9.1 Snap architecture
+
+A persistent PowerShell daemon (`src/main/grounding/snapper.ps1`, embedded at build, spawned
+lazily + warmed at startup, restarted on crash, killed on quit; JSON lines over stdio)
+resolves the top-level window under the model's mapped point with Win32 `WindowFromPoint`
+(mouse hit-test semantics — skips Clicky's own click-through overlays, sees exactly what the
+user sees; the daemon makes itself Per-Monitor-V2 DPI-aware so user32 and UIA agree on
+physical px) and enumerates nearby named UIA elements: rect-pruned ControlView DFS under the
+window, CacheRequest-batched properties, ±350px search radius (one retry at 700px), node/time
+budgets. Selection is pure TS (`grounding/scoring.ts`): stopword/punctuation-normalized fuzzy
+token similarity between the spoken label and element Names (max of token-dice,
+name-coverage, damped label-in-name containment, whole-string Levenshtein), threshold 0.55,
+small proximity tie-break. The whole snap is timeboxed at **600ms**; on no-match/timeout the
+raw model point is used unchanged — snapping is never worse than §8. The label chip keeps the
+model's words; `CLICKY_NO_SNAP=1` gives the A/B baseline; `POST /grounding/query` drives the
+snapper model-free. Two daemon lessons baked in: UIA's own `ElementFromPoint` ignores
+hit-test transparency (it kept landing on Clicky's overlay), and a DPI-unaware daemon mixes
+virtualized user32 px with physical UIA px — both broke window resolution before the final
+design. Plus one harness lesson: a machine-wide external extension pops an "added to
+Microsoft Edge" bubble over fresh kiosk profiles, overlaying scene toolbars in screenshots
+AND the UIA tree (`--disable-extensions` now).
+
+### 9.2 Snapper sanity (no model, `POST /grounding/query`)
+
+Eval toolbar scene in an Edge kiosk, probed at target-center ± a model-like drift
+(+120, ±40 DIP): **6/6 targets matched and snapped inside their rects** — `File` @1.0,
+`💾 Save`/`📂 Open`/`⇮ Export`/`⚙ Settings`/`🔗 Share` @0.85. Real apps: taskbar
+`File Explorer` @0.85, `Microsoft Edge` @1.0. Daemon latency: 21-111ms warm on the kiosk
+scene, ~590ms on the very first Edge query (Chromium a11y warm-up), 227-234ms on the
+taskbar. Occlusion semantics verified: when another window covers the probe point the
+snapper scopes the covering window — the same thing the capture (and user) sees.
+
+### 9.3 Pointing re-gate (live, snapping ON) — the gates finally pass
+
+`node eval/run.mjs --live`, all 5 scenes (20 targets), final §8.2 config + snapping ON,
+2026-07-12 (`eval/results/2026-07-12T20-23-46/`):
+
+| scene | hit | near | miss | notes |
+|---|---:|---:|---:|---|
+| calibration | 1 | 0 | 0 | 0px error — mapping pipeline still exact |
+| app-toolbar | 6 | 0 | 0 | every snap @1.0 incl. the 30px File menu item |
+| form | 4 | 0 | 0 | incl. the 26px checkbox (label→"Send me the monthly product newsletter" @0.7) |
+| shop | 4 | 0 | 1 | miss = price (model label carried no "$249.00" this run → no name match → raw point, 168px off); cart HIT on the raw point (emoji-only name, unsnappable) |
+| tricky | 3 | 1 | 0 | save/save-as twins both disambiguated @1.0; near = the 24px emoji bell (no UIA name → raw point, 19px off) |
+| **total** | **18** | **1** | **1** | 0 errors |
+
+**Unambiguous scenes (toolbar/form/shop, 15 targets): strict 14/15 = 93% (gate ≥70%),
+strict+near 14/15 = 93% (gate ≥90%) — BOTH PASS**, for the first time in any
+configuration. Tricky: 3 hit / 1 near of 4.
+
+### 9.4 Snap attribution + no-snap A/B
+
+Attribution recorded per turn (`PointerCommand.snap`: raw vs snapped point): 16/20 turns
+snapped; on the same turns the RAW model points would have scored **5 hit / 4 near / 11
+miss** (unambiguous: 3/15 strict = 20%) — snapping converted **13 raws into hits and broke
+0** (it never moved a raw hit off-target; the 4 unsnapped turns fell back to the raw point
+by design). A/B control, same scene minutes apart: `--live --no-snap --scenes shop`
+(`eval/results/2026-07-12T20-26-12/`) scored 2 hit / 1 near / 2 miss (40% strict) vs 4 hit /
+1 miss (80%) with snapping — consistent with §8's 40-47% ceiling for raw pointing.
+
+Snap latency across the run: **p50 49ms, p90 90ms**, max 370ms (a no-match that took the
+700px-radius retry); matched-only p50 45ms. Ask→first tool call p50 1591ms (p90 1977) —
+grounding adds ~50ms p50 / ~90ms p90 to pointer arrival (target <300ms p90 — PASS).
+
+### 9.5 Quick-commit fix + latency (partial — run interrupted)
+
+The §8.3 wedge is fixed at three layers: (1) `finishVoiceTurn` cancels instead of
+committing when the hold appended <200ms of mic audio (the 100ms-server-minimum class),
+(2) the session synthesizes a failed `response-done` if the API still rejects a commit
+("buffer too small"/"buffer is empty"), so `pendingResponses` can never wedge — regression
+tests cover both (`tests/conversation-hold.test.ts`, `tests/realtime.test.ts` M9 case;
+`tools/mock-realtime` now mirrors the real API's 100ms commit minimum), and (3) the
+voice-roundtrip harness retries a guarded-cancel turn once. The guard was also validated
+LIVE by accident: one hold in the (interrupted) live voice run delivered only 180ms of mic
+audio — the app logged `hold carried only 180ms of audio (< 200ms) — cancelling instead of
+committing` and settled back to idle with no commit, no error state, and the next turn
+working: exactly the scenario that error-wedged M8.6.
+
+Live voice latency (partial: 6 completed turns across runs interrupted by the operator —
+the machine was in active use): release→first audio delta 1023/1379/1446/2730/2798/2808ms
+(median ~2.1s, informal p50 <2.5s), first delta→first played 2-61ms, rms 0.058-0.065,
+0 underruns. A formal 5-turn latency pass + the 3-turn voice-loop spot check were NOT
+completed.
+
+### 9.6 Gate verdicts
+
+| Gate | Target | Measured | Verdict |
+|---|---|---|---|
+| Pointing strict (unambiguous) | ≥70% | **93%** (14/15) | **PASS** |
+| Pointing strict+near | ≥90% | **93%** (14/15) | **PASS** |
+| Snap overhead on pointer arrival | <300ms p90 | 90ms p90 (49ms p50) | PASS |
+| Release → first audio delta | p50 <2.5s | ~2.1s median over 6 turns (informal) | PENDING (formal 5-turn pass interrupted) |
+| Voice loop spot-check + live quick-tap barge-in | no wedge | guard fired live once, clean recovery (accidental coverage); dedicated spot-check not run | PENDING |
+| Unit tests / build | green | 152/152, build green | PASS |
+
+**Live re-gate status: pointing PASSED as above; the remaining latency/voice-loop passes
+were interrupted by the user (on-screen kiosk testing while the machine was in active use)
+and are deferred — rerun `node eval/voice-roundtrip.mjs --live` plus a 3-turn voice spot
+check when convenient.** M9 live spend: ~305k input tokens (96% cached) + ~6.2k output
+across the pointing runs, plus ~10 voice/interrupted turns — estimated **≈$0.40-0.60** at
+published gpt-realtime rates (M8.6 methodology).
+
+### 9.7 Known limitations
+
+- **Elements with no UIA Name can't snap**: emoji-only glyph buttons (the shop cart 🛒, the
+  tricky bell 🔔) and canvas-drawn UI fall back to the raw model point (cart still hit raw;
+  bell was near). OCR over the existing capture is the natural complement.
+- The snapper trusts hit-test semantics: it grounds against the window the USER sees at the
+  point — occluded windows are invisible to it (matches what the capture shows, verified).
+- The label does the work: if the model's spoken label shares no tokens with the on-screen
+  name (shop price this run: "the price" vs "$249.00"), no snap. §7-§8 showed labels are
+  usually verbatim-quality, so this is rare (1/20 this run; threshold 0.55 errs toward the
+  safe raw fallback).
+- First UIA query against a fresh Chromium window costs ~600ms (a11y warm-up) — inside the
+  timebox but occasionally a first-turn snap falls back; the daemon warm-up at app start
+  hides the PowerShell/assembly load itself.
+- `run.mjs --voice` still relaunches the app per target; the mock voice-roundtrip passes
+  all gates with the new commit guard (2026-07-12, `2026-07-12T18-20-32-voice`).

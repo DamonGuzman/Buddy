@@ -169,6 +169,42 @@ export function launchApp({ token, mockUrl, fakeMicWav, userDataDir, debugPort, 
   };
 }
 
+/**
+ * M9: force the kiosk window to the FOREGROUND (best-effort, never throws).
+ * When the eval runs while the user is actively working, a spawned Edge
+ * kiosk can open BEHIND the user's focused window — then both the capture
+ * and UIA grounding see the wrong window. Finds the first visible top-level
+ * window owned by the pid's process tree and foregrounds it (the brief
+ * synthetic Alt tap is the documented unlock for SetForegroundWindow from a
+ * background process).
+ */
+export function focusWindowOfTree(rootPid) {
+  if (!rootPid) return;
+  const script = [
+    `$rootPid = ${Number(rootPid)}`,
+    `$procs = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId`,
+    `$set = New-Object 'System.Collections.Generic.HashSet[int]'`,
+    `[void]$set.Add([int]$rootPid)`,
+    `do { $added = $false; foreach ($p in $procs) { if ($set.Contains([int]$p.ParentProcessId) -and -not $set.Contains([int]$p.ProcessId)) { [void]$set.Add([int]$p.ProcessId); $added = $true } } } while ($added)`,
+    `Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class FG{[DllImport("user32.dll")]public static extern IntPtr GetTopWindow(IntPtr h);[DllImport("user32.dll")]public static extern IntPtr GetWindow(IntPtr h, uint cmd);[DllImport("user32.dll")]public static extern bool IsWindowVisible(IntPtr h);[DllImport("user32.dll")]public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);[DllImport("user32.dll")]public static extern bool SetForegroundWindow(IntPtr h);[DllImport("user32.dll")]public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);[DllImport("user32.dll")]public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);}'`,
+    `$h = [FG]::GetTopWindow([IntPtr]::Zero); $target = [IntPtr]::Zero`,
+    `while ($h -ne [IntPtr]::Zero) { if ([FG]::IsWindowVisible($h)) { [uint32]$wpid = 0; [void][FG]::GetWindowThreadProcessId($h, [ref]$wpid); if ($set.Contains([int]$wpid)) { $target = $h; break } }; $h = [FG]::GetWindow($h, 2) }`,
+    // Z-order raise via TOPMOST pin (not subject to foreground-permission
+    // rules) so the kiosk stays above the user's windows for the scene; the
+    // Alt-tap + SetForegroundWindow additionally moves keyboard focus when
+    // allowed. The kiosk is killed right after the scene, unpinning is moot.
+    `if ($target -ne [IntPtr]::Zero) { [void][FG]::SetWindowPos($target, (New-Object IntPtr(-1)), 0, 0, 0, 0, 0x0053); [FG]::keybd_event(0x12,0,0,[UIntPtr]::Zero); [void][FG]::SetForegroundWindow($target); [FG]::keybd_event(0x12,0,2,[UIntPtr]::Zero) }`,
+  ].join('; ');
+  try {
+    execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      stdio: 'ignore',
+      timeout: 15_000,
+    });
+  } catch {
+    /* best effort */
+  }
+}
+
 /** Kill a process tree on Windows (best-effort, never throws). */
 export function killTree(pid) {
   if (!pid) return;
