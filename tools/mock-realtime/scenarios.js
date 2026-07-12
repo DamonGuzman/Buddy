@@ -44,12 +44,56 @@ const SCENARIOS = [
     },
   },
   {
+    // M11: mid-session rate limiting (integration tests for the error catalog).
+    name: 'rate-limit',
+    description: 'user text contains "rate limit"/"ratelimit": rate_limit_exceeded error event',
+    matches: (turn) => /\brate ?limit/.test(userTextOf(turn)),
+    async run(io) {
+      io.error('Rate limit reached for the model. Please try again later.', 'rate_limit_exceeded');
+      await io.done('failed');
+    },
+  },
+  {
+    // M11: mid-session server hiccup (integration tests for the error catalog).
+    name: 'server-error',
+    description: 'user text contains "server error"/"servererror": server_error event',
+    matches: (turn) => /\bserver ?error\b/.test(userTextOf(turn)),
+    async run(io) {
+      io.error('The server had an error while processing your request.', 'server_error');
+      await io.done('failed');
+    },
+  },
+  {
+    // M11: truncated answer (integration tests for response_incomplete).
+    name: 'incomplete-done',
+    description: 'user text contains "incomplete": speak, then response.done status incomplete',
+    matches: (turn) => /\bincomplete\b/.test(userTextOf(turn)),
+    async run(io) {
+      await io.speak('so the first thing you want to do is');
+      await io.done('incomplete');
+    },
+  },
+  {
     name: 'error',
     description: 'user text contains "error": emit an error event, then a failed response',
     matches: (turn) => /\berror\b/.test(userTextOf(turn)),
     async run(io) {
       io.error('mock scenario error (you asked for one)', 'mock_error');
       await io.done('failed');
+    },
+  },
+  {
+    // M11: agent-mode stub — ARCHITECTURE §2/§5 promise a friendly
+    // "coming soon" voice line when the user asks for agent mode.
+    name: 'agent-mode',
+    description: 'user text contains "agent": friendly coming-soon line (stubbed feature)',
+    matches: (turn) => /\bagent\b/.test(userTextOf(turn)),
+    async run(io) {
+      await io.speak(
+        "agent mode isn't ready quite yet — soon i'll be able to click around for you, " +
+          'not just point. for now, ask me to point at anything and i will.',
+      );
+      await io.done('completed');
     },
   },
   {

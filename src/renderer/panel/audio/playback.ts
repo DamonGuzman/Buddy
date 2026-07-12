@@ -270,12 +270,36 @@ export class AudioPlayer {
     }
   }
 
+  /** M11: playback init failed and main was told (re-armed on recovery). */
+  private initErrorReported = false;
+
   private async withNode(fn: (node: AudioWorkletNode) => void): Promise<void> {
     try {
       await this.ensure();
       if (this.node) fn(this.node);
+      this.initErrorReported = false;
     } catch (err) {
       console.warn('[playback] audio output unavailable:', err);
+      // M11 addition (orchestrator-approved): report the failure to main —
+      // audio_output_failed copy + forced captions — instead of a silent
+      // console.warn while the user hears nothing. Reset `ready` so the next
+      // chunk retries init (audio devices come back).
+      this.ready = null;
+      this.node = null;
+      void this.ctx?.close().catch(() => undefined);
+      this.ctx = null;
+      if (!this.initErrorReported) {
+        this.initErrorReported = true;
+        try {
+          clicky.reportAudioError({
+            source: 'playback',
+            name: err instanceof Error ? err.name : 'Error',
+            message: err instanceof Error ? err.message : String(err),
+          });
+        } catch {
+          /* reporting is best-effort */
+        }
+      }
     }
   }
 

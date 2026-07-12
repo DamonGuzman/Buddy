@@ -38,6 +38,12 @@ export type ModelId = 'gpt-realtime-2.1-mini' | 'gpt-realtime-2.1';
 export interface Settings {
   /** Whether an API key is stored (encrypted via safeStorage). Never the key itself. */
   apiKeyPresent: boolean;
+  /**
+   * M11 addition (orchestrator-approved): the stored key blob exists but
+   * DPAPI can no longer decrypt it (windows credentials changed). The
+   * settings UI should prompt for a re-paste; pasting a new key clears it.
+   */
+  apiKeyUnreadable: boolean;
   model: ModelId;
   voice: string;
   captionsEnabled: boolean;
@@ -62,6 +68,7 @@ export interface SettingsPatch {
 /** The renderer-safe defaults. */
 export const DEFAULT_SETTINGS: Settings = {
   apiKeyPresent: false,
+  apiKeyUnreadable: false,
   // M8.6 (orchestrator-approved): default to the full model — the live
   // pointing eval (docs/EVAL.md §8) showed mini's coordinate estimation is
   // far less accurate (0-13% strict vs full's 33-47%). mini remains
@@ -86,7 +93,10 @@ export function applySettingsPatch(current: Settings, patch: SettingsPatch): Set
     ...(patch.voice !== undefined ? { voice: patch.voice } : {}),
     ...(patch.captionsEnabled !== undefined ? { captionsEnabled: patch.captionsEnabled } : {}),
     ...(patch.micDeviceId !== undefined ? { micDeviceId: patch.micDeviceId } : {}),
-    ...(patch.apiKey !== undefined ? { apiKeyPresent: patch.apiKey !== null } : {}),
+    // M11: storing (or clearing) a key always resolves an unreadable blob.
+    ...(patch.apiKey !== undefined
+      ? { apiKeyPresent: patch.apiKey !== null, apiKeyUnreadable: false }
+      : {}),
   };
 }
 
@@ -247,6 +257,31 @@ export interface PlaybackStatsUpdate {
 export interface MicDevice {
   deviceId: string;
   label: string;
+}
+
+/**
+ * M11 addition (orchestrator-approved): an audio device failure reported by
+ * the panel renderer — mic capture failed to start ('mic') or the playback
+ * worklet/context failed to initialize ('playback'). Main classifies these
+ * into mic_unavailable / audio_output_failed catalog entries.
+ */
+export interface AudioDeviceError {
+  source: 'mic' | 'playback';
+  /** DOMException name when available (e.g. 'NotAllowedError'), else 'Error'. */
+  name: string;
+  message: string;
+}
+
+/**
+ * M11 addition (orchestrator-approved): main-computed runtime flags for the
+ * panel — whether the global push-to-talk keyboard hook is alive (the hero
+ * hint adapts when it is not), and which CLICKY_* dev/QA env flags are set
+ * for this run (besides CLICKY_DEBUG), shown as a dev chip in the header.
+ */
+export interface RuntimeFlags {
+  hookAlive: boolean;
+  /** Short flag names, CLICKY_ prefix stripped, lowercase (e.g. 'mock_url'). */
+  devFlags: string[];
 }
 
 // ---------------------------------------------------------------------------

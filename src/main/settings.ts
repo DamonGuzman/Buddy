@@ -17,6 +17,12 @@ import type { Settings, SettingsPatch } from '../shared/types';
 interface SettingsFile {
   version: 1;
   apiKeyEncrypted: string | null;
+  /**
+   * M11: the stored blob failed DPAPI decryption (windows credentials
+   * changed). Persisted so the "paste it again" prompt survives restarts;
+   * cleared when a new key is stored (or the key is cleared).
+   */
+  keyUnreadable?: boolean;
   model: Settings['model'];
   voice: string;
   captionsEnabled: boolean;
@@ -29,6 +35,8 @@ export class SettingsStore {
   private file: SettingsFile;
   private readonly path: string;
   private listeners = new Set<(settings: Settings) => void>();
+  /** M11: true when a settings.json EXISTED but was corrupt (reset to defaults). */
+  private wasReset = false;
 
   constructor(filePath?: string) {
     this.path = filePath ?? join(app.getPath('userData'), FILE_NAME);
@@ -39,6 +47,7 @@ export class SettingsStore {
   get(): Settings {
     return {
       apiKeyPresent: this.file.apiKeyEncrypted !== null,
+      apiKeyUnreadable: this.file.keyUnreadable === true,
       model: this.file.model,
       voice: this.file.voice,
       captionsEnabled: this.file.captionsEnabled,
@@ -47,11 +56,21 @@ export class SettingsStore {
     };
   }
 
+  /**
+   * M11: a settings.json existed at boot but could not be parsed, so the
+   * store started from defaults. The conversation surfaces this once.
+   */
+  settingsWereReset(): boolean {
+    return this.wasReset;
+  }
+
   /** Apply a patch (encrypting apiKey if present), persist, notify, return snapshot. */
   set(patch: SettingsPatch): Settings {
     if (patch.apiKey !== undefined) {
       this.file.apiKeyEncrypted =
         patch.apiKey === null || patch.apiKey === '' ? null : this.encrypt(patch.apiKey);
+      // M11: a freshly stored (or cleared) key resolves an unreadable blob.
+      this.file.keyUnreadable = false;
     }
     const merged = applySettingsPatch(this.get(), patch);
     this.file.model = merged.model;
@@ -59,18 +78,32 @@ export class SettingsStore {
     this.file.captionsEnabled = merged.captionsEnabled;
     this.file.micDeviceId = merged.micDeviceId;
     this.persist();
-    const snapshot = this.get();
-    for (const cb of this.listeners) cb(snapshot);
-    return snapshot;
+    this.notify();
+    return this.get();
   }
 
   /** Decrypted API key — MAIN PROCESS ONLY. Never send over IPC. */
   getApiKey(): string | null {
     if (this.file.apiKeyEncrypted === null) return null;
     try {
-      return safeStorage.decryptString(Buffer.from(this.file.apiKeyEncrypted, 'base64'));
+      const key = safeStorage.decryptString(Buffer.from(this.file.apiKeyEncrypted, 'base64'));
+      // A previously flagged blob decrypts again (rare, but heal the flag).
+      if (this.file.keyUnreadable === true) {
+        this.file.keyUnreadable = false;
+        this.persist();
+        this.notify();
+      }
+      return key;
     } catch (err) {
       console.error('[settings] failed to decrypt api key:', err);
+      // M11: flag the dead blob (once) so the UI stops claiming a key is
+      // present-and-working while every turn fails. Persisted + notified so
+      // the panel snapshot reflects it immediately and across restarts.
+      if (this.file.keyUnreadable !== true) {
+        this.file.keyUnreadable = true;
+        this.persist();
+        this.notify();
+      }
       return null;
     }
   }
@@ -78,6 +111,11 @@ export class SettingsStore {
   onChange(cb: (settings: Settings) => void): () => void {
     this.listeners.add(cb);
     return () => this.listeners.delete(cb);
+  }
+
+  private notify(): void {
+    const snapshot = this.get();
+    for (const cb of this.listeners) cb(snapshot);
   }
 
   // -------------------------------------------------------------------------
@@ -94,6 +132,7 @@ export class SettingsStore {
     const fallback: SettingsFile = {
       version: 1,
       apiKeyEncrypted: null,
+      keyUnreadable: false,
       model: DEFAULT_SETTINGS.model,
       voice: DEFAULT_SETTINGS.voice,
       captionsEnabled: DEFAULT_SETTINGS.captionsEnabled,
@@ -105,6 +144,7 @@ export class SettingsStore {
       return {
         version: 1,
         apiKeyEncrypted: typeof parsed.apiKeyEncrypted === 'string' ? parsed.apiKeyEncrypted : null,
+        keyUnreadable: parsed.keyUnreadable === true,
         // M8.6: validate against the full model list — a stored 'mini' choice
         // must survive the default flipping to the full model.
         model: MODEL_IDS.includes(parsed.model as Settings['model'])
@@ -119,6 +159,9 @@ export class SettingsStore {
       };
     } catch (err) {
       console.error('[settings] failed to load, using defaults:', err);
+      // M11 (settings_reset): the file existed but was scrambled — remember
+      // it so clicky can say so on the first turn (the key is gone with it).
+      this.wasReset = true;
       return fallback;
     }
   }

@@ -118,6 +118,72 @@ describe('AltGr / international layouts (F1 AltGr fix)', () => {
   });
 });
 
+describe('hook start failure (M11 crash fix)', () => {
+  class ThrowingHook implements UiohookLike {
+    on(): unknown {
+      return this;
+    }
+    start(): void {
+      throw new Error('SetWindowsHookEx failed (simulated)');
+    }
+    stop(): void {}
+  }
+
+  it('start() never throws WITH an error listener: emits + hookAlive false', () => {
+    const hotkey = new HotkeyManager({ hook: new ThrowingHook() });
+    const errors: Error[] = [];
+    hotkey.on('error', (err) => errors.push(err));
+    expect(() => hotkey.start()).not.toThrow();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.message).toContain('SetWindowsHookEx failed');
+    expect(hotkey.status().hookAlive).toBe(false);
+    expect(hotkey.status().error).toContain('SetWindowsHookEx failed');
+  });
+
+  it('start() never throws even with NO error listener (the old crash)', () => {
+    const hotkey = new HotkeyManager({ hook: new ThrowingHook() });
+    // Before M11 the unlistened EventEmitter 'error' escaped start() and
+    // aborted app boot (tray / powerMonitor / debug server never ran).
+    expect(() => hotkey.start()).not.toThrow();
+    expect(hotkey.status().hookAlive).toBe(false);
+  });
+
+  it('the debug simulate() path still drives the FSM after a hook failure', () => {
+    const hotkey = new HotkeyManager({ hook: new ThrowingHook() });
+    hotkey.on('error', () => {});
+    hotkey.start();
+    const events: string[] = [];
+    hotkey.on('hold-start', () => events.push('start'));
+    hotkey.on('hold-end', () => events.push('end'));
+    hotkey.simulate('press');
+    hotkey.simulate('release');
+    expect(events).toEqual(['start', 'end']);
+  });
+});
+
+describe('hold-cancel reasons (M11 hold_too_long)', () => {
+  it('the watchdog cancel carries reason "watchdog"', () => {
+    vi.useFakeTimers();
+    const h = makeHarness(1_000);
+    const reasons: string[] = [];
+    h.hotkey.on('hold-cancel', (reason) => reasons.push(reason));
+    h.down(L_CTRL);
+    h.down(L_ALT);
+    vi.advanceTimersByTime(1_000);
+    expect(reasons).toEqual(['watchdog']);
+  });
+
+  it('an external forceCancel (lock/suspend) carries reason "forced"', () => {
+    const h = makeHarness();
+    const reasons: string[] = [];
+    h.hotkey.on('hold-cancel', (reason) => reasons.push(reason));
+    h.down(L_CTRL);
+    h.down(L_ALT);
+    h.hotkey.forceCancel();
+    expect(reasons).toEqual(['forced']);
+  });
+});
+
 describe('max-hold watchdog + forced release (F1 C1 fix)', () => {
   it('force-cancels a hold after MAX_HOLD_MS (swallowed keyup)', () => {
     vi.useFakeTimers();

@@ -30,8 +30,11 @@ const api: PanelApi = {
   onPlayback: (cb) => subscribe('audio:playback', cb),
   // M5 addition (orchestrator-approved): mic capture start/stop from main.
   onCaptureCommand: (cb) => subscribe('audio:capture', cb),
+  // M11 addition (orchestrator-approved): runtime flags (hookAlive + dev flags).
+  onRuntime: (cb) => subscribe('panel:runtime', cb),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),
+  getRuntime: () => ipcRenderer.invoke('panel:get-runtime'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
   askText: (text) => ipcRenderer.invoke('panel:ask-text', text),
   listMics: () => ipcRenderer.invoke('mic:list'),
@@ -42,6 +45,9 @@ const api: PanelApi = {
   // M8.5 addition (orchestrator-approved): playback tap reporting.
   sendPlaybackStats: (stats) => ipcRenderer.send('audio:playback-stats', stats),
   sendPlaybackRing: (ring) => ipcRenderer.send('audio:playback-ring', ring),
+
+  // M11 addition (orchestrator-approved): audio device failure reporting.
+  reportAudioError: (payload) => ipcRenderer.send('audio:capture-error', payload),
 };
 
 contextBridge.exposeInMainWorld('clicky', api);

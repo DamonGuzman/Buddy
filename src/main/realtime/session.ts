@@ -37,6 +37,7 @@ import type {
 } from './protocol';
 import { parseServerEvent, validatePointAtArgs } from './protocol';
 import { resolveEndpoint } from './mockable';
+import { withErrorCode } from '../errors';
 
 // ---------------------------------------------------------------------------
 // Public event + option surfaces
@@ -407,7 +408,12 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       const timeout = setTimeout(() => {
         fail(
           preSettleError !== null
-            ? new Error(describeHandshakeRejection(preSettleError, null))
+            ? // M11: the server's error code rides on the Error so the
+              // catalog classifier (src/main/errors.ts) can map it.
+              withErrorCode(
+                new Error(describeHandshakeRejection(preSettleError, null)),
+                preSettleError.code,
+              )
             : new Error(`realtime handshake timed out after ${this.connectTimeoutMs}ms`),
         );
         ws.terminate();
@@ -471,12 +477,15 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       ws.on('close', (code: number, reason: Buffer) => {
         this.guard(() => {
           if (!settled) {
+            const closeInfo = { code, reason: reason.toString('utf8') };
+            // M11: keep the classification data (server error code) flowing.
+            const rejectionCode =
+              preSettleError?.code ??
+              (closeInfo.reason.includes('insufficient_quota') ? 'insufficient_quota' : undefined);
             fail(
-              new Error(
-                describeHandshakeRejection(preSettleError, {
-                  code,
-                  reason: reason.toString('utf8'),
-                }),
+              withErrorCode(
+                new Error(describeHandshakeRejection(preSettleError, closeInfo)),
+                rejectionCode,
               ),
             );
             return;
@@ -811,7 +820,12 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
           this.failActiveResponse(`audio commit rejected: ${evt.error.message}`);
         }
         this.setStatus({ state: 'error', error: evt.error.message });
-        this.emitError(new Error(evt.error.message));
+        // M11: the server error code (falling back to the coarse error type,
+        // e.g. 'server_error') rides on the Error so the catalog classifier
+        // can turn a mid-session error event into friendly transcript copy.
+        this.emitError(
+          withErrorCode(new Error(evt.error.message), evt.error.code ?? evt.error.type),
+        );
         break;
       }
 

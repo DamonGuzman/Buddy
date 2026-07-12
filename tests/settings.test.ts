@@ -34,6 +34,7 @@ describe('settings schema', () => {
     const next = applySettingsPatch(DEFAULT_SETTINGS, patch);
     expect(next).toEqual({
       apiKeyPresent: true,
+      apiKeyUnreadable: false, // M11: a stored key always resolves an unreadable blob
       model: 'gpt-realtime-2.1',
       voice: 'cedar',
       captionsEnabled: false,

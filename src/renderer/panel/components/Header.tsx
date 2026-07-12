@@ -19,12 +19,14 @@ const SESSION_TITLE: Record<SessionStatus['state'], string> = {
 interface HeaderProps {
   assistantState: AssistantState;
   session: SessionStatus | null;
+  /** M11: CLICKY_* dev/QA flags set for this run (besides CLICKY_DEBUG). */
+  devFlags?: string[];
   settingsOpen: boolean;
   onToggleSettings: () => void;
 }
 
 export function Header(props: HeaderProps): React.JSX.Element {
-  const { assistantState, session, settingsOpen, onToggleSettings } = props;
+  const { assistantState, session, devFlags = [], settingsOpen, onToggleSettings } = props;
   const sessionState = session?.state ?? 'disconnected';
   const sessionTitle =
     sessionState === 'error' && session?.error
@@ -43,6 +45,13 @@ export function Header(props: HeaderProps): React.JSX.Element {
       </span>
       <div className="header-right">
         {session?.usingMockServer ? <span className="mock-badge">mock</span> : null}
+        {/* M11: generic dev-flags chip — any CLICKY_* flag besides CLICKY_DEBUG
+            (reuses the mock-badge style; full list in the tooltip). */}
+        {devFlags.length > 0 ? (
+          <span className="mock-badge" title={devFlags.map((f) => `CLICKY_${f.toUpperCase()}`).join(', ')}>
+            dev:{devFlags.length}
+          </span>
+        ) : null}
         <span className={`session-dot ${sessionState}`} title={sessionTitle} />
         <button
           type="button"

@@ -11,6 +11,7 @@
 
 import type {
   AssistantState,
+  AudioDeviceError,
   AudioOutputDelta,
   CaptionUpdate,
   CaptureCommand,
@@ -18,6 +19,7 @@ import type {
   PlaybackCommand,
   PlaybackStatsUpdate,
   PointerCommand,
+  RuntimeFlags,
   SessionStatus,
   Settings,
   SettingsPatch,
@@ -67,6 +69,9 @@ export interface MainToPanelEvents {
   // M5 addition (orchestrator-approved): main tells the panel renderer to
   // start/stop mic capture when the push-to-talk hotkey goes down/up.
   'audio:capture': { command: CaptureCommand };
+  // M11 addition (orchestrator-approved): runtime flags for the panel —
+  // hookAlive (hero hint adapts) + CLICKY_* dev flags (header dev chip).
+  'panel:runtime': RuntimeFlags;
 }
 
 // ===========================================================================
@@ -82,6 +87,10 @@ export interface RendererSendEvents {
   // M8.5 addition (orchestrator-approved): ring buffer of the last ~15s of
   // PLAYED audio as Int16 PCM (24kHz mono), sent when an item finishes.
   'audio:playback-ring': ArrayBuffer;
+  // M11 addition (orchestrator-approved): the panel renderer reports audio
+  // device failures (mic capture start / playback init) so main can surface
+  // mic_unavailable / audio_output_failed from the error catalog.
+  'audio:capture-error': AudioDeviceError;
 }
 
 // ===========================================================================
@@ -101,6 +110,9 @@ export interface InvokeChannels {
   'mic:select': { args: [deviceId: string]; result: void };
   /** Overlay bootstrap: current assistant state (for late-created windows). */
   'overlay:get-state': { args: []; result: AssistantState };
+  // M11 addition (orchestrator-approved): panel bootstrap for runtime flags
+  // (push updates ride on 'panel:runtime').
+  'panel:get-runtime': { args: []; result: RuntimeFlags };
 }
 
 // ===========================================================================
@@ -144,8 +156,12 @@ export interface PanelApi {
   onPlayback(cb: (payload: { command: PlaybackCommand; epoch?: number }) => void): Unsubscribe;
   // M5 addition (orchestrator-approved): mic capture start/stop from main.
   onCaptureCommand(cb: (payload: { command: CaptureCommand }) => void): Unsubscribe;
+  // M11 addition (orchestrator-approved): runtime flags (hookAlive + dev flags).
+  onRuntime(cb: (flags: RuntimeFlags) => void): Unsubscribe;
 
   getSettings(): Promise<Settings>;
+  // M11 addition (orchestrator-approved): runtime flags bootstrap.
+  getRuntime(): Promise<RuntimeFlags>;
   setSettings(patch: SettingsPatch): Promise<Settings>;
   askText(text: string): Promise<void>;
   listMics(): Promise<MicDevice[]>;
@@ -159,4 +175,8 @@ export interface PanelApi {
   sendPlaybackStats(stats: PlaybackStatsUpdate): void;
   /** Ship the last ~15s of played audio (Int16 PCM 24kHz mono). */
   sendPlaybackRing(ring: ArrayBuffer): void;
+
+  // M11 addition (orchestrator-approved): audio device failure report
+  // (mic capture start failed / playback init failed) — fire-and-forget.
+  reportAudioError(payload: AudioDeviceError): void;
 }

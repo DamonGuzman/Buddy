@@ -160,6 +160,29 @@ production code path: docs/EVAL.md §10.
   `conversation.item.create` function_call_output + continue), `response.done`, `error`.
 - Reconnect with backoff; session is created lazily on first use and kept warm ~5min.
 
+## 7b. Error catalog (M11)
+
+Every user-reachable failure is classified into `src/main/errors.ts` — a pure catalog
+(kind → lowercase clicky copy: what happened + what to do) + `classifyError()` (server error
+codes, HTTP-rejected WS upgrades, network errno strings, handshake timeouts). Consumers:
+`conversation.failTurn`, the conversation's session `error` listener (mid-session events are
+no longer a wordless red flash; mid-hold connect failures are deferred to commit resolution),
+and boot wiring in `index.ts`. Kinds cover keys (missing / rejected / DPAPI-unreadable /
+quota), server trouble (rate limit / model access / 5xx / interrupted / incomplete), devices
+(mic via the renderer's `audio:capture-error` report + zero-chunk holds; speakers force
+captions on while playback is down), and local failures (capture-less turns also inject a
+"you cannot see the screen" context part; 30s hold watchdog; corrupt-settings reset; dead
+keyboard hook; panel-renderer death → tray balloon). Unclassified errors keep
+`something went wrong: <detail>` and still reach the transcript. Actionable kinds auto-show
+the panel at most ONCE PER KIND per run (`windows/panel.ts` `showPanelOnce(reason)`; first-run
+discoverability has its own budget). Boot order matters: the tray and the hotkey `error`
+listener are created BEFORE `hotkey.start()` (an unlistened EventEmitter `error` used to abort
+boot). Last resort: `uncaughtException`/`unhandledRejection` log to `<userData>/clicky.log`
+and keep the tray app alive (verify with `CLICKY_TEST_THROW=exception|rejection`). Hostile-
+endpoint testing: `tools/mock-realtime/reject-server.js` (HTTP-status upgrade rejections,
+pre-settle quota errors); mock scenarios cover rate-limit / server-error / incomplete / agent-
+mode. Runtime flags (`hookAlive`, CLICKY_* dev flags) reach the panel via `panel:runtime`.
+
 ## 8. QA & verification plan
 
 - Unit: vitest on coords/protocol/settings/hotkey FSM.

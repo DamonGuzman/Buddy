@@ -17,6 +17,7 @@ import { SettingsView } from './components/SettingsView';
 import type {
   AssistantState,
   MicDevice,
+  RuntimeFlags,
   SessionStatus,
   Settings,
   TranscriptEntry,
@@ -56,6 +57,8 @@ export function App(): React.JSX.Element {
   const [view, setView] = useState<'chat' | 'settings'>('chat');
   const [micDevices, setMicDevices] = useState<MicDevice[]>([]);
   const [micError, setMicError] = useState<string | null>(null);
+  // M11 addition (orchestrator-approved): hookAlive + dev flags from main.
+  const [runtime, setRuntime] = useState<RuntimeFlags | null>(null);
 
   // Capture needs the *current* mic preference without resubscribing.
   const micDeviceIdRef = useRef('');
@@ -80,11 +83,18 @@ export function App(): React.JSX.Element {
   // ---- subscriptions + boot ----------------------------------------------
   useEffect(() => {
     void clicky.getSettings().then(setSettings);
+    // M11: tolerate an older preload (crash-recreate races) — best-effort.
+    try {
+      void clicky.getRuntime().then(setRuntime);
+    } catch {
+      /* runtime flags are progressive enhancement */
+    }
 
     const offs = [
       clicky.onAssistantState(setAssistantState),
       clicky.onSessionStatus(setSession),
       clicky.onSettings(setSettings),
+      clicky.onRuntime(setRuntime),
       clicky.onTranscript(upsertEntry),
       clicky.onAudioOutput((delta) => audioPlayer.enqueue(delta)),
       clicky.onPlayback(({ command }) => audioPlayer.control(command)),
@@ -174,6 +184,7 @@ export function App(): React.JSX.Element {
       <Header
         assistantState={assistantState}
         session={session}
+        devFlags={runtime?.devFlags ?? []}
         settingsOpen={view === 'settings'}
         onToggleSettings={() => setView((v) => (v === 'chat' ? 'settings' : 'chat'))}
       />
@@ -194,7 +205,11 @@ export function App(): React.JSX.Element {
           ) : null
         ) : (
           <>
-            <Transcript entries={entries} hotkeyLabel={settings?.hotkeyLabel ?? 'Ctrl+Alt (left alt)'} />
+            <Transcript
+              entries={entries}
+              hotkeyLabel={settings?.hotkeyLabel ?? 'Ctrl+Alt (left alt)'}
+              hookAlive={runtime?.hookAlive ?? true}
+            />
             <Composer
               disabled={composerDisabled}
               disabledReason="add your openai key in settings so clicky can connect"

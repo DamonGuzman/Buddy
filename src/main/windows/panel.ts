@@ -40,24 +40,49 @@ const FIRST_RUN_SHOW_DELAY_MS = 1500;
  * without bootstrap wiring changes.
  */
 let activePanel: PanelManager | null = null;
-let shownOnce = false;
+/**
+ * M11: one auto-show budget PER REASON (error kind or 'first-run') instead of
+ * a single boolean — the first-run discoverability show no longer consumes
+ * the error budget, and each error kind can surface the panel once per run.
+ */
+const shownForReason = new Set<string>();
 
 /**
- * Show the panel at most once per app run. First-run discoverability + hidden
- * -failure surfacing: the panel otherwise only ever opens via a tray click.
+ * Show the panel at most once per app run PER REASON (an error-catalog kind,
+ * or 'first-run'). First-run discoverability + hidden-failure surfacing: the
+ * panel otherwise only ever opens via a tray click.
  * Uses the focus-less show — this fires while the user may be mid-typing
  * elsewhere, and Windows' focus-steal prevention would otherwise demote the
  * window (drop topmost + bury it at the bottom of the z-order).
  */
-export function showPanelOnce(): void {
-  if (shownOnce || !activePanel) return;
-  shownOnce = true;
+export function showPanelOnce(reason = 'first-run'): void {
+  if (shownForReason.has(reason) || !activePanel) return;
+  shownForReason.add(reason);
   activePanel.showInactive();
 }
 
 export class PanelManager {
   private win: BrowserWindow | null = null;
   private crashGuard = new CrashLoopGuard(3, 5 * 60_000, 'panel');
+  /** M11: crash recovery gave up — index.ts surfaces it via the tray. */
+  private fatalCb: (() => void) | null = null;
+  /** M11: fired on every panel did-finish-load (transcript replay etc.). */
+  private rendererReadyCb: (() => void) | null = null;
+
+  /**
+   * M11: called when the panel renderer crashed repeatedly and recovery gave
+   * up. The dead window has been destroyed; the next tray click recreates a
+   * fresh one (bypassing the guard — a manual recreate is a user decision).
+   */
+  onFatal(cb: () => void): void {
+    this.fatalCb = cb;
+  }
+
+  /** M11: called whenever the panel renderer finishes loading (incl. after a
+   *  crash-recreate) — main replays the transcript ring + status snapshots. */
+  onRendererReady(cb: () => void): void {
+    this.rendererReadyCb = cb;
+  }
 
   constructor() {
     activePanel = this;
@@ -176,15 +201,35 @@ export class PanelManager {
     // Crash recovery: a dead panel renderer silently kills mic capture AND
     // model-voice playback (both live in this renderer). Recreate, preserving
     // visibility (bounded by crashGuard).
-    recoverOnRenderProcessGone(win, this.crashGuard, 'panel', () => {
-      const wasVisible = !win.isDestroyed() && win.isVisible();
-      if (!win.isDestroyed()) win.destroy();
-      if (this.win === win) this.win = null;
-      const fresh = this.ensureWindow();
-      if (wasVisible) {
-        fresh.webContents.once('did-finish-load', () => this.show());
-      }
-    });
+    recoverOnRenderProcessGone(
+      win,
+      this.crashGuard,
+      'panel',
+      () => {
+        const wasVisible = !win.isDestroyed() && win.isVisible();
+        if (!win.isDestroyed()) win.destroy();
+        if (this.win === win) this.win = null;
+        const fresh = this.ensureWindow();
+        if (wasVisible) {
+          fresh.webContents.once('did-finish-load', () => this.show());
+        }
+      },
+      // M11 fix (renderer_dead): the guard gave up — WITHOUT this, a zombie
+      // BrowserWindow with a gone renderer lingered forever (voice + playback
+      // dead, tray click showed an empty shell). Destroy + null it so the
+      // next tray click recreates from scratch, and let index.ts surface the
+      // failure via the tray (balloon + tooltip).
+      () => {
+        if (!win.isDestroyed()) win.destroy();
+        if (this.win === win) this.win = null;
+        this.fatalCb?.();
+      },
+    );
+
+    // M11: notify main wiring on every renderer load (first boot AND
+    // crash-recreates) so the transcript ring / status can be replayed —
+    // entries pushed before the renderer existed are otherwise lost.
+    win.webContents.on('did-finish-load', () => this.rendererReadyCb?.());
 
     win.on('blur', () => {
       if (SHOW_ON_LAUNCH) return; // visual QA mode: keep the panel up

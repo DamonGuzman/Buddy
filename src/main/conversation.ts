@@ -38,6 +38,8 @@ import { GroundingService } from './grounding/snapper';
 import { RestGrounder } from './grounding/rest-grounder';
 import { dipToPhysicalViaMeta, physicalToDipViaMeta } from './grounding/convert';
 import type { Pt } from './grounding/convert';
+import { classifyError, describeKind } from './errors';
+import type { ErrorKind, ErrorParams, ErrorPresentation } from './errors';
 import { getSessionInstructions, getToolDefinitions } from './persona';
 import { RealtimeSession } from './realtime/session';
 import type { ToolCall } from './realtime/session';
@@ -48,6 +50,7 @@ import { showPanelOnce } from './windows/panel';
 import type { PanelManager } from './windows/panel';
 import type {
   AssistantState,
+  AudioDeviceError,
   CaptureMeta,
   PlaybackCommand,
   PlaybackStatsUpdate,
@@ -84,6 +87,18 @@ const POINTER_HISTORY_LIMIT = 10;
 const TIMINGS_HISTORY_LIMIT = 20;
 /** Per-item playback stats kept for GET /audio/output-stats. */
 const OUTPUT_STATS_LIMIT = 20;
+// M11 additions: error-catalog surfacing.
+/**
+ * One failure often fires two surfacing paths within milliseconds (a server
+ * `error` event followed by the synthesized failed response-done). Error
+ * (pill-grade) transcript entries within this window collapse into the FIRST
+ * one — which carries the more specific classification.
+ */
+const ERROR_DEDUPE_MS = 1_500;
+/** Factual context sent with a turn whose screenshot capture failed. */
+export const CAPTURE_FAILED_CONTEXT =
+  'screen capture failed for this turn — you have NO screenshots. answer from the words ' +
+  'alone, say you could not see the screen if it matters, and never call point_at.';
 
 export interface ConversationDeps {
   settings: SettingsStore;
@@ -172,6 +187,16 @@ export class Conversation {
   private errorTimer: NodeJS.Timeout | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private closed = false;
+
+  // M11: error-catalog surfacing state.
+  /** Last pill-grade error transcript entry (dedupe window). */
+  private lastPillErrorAt = 0;
+  /** Renderer-reported mic capture failure for the CURRENT hold. */
+  private micError: { name: string; message: string } | null = null;
+  /** Playback is failed until the renderer reports actually-played samples. */
+  private playbackFailed = false;
+  /** settings_reset is surfaced at most once (on the first turn). */
+  private settingsResetSurfaced = false;
 
   // M8.5 additions (orchestrator-approved): audio-experience eval.
   /** The turn currently accumulating timings (stays set until the next turn). */
@@ -279,6 +304,9 @@ export class Conversation {
 
   /** 'audio:playback-stats' from the panel renderer (ipcMain wiring). */
   handlePlaybackStats(stats: PlaybackStatsUpdate): void {
+    // M11 (audio_output_failed): samples actually rendered — sound is back,
+    // stop forcing captions and re-arm the one-time failure surfacing.
+    if (stats.samplesPlayed > 0) this.playbackFailed = false;
     const idx = this.outputStatsList.findIndex((s) => s.itemId === stats.itemId);
     if (idx === -1) {
       this.outputStatsList.push(stats);
@@ -368,6 +396,8 @@ export class Conversation {
     this.holdStartedAt = Date.now();
     this.chunksThisHold = 0;
     this.holdAudioMs = 0; // M9
+    this.micError = null; // M11: mic failures are per-hold
+    this.maybeSurfaceSettingsReset(); // M11: first turn after a settings reset
     this.acceptingAudio = this.canReachServer();
     this.epoch += 1;
     // F1 (M7): drop stale un-committed audio (a superseded hold's buffer,
@@ -409,12 +439,26 @@ export class Conversation {
 
     const heldMs = Date.now() - this.holdStartedAt;
     if (heldMs < MIN_HOLD_MS || this.chunksThisHold === 0) {
-      // Accidental tap or dead mic: no turn, no error.
+      // Accidental tap (short hold): no turn, no error.
       this.acceptingAudio = false;
       this.session.clearAudio();
       this.pendingCaptures = null;
       this.discardActiveTurn(); // M8.5: no turn -> no timings record
-      this.setState('idle');
+      // M11 (mic_unavailable): a REAL hold that produced zero mic chunks is a
+      // dead/blocked microphone, not a tap — until now this was a silent
+      // nothing (the renderer swallowed the capture error and this branch
+      // treated it as a tap). The renderer's capture-error report (if any)
+      // selects the NotAllowedError privacy-toggle copy variant.
+      if (heldMs >= MIN_HOLD_MS && this.chunksThisHold === 0) {
+        this.surfaceError(
+          describeKind(
+            'mic_unavailable',
+            this.micError !== null ? { micErrorName: this.micError.name } : {},
+          ),
+        );
+      } else {
+        this.setState('idle');
+      }
       return;
     }
     if (this.activeTurn) this.activeTurn.tHoldEnd = Date.now(); // M8.5
@@ -457,6 +501,7 @@ export class Conversation {
   async askText(text: string): Promise<void> {
     const trimmed = text.trim();
     if (this.closed || trimmed.length === 0) return;
+    this.maybeSurfaceSettingsReset(); // M11: first turn after a settings reset
     // A typed question while the hotkey is held supersedes the hold —
     // never two concurrent turns (m1) / response.creates.
     if (this.holding) this.cancelHold();
@@ -500,8 +545,17 @@ export class Conversation {
     this.lastCapture = captures.map((r) => r.meta);
     this.turnCaptures = captures;
 
+    // M11 (capture_failed): the turn is going ahead with ZERO screenshots —
+    // tell the user (transcript + caption) and tell the MODEL via the factual
+    // context part so it doesn't pretend to see the screen.
+    let contextText = '';
+    if (captures.length === 0) {
+      this.surfaceError(describeKind('capture_failed'));
+      contextText = CAPTURE_FAILED_CONTEXT;
+    }
+
     try {
-      await this.session.askText(trimmed, captures, '');
+      await this.session.askText(trimmed, captures, contextText);
       turn.tCommitSent = Date.now(); // M8.5
       // pendingResponses counted via 'response-requested' (M3).
     } catch (err) {
@@ -602,8 +656,15 @@ export class Conversation {
       streaming: true,
       timestamp: Date.now(),
     });
+    // M11 (capture_failed): committing with ZERO screenshots — tell the user
+    // (transcript + caption) and tell the MODEL via the factual context part.
+    let contextText = '';
+    if (captures.length === 0) {
+      this.surfaceError(describeKind('capture_failed'));
+      contextText = CAPTURE_FAILED_CONTEXT;
+    }
     try {
-      await this.session.commitAudioAndRespond(captures, '');
+      await this.session.commitAudioAndRespond(captures, contextText);
       if (this.activeTurn) this.activeTurn.tCommitSent = Date.now(); // M8.5
       // pendingResponses counted via 'response-requested' (M3).
     } catch (err) {
@@ -611,26 +672,116 @@ export class Conversation {
     }
   }
 
-  /** A turn could not be started/committed: fail soft, never crash. */
+  /**
+   * A turn could not be started/committed (or died mid-flight): fail soft,
+   * never crash. M11: the string-matching is gone — the error catalog
+   * (src/main/errors.ts) classifies the failure and owns the copy.
+   */
   private failTurn(err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[conversation] turn failed:', message);
     // F1 (M7): the failed turn's audio must never leak into the next turn.
     this.session.clearAudio();
     this.resolveVoicePlaceholder('(voice message)');
-    const noKey = message.includes('no API key');
-    this.pushTranscript({
-      id: `sys_${Date.now()}_${(this.entrySeq += 1)}`,
-      role: 'system',
-      text: noKey ? 'add your openai key in settings' : `something went wrong: ${message}`,
-      streaming: false,
-      timestamp: Date.now(),
-    });
-    // No key = almost certainly a first-time user talking to a hidden panel.
-    // Surface it (at most once per run, focus-less) so the "add your openai
-    // key" message is actually seen instead of dying behind the tray icon.
-    if (noKey) showPanelOnce();
-    this.setState('error');
+    let pres = classifyError(err, { model: this.sessionModel });
+    // M11 (api_key_unreadable): "no key" while an (undecryptable) blob IS
+    // stored means DPAPI lost the key — the fix is a re-paste, not an add.
+    if (pres.kind === 'no_api_key' && this.settings.get().apiKeyUnreadable) {
+      pres = describeKind('api_key_unreadable');
+    }
+    this.surfaceError(pres);
+  }
+
+  // ---------------------------------------------------------------------
+  // M11: error-catalog surfacing
+  // ---------------------------------------------------------------------
+
+  /**
+   * Surface a catalog kind directly — index.ts wiring uses this for failures
+   * the conversation cannot observe itself (hotkey_dead, hold_too_long).
+   */
+  reportError(kind: ErrorKind, params?: ErrorParams): void {
+    if (this.closed) return;
+    this.surfaceError(describeKind(kind, params));
+  }
+
+  /**
+   * 'audio:capture-error' from the panel renderer (ipcMain wiring):
+   * mic capture failed to start, or the playback pipeline failed to init.
+   */
+  handleAudioDeviceError(payload: AudioDeviceError): void {
+    if (this.closed) return;
+    if (payload.source === 'mic') {
+      console.warn(`[conversation] mic capture error: ${payload.name}: ${payload.message}`);
+      // Remembered for the hold in progress; surfaced at hold end when the
+      // hold really produced zero audio (real-hold-with-zero-chunks branch).
+      this.micError = { name: payload.name, message: payload.message };
+      return;
+    }
+    console.warn(`[conversation] playback init error: ${payload.name}: ${payload.message}`);
+    if (!this.playbackFailed) {
+      this.playbackFailed = true;
+      // Captions are forced on while playback is down (see the
+      // assistant-transcript listener) so the answer still reaches the user.
+      this.surfaceError(describeKind('audio_output_failed'));
+    }
+  }
+
+  /**
+   * Route one classified failure to its surfaces: transcript system entry,
+   * assistant error state ('pill'), overlay caption, and the once-per-kind
+   * panel auto-show. The single place the policy is enforced.
+   */
+  private surfaceError(pres: ErrorPresentation): void {
+    const now = Date.now();
+    const isPill = pres.surfaces.includes('pill');
+    // Dedupe: one failure, two paths (server error event + synthesized failed
+    // response-done) — the FIRST entry (more specific classification) wins.
+    const suppressed = isPill && now - this.lastPillErrorAt < ERROR_DEDUPE_MS;
+    if (pres.surfaces.includes('transcript') && !suppressed) {
+      this.pushTranscript({
+        id: `sys_${now}_${(this.entrySeq += 1)}`,
+        role: 'system',
+        text: pres.message,
+        streaming: false,
+        timestamp: now,
+      });
+    }
+    if (pres.surfaces.includes('caption') && !suppressed) {
+      this.overlays.broadcast('overlay:caption', {
+        itemId: `sys_err_${now}_${this.entrySeq}`,
+        text: pres.message,
+        done: true,
+      });
+    }
+    // Actionable kinds surface the panel — at most once per KIND per run
+    // (first-run discoverability no longer consumes this budget).
+    if (pres.autoShowPanel && pres.kind !== 'unknown') showPanelOnce(pres.kind);
+    if (isPill) {
+      this.lastPillErrorAt = now;
+      this.setState('error');
+    }
+  }
+
+  /** M11 (settings_reset): one transcript entry + auto-show, on the first turn. */
+  private maybeSurfaceSettingsReset(): void {
+    if (this.settingsResetSurfaced) return;
+    if (typeof this.settings.settingsWereReset !== 'function') return; // test fakes
+    if (!this.settings.settingsWereReset()) return;
+    this.settingsResetSurfaced = true;
+    this.surfaceError(describeKind('settings_reset'));
+  }
+
+  /**
+   * M11: re-send the transcript ring + status snapshots to a (re)loaded panel
+   * renderer — entries pushed before the renderer existed (boot-time errors)
+   * or before a crash-recreate were otherwise lost. Upsert semantics make the
+   * replay idempotent.
+   */
+  replayToPanel(): void {
+    for (const entry of this.entries) this.panel.send('panel:transcript', entry);
+    this.panel.send('panel:session-status', this.session.status());
+    this.panel.send('panel:assistant-state', this.state);
   }
 
   private canReachServer(): boolean {
@@ -760,7 +911,9 @@ export class Conversation {
       if (this.activeTurn && this.activeTurn.tFirstAssistantTranscript === undefined) {
         this.activeTurn.tFirstAssistantTranscript = Date.now(); // M8.5
       }
-      if (this.settings.get().captionsEnabled) {
+      // M11 (audio_output_failed): captions are FORCED on while playback is
+      // failed — the spoken answer would otherwise be lost entirely.
+      if (this.settings.get().captionsEnabled || this.playbackFailed) {
         this.overlays.broadcast('overlay:caption', { itemId, text, done });
       }
       const existing = this.entries.find((e) => e.id === itemId);
@@ -836,11 +989,20 @@ export class Conversation {
       // F1 (retention): the turn settled — release the capture buffers now
       // instead of holding multi-MB screenshots until the next turn.
       this.turnCaptures = [];
-      if (status === 'failed' && this.state !== 'error' && !this.closed) {
-        // F1 fix (M6): a response failed without a server error event
-        // (socket drop, watchdog) — run the normal turn-failure recovery.
+      if (status === 'failed' && !this.closed) {
+        // F1 fix (M6): a response failed (socket drop, watchdog, server
+        // error event) — run the normal turn-failure recovery. M11: the old
+        // `state !== 'error'` gate is gone — the response_interrupted copy
+        // must still land after a server error event flipped the state
+        // (surfaceError's dedupe window keeps it to one entry per failure).
         this.failTurn(new Error('the response was interrupted'));
         return;
+      }
+      // M11 (response_incomplete): status 'incomplete' used to be treated as
+      // success — the answer just stopped mid-sentence with no
+      // acknowledgement. Not an error state; one system entry.
+      if (status === 'incomplete' && !this.closed) {
+        this.surfaceError(describeKind('response_incomplete'));
       }
       this.scheduleIdle();
     });
@@ -848,8 +1010,17 @@ export class Conversation {
     session.on('error', (err) => {
       console.error('[conversation] session error:', err.message);
       this.epoch += 1;
+      if (this.closed) return;
+      // M11: mid-hold connect failures (the fire-and-forget connect kicked by
+      // appendAudio) must not flip the listening indicator to a red flash
+      // while the user is still talking — the commit at hold end resolves the
+      // turn through failTurn with the same classification.
+      if (this.holding) return;
       // Panel session-status was already pushed by the 'status' listener.
-      this.setState('error');
+      // M11: a mid-session server error is no longer a WORDLESS red flash —
+      // classified catalog copy (rate_limited, server_error, ...) reaches the
+      // transcript; unclassified errors keep `something went wrong: <detail>`.
+      this.surfaceError(classifyError(err, { model: this.sessionModel }));
     });
   }
 

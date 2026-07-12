@@ -24,11 +24,18 @@
 
 import { EventEmitter } from 'node:events';
 
+/**
+ * M11: why a hold was force-cancelled. 'watchdog' = the 30s max-hold guard
+ * (surfaced to the user as hold_too_long); 'forced' = lock/suspend/secure
+ * desktop (silent — the user did not do anything wrong).
+ */
+export type HoldCancelReason = 'watchdog' | 'forced';
+
 export interface HotkeyEvents {
   'hold-start': [];
   'hold-end': [];
   /** Forced release: watchdog / lock / suspend. Cancel the hold, no turn. */
-  'hold-cancel': [];
+  'hold-cancel': [reason: HoldCancelReason];
   error: [Error];
 }
 
@@ -97,7 +104,11 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
       this.hookAlive = false;
       this.lastError = error.message;
       console.error('[hotkey] failed to start uiohook, hold-to-talk disabled:', error);
-      this.emit('error', error);
+      // M11 CRASH FIX: an EventEmitter 'error' with no listener THROWS — the
+      // throw escaped start() and aborted app boot (tray/powerMonitor/debug
+      // server never ran). index.ts now subscribes before start(); this guard
+      // keeps the "never throws" contract even for callers that don't.
+      if (this.listenerCount('error') > 0) this.emit('error', error);
     }
   }
 
@@ -128,13 +139,13 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
    * modifier state, so swallowed keyups (secure desktop, lock screen, sleep)
    * can never latch the hold or a phantom Ctrl/Alt. Safe to call anytime.
    */
-  forceCancel(): void {
+  forceCancel(reason: HoldCancelReason = 'forced'): void {
     this.ctrlDown = false;
     this.altDown = false;
     this.clearWatchdog();
     if (this.holding) {
       this.holding = false;
-      this.emit('hold-cancel');
+      this.emit('hold-cancel', reason);
     }
   }
 
@@ -179,8 +190,9 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
     this.clearWatchdog();
     this.watchdog = setTimeout(() => {
       this.watchdog = null;
-      // Nobody asks a question for 30s straight: the keyup was swallowed.
-      this.forceCancel();
+      // Nobody asks a question for 30s straight: the keyup was swallowed —
+      // OR the user genuinely held for 30s (M11: hold_too_long tells them).
+      this.forceCancel('watchdog');
     }, this.options.maxHoldMs ?? MAX_HOLD_MS);
   }
 

@@ -15,16 +15,27 @@
  */
 
 import { app, ipcMain, powerMonitor } from 'electron';
+import type { Tray } from 'electron';
+import { appendFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { captureAllDisplays } from './capture';
 import { Conversation } from './conversation';
 import { startDebugServer } from './debug-server';
+import { describeKind } from './errors';
 import { HotkeyManager } from './hotkey';
 import { SettingsStore } from './settings';
 import { createTray } from './tray';
 import { OverlayManager } from './windows/overlay';
 import { PanelManager } from './windows/panel';
+import { ENV_DEBUG } from '../shared/constants';
 import type { InvokeArgs, InvokeChannel, InvokeResult } from '../shared/ipc';
-import type { DebugState, MicDevice, PlaybackStatsUpdate } from '../shared/types';
+import type {
+  AudioDeviceError,
+  DebugState,
+  MicDevice,
+  PlaybackStatsUpdate,
+  RuntimeFlags,
+} from '../shared/types';
 
 // CLICKY_USER_DATA=<dir>: separate userData dir (settings + the
 // single-instance lock) so parallel dev/QA instances don't fight over the
@@ -59,6 +70,43 @@ async function main(): Promise<void> {
   const panel = new PanelManager();
   const hotkey = new HotkeyManager();
   const conversation = new Conversation({ settings, overlays, panel });
+  let tray: Tray | null = null;
+
+  // ---------------------------------------------------------------------
+  // M11: last-resort crash handling. An uncaught main-process exception used
+  // to pop Electron's raw dialog (or kill the tray app outright). Log it to
+  // <userData>/clicky.log, keep the app alive, and let the tray tooltip say
+  // what to do. Registered FIRST so even boot-time throws are covered.
+  // ---------------------------------------------------------------------
+  const logFatal = (kind: string, err: unknown): void => {
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    console.error(`[fatal] ${kind}:`, detail);
+    try {
+      appendFileSync(
+        join(app.getPath('userData'), 'clicky.log'),
+        `[${new Date().toISOString()}] ${kind}: ${detail}\n`,
+      );
+    } catch {
+      /* the crash logger must never crash */
+    }
+    try {
+      tray?.setToolTip('clicky tripped over something — a restart will fix it');
+    } catch {
+      /* tray may be gone during shutdown */
+    }
+  };
+  process.on('uncaughtException', (err) => logFatal('uncaughtException', err));
+  process.on('unhandledRejection', (reason) => logFatal('unhandledRejection', reason));
+
+  // M11: runtime flags for the panel — hookAlive (the hero hint adapts when
+  // the hook is dead) + CLICKY_* dev/QA flags besides CLICKY_DEBUG (generic
+  // dev chip in the header, extending the old mock-only badge).
+  const devFlags = Object.keys(process.env)
+    .filter((k) => k.startsWith('CLICKY_') && k !== ENV_DEBUG && (process.env[k] ?? '') !== '')
+    .map((k) => k.slice('CLICKY_'.length).toLowerCase())
+    .sort();
+  const runtimeFlags = (): RuntimeFlags => ({ hookAlive: hotkey.status().hookAlive, devFlags });
+  const pushRuntime = (): void => panel.send('panel:runtime', runtimeFlags());
 
   // ---------------------------------------------------------------------
   // Typed invoke handlers (single registration point for InvokeChannels)
@@ -78,9 +126,21 @@ async function main(): Promise<void> {
     settings.set({ micDeviceId: deviceId });
   });
   handle('overlay:get-state', () => conversation.assistantState());
+  // M11 addition (orchestrator-approved): runtime flags bootstrap.
+  handle('panel:get-runtime', () => runtimeFlags());
 
   ipcMain.on('audio:chunk', (_event, chunk: ArrayBuffer) => {
     conversation.handleAudioChunk(chunk);
+  });
+  // M11 addition (orchestrator-approved): audio device failure reports from
+  // the panel renderer (mic capture start / playback init).
+  ipcMain.on('audio:capture-error', (_event, payload: AudioDeviceError) => {
+    if (!payload || (payload.source !== 'mic' && payload.source !== 'playback')) return;
+    conversation.handleAudioDeviceError({
+      source: payload.source,
+      name: typeof payload.name === 'string' ? payload.name : 'Error',
+      message: typeof payload.message === 'string' ? payload.message : '',
+    });
   });
   // M8.5 (orchestrator-approved): playback tap reporting from the panel.
   ipcMain.on('audio:playback-stats', (_event, stats: PlaybackStatsUpdate) => {
@@ -102,7 +162,12 @@ async function main(): Promise<void> {
   hotkey.on('hold-end', () => conversation.holdEnd());
   // F1 fix (C1): forced release (max-hold watchdog / lock / suspend) cancels
   // the hold — mic released, held audio cleared, NO turn committed.
-  hotkey.on('hold-cancel', () => conversation.cancelHold());
+  // M11 (hold_too_long): the 30s watchdog cancel additionally TELLS the user
+  // (it used to be silent — the answer just never came).
+  hotkey.on('hold-cancel', (reason) => {
+    conversation.cancelHold();
+    if (reason === 'watchdog') conversation.reportError('hold_too_long');
+  });
 
   // ---------------------------------------------------------------------
   // Boot
@@ -111,7 +176,49 @@ async function main(): Promise<void> {
   app.setAppUserModelId('ai.fastyr.clicky');
 
   overlays.start();
+
+  // M11 CRASH FIX: the tray AND the hotkey 'error' listener must exist
+  // BEFORE hotkey.start(). A failing keyboard hook emits 'error', and an
+  // EventEmitter 'error' with no listener THROWS — which used to escape here
+  // and abort the rest of boot (tray, powerMonitor, debug server never ran):
+  // a hook failure left the app running with no UI entry point at all.
+  tray = createTray({
+    onTogglePanel: () => panel.toggle(),
+    onOpenPanel: () => panel.show(),
+    onQuit: () => app.quit(),
+  });
+
+  hotkey.on('error', () => {
+    // hotkey_dead: transcript entry + one-time panel auto-show (catalog
+    // policy) + a tray tooltip that points at the typing fallback.
+    conversation.reportError('hotkey_dead');
+    tray?.setToolTip('clicky — hotkey unavailable, click to type');
+    pushRuntime(); // the panel hero hint adapts to hookAlive === false
+  });
+
   hotkey.start();
+
+  // M11 (renderer_dead): panel crash recovery gave up — the window has been
+  // torn down (a tray click builds a fresh one); tell the user via the tray.
+  panel.onFatal(() => {
+    const dead = describeKind('renderer_dead');
+    try {
+      tray?.displayBalloon({ title: 'clicky', content: dead.message });
+    } catch {
+      /* balloons can be unavailable; the tooltip below still lands */
+    }
+    tray?.setToolTip(`clicky — ${dead.message}`);
+  });
+
+  // M11: every panel renderer load (boot + crash-recreate) gets the current
+  // transcript ring, status snapshots and runtime flags replayed — boot-time
+  // errors (hotkey_dead, settings_reset) no longer vanish because they were
+  // pushed before the renderer existed.
+  panel.onRendererReady(() => {
+    conversation.replayToPanel();
+    panel.send('panel:settings', settings.get());
+    pushRuntime();
+  });
 
   // F1 fix (C1 + sleep/resume): the secure desktop (Ctrl+Alt+Del) and lock
   // screen swallow keyups — force-cancel any live hold and reset modifier
@@ -121,15 +228,21 @@ async function main(): Promise<void> {
   powerMonitor.on('suspend', () => hotkey.forceCancel());
   powerMonitor.on('resume', () => conversation.onSystemResume());
 
-  const tray = createTray({
-    onTogglePanel: () => panel.toggle(),
-    onOpenPanel: () => panel.show(),
-    onQuit: () => app.quit(),
-  });
-  // Keep a reference so the tray isn't garbage-collected.
-  void tray;
-
   app.on('second-instance', () => panel.show());
+
+  // M11: last-resort-handler verification hook (headless QA only):
+  // CLICKY_TEST_THROW=exception|rejection blows up 3s after boot so the
+  // harness can assert the app SURVIVES and the crash landed in clicky.log.
+  if (process.env['CLICKY_TEST_THROW']) {
+    const kind = process.env['CLICKY_TEST_THROW'];
+    setTimeout(() => {
+      if (kind === 'rejection') {
+        void Promise.reject(new Error('debug-injected unhandled rejection'));
+      } else {
+        throw new Error('debug-injected uncaught exception');
+      }
+    }, 3_000);
+  }
 
   const getDebugState = (): DebugState => ({
     appVersion: app.getVersion(),

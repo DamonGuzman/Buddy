@@ -108,6 +108,18 @@ export class MicCapture {
       this.lastError = err instanceof Error ? err.message : String(err);
       console.warn('[capture] failed to start mic capture:', this.lastError);
       this.running = false;
+      // M11 addition (orchestrator-approved): report the failure to main so
+      // the hold that produced no audio surfaces mic_unavailable (with the
+      // NotAllowedError privacy-toggle variant) instead of a silent nothing.
+      try {
+        clicky.reportAudioError({
+          source: 'mic',
+          name: err instanceof Error ? err.name : 'Error',
+          message: this.lastError,
+        });
+      } catch {
+        /* reporting is best-effort */
+      }
     }
   }
 
