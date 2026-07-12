@@ -174,6 +174,9 @@ export interface AudioOutputDelta {
 
 export type PlaybackCommand = 'stop' | 'flush';
 
+/** M5 addition (orchestrator-approved): push-to-talk mic capture command. */
+export type CaptureCommand = 'start' | 'stop';
+
 export interface MicDevice {
   deviceId: string;
   label: string;

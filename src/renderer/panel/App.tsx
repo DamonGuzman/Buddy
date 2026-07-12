@@ -1,100 +1,231 @@
 /**
- * Panel UI (M1 minimal): app name, assistant/session state, disabled text
- * input. Transcript list, settings view, and the live text pipeline land in
- * the panel milestone.
+ * Panel app: header (brand + assistant/session state), transcript with
+ * text-input fallback, and a gear-toggled settings view. Also hosts the two
+ * audio engines — mic capture (push-to-talk, works while the window is
+ * hidden) and model-voice playback — because this renderer is kept alive by
+ * main from app start.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { clicky } from './clicky';
-import type { AssistantState, SessionStatus, Settings } from '../../shared/types';
+import { micCapture } from './audio/capture';
+import { audioPlayer } from './audio/playback';
+import { Header } from './components/Header';
+import { Transcript } from './components/Transcript';
+import { Composer } from './components/Composer';
+import { SettingsView } from './components/SettingsView';
+import type {
+  AssistantState,
+  MicDevice,
+  SessionStatus,
+  Settings,
+  TranscriptEntry,
+} from '../../shared/types';
 
-const STATE_LABEL: Record<AssistantState, string> = {
-  idle: 'resting',
-  listening: 'listening…',
-  thinking: 'thinking…',
-  speaking: 'speaking…',
-  error: 'something went wrong',
-};
+let prewarmStarted = false; // once per renderer, even under StrictMode
+
+async function enumerateMics(): Promise<MicDevice[]> {
+  const seen = new Map<string, MicDevice>();
+  try {
+    const local = await navigator.mediaDevices.enumerateDevices();
+    for (const d of local) {
+      if (d.kind !== 'audioinput') continue;
+      seen.set(d.deviceId, { deviceId: d.deviceId, label: d.label });
+    }
+  } catch (err) {
+    console.warn('[mic] enumerateDevices failed:', err);
+  }
+  try {
+    for (const d of await clicky.listMics()) {
+      if (!seen.has(d.deviceId)) seen.set(d.deviceId, d);
+    }
+  } catch {
+    /* main-side list is best-effort */
+  }
+  return [...seen.values()];
+}
 
 export function App(): React.JSX.Element {
   const [assistantState, setAssistantState] = useState<AssistantState>('idle');
   const [session, setSession] = useState<SessionStatus | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [entries, setEntries] = useState<TranscriptEntry[]>([]);
+  const [view, setView] = useState<'chat' | 'settings'>('chat');
+  const [micDevices, setMicDevices] = useState<MicDevice[]>([]);
+  const [micError, setMicError] = useState<string | null>(null);
 
-  useEffect(() => {
-    void clicky.getSettings().then(setSettings);
-    const offState = clicky.onAssistantState(setAssistantState);
-    const offSession = clicky.onSessionStatus(setSession);
-    const offSettings = clicky.onSettings(setSettings);
-    return () => {
-      offState();
-      offSession();
-      offSettings();
-    };
+  // Capture needs the *current* mic preference without resubscribing.
+  const micDeviceIdRef = useRef('');
+  micDeviceIdRef.current = settings?.micDeviceId ?? '';
+
+  const upsertEntry = useCallback((entry: TranscriptEntry): void => {
+    setEntries((prev) => {
+      const idx = prev.findIndex((e) => e.id === entry.id);
+      if (idx === -1) return [...prev, entry];
+      const next = prev.slice();
+      next[idx] = entry;
+      return next;
+    });
   }, []);
 
+  // ---- subscriptions + boot ----------------------------------------------
+  useEffect(() => {
+    void clicky.getSettings().then(setSettings);
+
+    const offs = [
+      clicky.onAssistantState(setAssistantState),
+      clicky.onSessionStatus(setSession),
+      clicky.onSettings(setSettings),
+      clicky.onTranscript(upsertEntry),
+      clicky.onAudioOutput((delta) => audioPlayer.enqueue(delta)),
+      clicky.onPlayback(({ command }) => audioPlayer.control(command)),
+      clicky.onCaptureCommand(({ command }) => {
+        if (command === 'start') {
+          void micCapture.start(micDeviceIdRef.current).then(() => {
+            setMicError(micCapture.error());
+          });
+        } else {
+          micCapture.stop();
+        }
+      }),
+    ];
+    return () => offs.forEach((off) => off());
+  }, [upsertEntry]);
+
+  // ---- mic permission pre-warm + device list ------------------------------
+  useEffect(() => {
+    const refresh = (): void => {
+      void enumerateMics().then(setMicDevices);
+    };
+    if (!prewarmStarted) {
+      prewarmStarted = true;
+      void micCapture.prewarm().then((ok) => {
+        setMicError(ok ? null : micCapture.error());
+        refresh();
+      });
+    } else {
+      refresh();
+    }
+    navigator.mediaDevices.addEventListener('devicechange', refresh);
+    return () => navigator.mediaDevices.removeEventListener('devicechange', refresh);
+  }, []);
+
+  // ---- dev hooks (test tone, transcript seed, capture stats) --------------
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+    const dev = {
+      playTestTone: (seconds?: number) => audioPlayer.playTestTone(seconds),
+      /**
+       * Playback QA: returns drain-event timestamps (ms from start).
+       * Expected ≈ [2000, ~3100, ~4100]:
+       *  - 2s tone enqueued all at once drains at ~2000ms → contiguous,
+       *    gapless scheduling (any inter-chunk gap would inflate this).
+       *  - flush during a 3s tone drains immediately (~3100ms mark).
+       *  - re-enqueue under the flushed itemId is dropped entirely; a fresh
+       *    1s item plays to ~4100ms. If stale-drop failed → ~8100ms.
+       */
+      playbackQa: async (): Promise<number[]> => {
+        const marks: number[] = [];
+        const t0 = performance.now();
+        audioPlayer.onDrained(() => marks.push(Math.round(performance.now() - t0)));
+        audioPlayer.enqueueTone('qa-1', 2);
+        await sleep(2600);
+        audioPlayer.enqueueTone('qa-2', 3);
+        await sleep(500);
+        audioPlayer.control('flush');
+        audioPlayer.enqueueTone('qa-2', 5); // superseded item → must be dropped
+        audioPlayer.enqueueTone('qa-3', 1);
+        await sleep(2200);
+        return marks;
+      },
+      seedTranscript: () => SEED_ENTRIES.forEach(upsertEntry),
+      clearTranscript: () => setEntries([]),
+      openSettings: () => setView('settings'),
+      openChat: () => setView('chat'),
+      scrollSettings: (px: number) => {
+        document.querySelector('.settings')?.scrollBy({ top: px });
+      },
+      startCapture: () => void micCapture.start(micDeviceIdRef.current),
+      captureTone: () => void micCapture.startWithTestTone(),
+      stopCapture: () => micCapture.stop(),
+      captureStats: () => micCapture.stats(),
+    };
+    (window as unknown as Record<string, unknown>)['__clickyDev'] = dev;
+    return () => {
+      delete (window as unknown as Record<string, unknown>)['__clickyDev'];
+    };
+  }, [upsertEntry]);
+
+  const noKey = settings !== null && !settings.apiKeyPresent;
+  const composerDisabled = session?.state === 'error' && noKey;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: 16 }}>
-      <header style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div
-          style={{
-            width: 0,
-            height: 0,
-            borderLeft: '9px solid transparent',
-            borderRight: '9px solid transparent',
-            borderBottom: '16px solid #3b82f6',
-          }}
-        />
-        <h1 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>clicky</h1>
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: '#94a3b8' }}>
-          {STATE_LABEL[assistantState]}
-        </span>
-      </header>
-
-      <div style={{ fontSize: 12, color: '#64748b', marginTop: 12, lineHeight: 1.6 }}>
-        <div>
-          hold <strong style={{ color: '#e2e8f0' }}>{settings?.hotkeyLabel ?? 'Ctrl+Alt'}</strong>{' '}
-          and talk
-        </div>
-        <div>
-          session: {session ? session.state : 'disconnected'}
-          {session?.usingMockServer ? ' (mock)' : ''}
-        </div>
-        <div>api key: {settings ? (settings.apiKeyPresent ? 'set' : 'not set') : '…'}</div>
-      </div>
-
-      {/* transcript area (panel milestone) */}
-      <div
-        style={{
-          flex: 1,
-          marginTop: 16,
-          borderRadius: 8,
-          background: '#1e293b',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#475569',
-          fontSize: 13,
-        }}
-      >
-        transcript will appear here
-      </div>
-
-      <input
-        type="text"
-        disabled
-        placeholder="type a question (coming soon)"
-        style={{
-          marginTop: 12,
-          padding: '10px 12px',
-          borderRadius: 8,
-          border: '1px solid #334155',
-          background: '#1e293b',
-          color: '#e2e8f0',
-          fontSize: 13,
-          outline: 'none',
-        }}
+    <div className="app">
+      <Header
+        assistantState={assistantState}
+        session={session}
+        settingsOpen={view === 'settings'}
+        onToggleSettings={() => setView((v) => (v === 'chat' ? 'settings' : 'chat'))}
       />
+
+      {view === 'chat' && noKey ? (
+        <div className="callout">
+          <span className="grow">add your openai key to give clicky a voice</span>
+          <button type="button" onClick={() => setView('settings')}>
+            open settings
+          </button>
+        </div>
+      ) : null}
+
+      <main className="main">
+        {view === 'settings' ? (
+          settings ? (
+            <SettingsView settings={settings} micDevices={micDevices} micError={micError} />
+          ) : null
+        ) : (
+          <>
+            <Transcript entries={entries} hotkeyLabel={settings?.hotkeyLabel ?? 'Ctrl+Alt'} />
+            <Composer
+              disabled={composerDisabled}
+              disabledReason="add your openai key in settings so clicky can connect"
+              onSend={(text) => void clicky.askText(text)}
+            />
+          </>
+        )}
+      </main>
     </div>
   );
 }
+
+/** Dev-only fake conversation for visual QA (window.__clickyDev.seedTranscript). */
+const SEED_ENTRIES: TranscriptEntry[] = [
+  {
+    id: 'seed-1',
+    role: 'user',
+    text: 'how do i make this spreadsheet column fit its text?',
+    streaming: false,
+    timestamp: Date.now() - 60_000,
+  },
+  {
+    id: 'seed-2',
+    role: 'assistant',
+    text: "see the line between the C and D column headers? double-click it and the column snaps to fit. i'm pointing at it now.",
+    streaming: false,
+    timestamp: Date.now() - 55_000,
+  },
+  {
+    id: 'seed-3',
+    role: 'user',
+    text: 'nice. can i do all columns at once?',
+    streaming: false,
+    timestamp: Date.now() - 20_000,
+  },
+  {
+    id: 'seed-4',
+    role: 'assistant',
+    text: 'yep — click the little triangle at the top-left corner to select everything, then double-click any header divider. every column',
+    streaming: true,
+    timestamp: Date.now() - 2_000,
+  },
+];

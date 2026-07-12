@@ -28,6 +28,8 @@ const api: PanelApi = {
   onSettings: (cb) => subscribe('panel:settings', cb),
   onAudioOutput: (cb) => subscribe('audio:output', cb),
   onPlayback: (cb) => subscribe('audio:playback', cb),
+  // M5 addition (orchestrator-approved): mic capture start/stop from main.
+  onCaptureCommand: (cb) => subscribe('audio:capture', cb),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
