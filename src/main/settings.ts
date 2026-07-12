@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { MODEL_IDS } from '../shared/constants';
 import { DEFAULT_SETTINGS, applySettingsPatch } from '../shared/types';
-import type { Settings, SettingsPatch } from '../shared/types';
+import type { BuddyRest, Settings, SettingsPatch } from '../shared/types';
 
 /** On-disk shape. `apiKeyEncrypted` is a base64 safeStorage blob. */
 interface SettingsFile {
@@ -21,9 +21,24 @@ interface SettingsFile {
   voice: string;
   captionsEnabled: boolean;
   micDeviceId: string;
+  // M15 addition (orchestrator-approved): user-defined buddy rest position.
+  buddyRest: BuddyRest | null;
 }
 
 const FILE_NAME = 'settings.json';
+
+/**
+ * M15 addition (orchestrator-approved): module-level handle to the started
+ * store so sibling main modules (windows/overlay.ts buddy-hover feature) can
+ * read hotkeyLabel/buddyRest and persist drag-repositions without bootstrap
+ * wiring changes (index.ts is frozen for M15). Same pattern as
+ * windows/overlay.ts getOverlayManager.
+ */
+let activeStore: SettingsStore | null = null;
+
+export function getSettingsStore(): SettingsStore | null {
+  return activeStore;
+}
 
 export class SettingsStore {
   private file: SettingsFile;
@@ -33,6 +48,8 @@ export class SettingsStore {
   constructor(filePath?: string) {
     this.path = filePath ?? join(app.getPath('userData'), FILE_NAME);
     this.file = this.load();
+    // M15 addition (orchestrator-approved): see getSettingsStore above.
+    activeStore = this;
   }
 
   /** Renderer-safe snapshot (never the raw key). */
@@ -44,6 +61,8 @@ export class SettingsStore {
       captionsEnabled: this.file.captionsEnabled,
       micDeviceId: this.file.micDeviceId,
       hotkeyLabel: DEFAULT_SETTINGS.hotkeyLabel,
+      // M15 addition (orchestrator-approved).
+      buddyRest: this.file.buddyRest,
     };
   }
 
@@ -58,6 +77,8 @@ export class SettingsStore {
     this.file.voice = merged.voice;
     this.file.captionsEnabled = merged.captionsEnabled;
     this.file.micDeviceId = merged.micDeviceId;
+    // M15 addition (orchestrator-approved).
+    this.file.buddyRest = merged.buddyRest;
     this.persist();
     const snapshot = this.get();
     for (const cb of this.listeners) cb(snapshot);
@@ -98,6 +119,8 @@ export class SettingsStore {
       voice: DEFAULT_SETTINGS.voice,
       captionsEnabled: DEFAULT_SETTINGS.captionsEnabled,
       micDeviceId: DEFAULT_SETTINGS.micDeviceId,
+      // M15 addition (orchestrator-approved).
+      buddyRest: DEFAULT_SETTINGS.buddyRest,
     };
     try {
       if (!existsSync(this.path)) return fallback;
@@ -116,6 +139,8 @@ export class SettingsStore {
             ? parsed.captionsEnabled
             : fallback.captionsEnabled,
         micDeviceId: typeof parsed.micDeviceId === 'string' ? parsed.micDeviceId : fallback.micDeviceId,
+        // M15 addition (orchestrator-approved): validate the persisted rest.
+        buddyRest: parseBuddyRest(parsed.buddyRest),
       };
     } catch (err) {
       console.error('[settings] failed to load, using defaults:', err);
@@ -131,4 +156,24 @@ export class SettingsStore {
       console.error('[settings] failed to persist:', err);
     }
   }
+}
+
+/**
+ * M15 addition (orchestrator-approved): validate a persisted buddyRest —
+ * screenIndex must be a non-negative integer and both fractions finite in
+ * [0, 1]. Anything else falls back to null (default corner).
+ */
+function parseBuddyRest(value: unknown): BuddyRest | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const rec = value as Record<string, unknown>;
+  const screenIndex = rec['screenIndex'];
+  const xFrac = rec['xFrac'];
+  const yFrac = rec['yFrac'];
+  if (typeof screenIndex !== 'number' || !Number.isInteger(screenIndex) || screenIndex < 0) {
+    return null;
+  }
+  const fracOk = (f: unknown): f is number =>
+    typeof f === 'number' && Number.isFinite(f) && f >= 0 && f <= 1;
+  if (!fracOk(xFrac) || !fracOk(yFrac)) return null;
+  return { screenIndex, xFrac, yFrac };
 }

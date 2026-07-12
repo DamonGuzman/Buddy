@@ -663,3 +663,28 @@ const GROUNDING_ROUTES: Record<string, RouteHandler> = {
 
 Object.assign(ROUTES, GROUNDING_ROUTES);
 // --- end M9 grounding debug routes ---
+
+// ===========================================================================
+// --- M15 buddy-hover debug routes (isolated section, appended at the very
+// end of the file to minimize merge conflicts with parallel main work) ---
+//
+//   GET /hover/state -> OverlayManager.hoverDebugInfo(): assistant state,
+//     buddy host, interactive window + region, persisted buddyRest, and per-
+//     overlay {displayId, screenIndex, bounds, scaleFactor, forwarding,
+//     interactive, rendererPid, hover status} — everything the hover QA
+//     harness needs (cursor targeting, CPU sampling by pid, state asserts).
+//
+// Same pattern as the M2 overlay routes: reach the overlays through
+// getOverlayManager(), never a parallel code path.
+// ===========================================================================
+
+const HOVER_ROUTES: Record<string, RouteHandler> = {
+  'GET /hover/state': (_deps, _req, res) => {
+    withOverlays(res, (overlays) => {
+      sendJson(res, 200, overlays.hoverDebugInfo());
+    });
+  },
+};
+
+Object.assign(ROUTES, HOVER_ROUTES);
+// --- end M15 buddy-hover debug routes ---
