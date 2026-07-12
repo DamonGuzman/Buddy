@@ -4,12 +4,30 @@
  * hotplug (add/remove/metrics change).
  *
  * Overlays are NEVER focusable and never intercept mouse input (hard rule).
+ *
+ * Buddy residency rule (M2): at rest the buddy lives on the PRIMARY display's
+ * overlay only. A pointer 'animate' command shows/moves it on the addressed
+ * display and hides it everywhere else; 'idle' returns it to the primary
+ * rest corner; 'hide' fades it out everywhere. `routePointer` is the single
+ * entry point that enforces this — production dispatch and the debug server
+ * both go through it.
  */
 
 import { BrowserWindow, screen } from 'electron';
 import type { Display } from 'electron';
 import { join } from 'node:path';
 import type { MainToOverlayChannel, MainToOverlayEvents } from '../../shared/ipc';
+import type { PointerCommand } from '../../shared/types';
+
+/**
+ * Module-level handle to the started manager so sibling main modules (e.g.
+ * the debug server) can reach the overlays without bootstrap wiring changes.
+ */
+let activeManager: OverlayManager | null = null;
+
+export function getOverlayManager(): OverlayManager | null {
+  return activeManager;
+}
 
 export class OverlayManager {
   /** displayId -> window */
@@ -22,6 +40,7 @@ export class OverlayManager {
   start(): void {
     if (this.started) return;
     this.started = true;
+    activeManager = this;
     this.syncDisplays();
     screen.on('display-added', () => this.syncDisplays());
     screen.on('display-removed', () => this.syncDisplays());
@@ -53,7 +72,38 @@ export class OverlayManager {
     }
   }
 
+  /**
+   * Route a pointer command per the buddy residency rule:
+   * - 'animate' → addressed screenIndex gets the command, all others 'hide'
+   * - 'idle'    → primary display gets 'idle' (rest corner), others 'hide'
+   * - 'hide'    → everyone hides
+   */
+  routePointer(cmd: PointerCommand): void {
+    if (cmd.type === 'animate') {
+      for (const [displayId, index] of this.indexByDisplayId) {
+        const win = this.windows.get(displayId);
+        if (!win || win.isDestroyed()) continue;
+        win.webContents.send(
+          'overlay:pointer',
+          index === cmd.screenIndex ? cmd : ({ type: 'hide' } satisfies PointerCommand),
+        );
+      }
+    } else if (cmd.type === 'idle') {
+      const primaryId = screen.getPrimaryDisplay().id;
+      for (const [displayId, win] of this.windows) {
+        if (win.isDestroyed()) continue;
+        win.webContents.send(
+          'overlay:pointer',
+          displayId === primaryId ? cmd : ({ type: 'hide' } satisfies PointerCommand),
+        );
+      }
+    } else {
+      this.broadcast('overlay:pointer', cmd);
+    }
+  }
+
   destroy(): void {
+    if (activeManager === this) activeManager = null;
     for (const win of this.windows.values()) {
       if (!win.isDestroyed()) win.destroy();
     }
@@ -90,6 +140,7 @@ export class OverlayManager {
   }
 
   private createWindow(display: Display, screenIndex: number): BrowserWindow {
+    const isPrimary = screen.getPrimaryDisplay().id === display.id;
     const win = new BrowserWindow({
       x: display.bounds.x,
       y: display.bounds.y,
@@ -104,6 +155,7 @@ export class OverlayManager {
       maximizable: false,
       closable: true,
       focusable: false,
+      fullscreenable: false,
       skipTaskbar: true,
       show: false,
       webPreferences: {
@@ -111,16 +163,20 @@ export class OverlayManager {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,
+        // Keep animations running while the (never-focused) overlay is "unfocused".
+        backgroundThrottling: false,
       },
     });
 
     win.setAlwaysOnTop(true, 'screen-saver');
-    win.setIgnoreMouseEvents(true, { forward: true });
+    // Click-through at the OS level; no forwarding — the overlay never reacts
+    // to the mouse, so forwarding move events would only burn CPU.
+    win.setIgnoreMouseEvents(true);
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     // Belt-and-braces: bounds again after frameless quirks on scaled displays.
     win.setBounds(display.bounds);
 
-    const query = `?screenIndex=${screenIndex}`;
+    const query = `?screenIndex=${screenIndex}&primary=${isPrimary ? '1' : '0'}`;
     if (process.env['ELECTRON_RENDERER_URL']) {
       void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/overlay/index.html${query}`);
     } else {
@@ -128,6 +184,15 @@ export class OverlayManager {
         search: query,
       });
     }
+
+    // Authoritative initial residency (the ?primary flag is the renderer's
+    // pre-subscription default; this message settles any race).
+    win.webContents.on('did-finish-load', () => {
+      const primaryNow = screen.getPrimaryDisplay().id === display.id;
+      win.webContents.send('overlay:pointer', {
+        type: primaryNow ? 'idle' : 'hide',
+      } satisfies PointerCommand);
+    });
 
     win.once('ready-to-show', () => win.showInactive());
     return win;
