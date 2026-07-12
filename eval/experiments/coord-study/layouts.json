@@ -1,0 +1,43 @@
+{
+  "width": 2048,
+  "height": 1152,
+  "layouts": {
+    "A": {
+      "targets": [
+        { "id": "save",   "kind": "button", "label": "SAVE",  "cx": 180,  "cy": 96,   "w": 130, "h": 48, "color": "#2563EB", "ask": "the SAVE button",        "zone": "corner" },
+        { "id": "open",   "kind": "button", "label": "OPEN",  "cx": 1900, "cy": 110,  "w": 130, "h": 48, "color": "#059669", "ask": "the OPEN button",        "zone": "corner" },
+        { "id": "help",   "kind": "button", "label": "HELP",  "cx": 150,  "cy": 1050, "w": 130, "h": 48, "color": "#7C3AED", "ask": "the HELP button",        "zone": "corner" },
+        { "id": "exit",   "kind": "button", "label": "EXIT",  "cx": 1890, "cy": 1040, "w": 130, "h": 48, "color": "#DC2626", "ask": "the EXIT button",        "zone": "corner" },
+        { "id": "start",  "kind": "button", "label": "START", "cx": 1010, "cy": 590,  "w": 150, "h": 52, "color": "#D97706", "ask": "the START button",       "zone": "center" },
+        { "id": "cart",   "kind": "button", "label": "CART",  "cx": 1024, "cy": 70,   "w": 130, "h": 46, "color": "#0891B2", "ask": "the CART button",        "zone": "edge" },
+        { "id": "send",   "kind": "button", "label": "SEND",  "cx": 1966, "cy": 620,  "w": 120, "h": 46, "color": "#4F46E5", "ask": "the SEND button",        "zone": "edge" },
+        { "id": "copy",   "kind": "button", "label": "COPY",  "cx": 620,  "cy": 820,  "w": 128, "h": 46, "color": "#334155", "ask": "the COPY button",        "zone": "cluster" },
+        { "id": "paste",  "kind": "button", "label": "PASTE", "cx": 770,  "cy": 820,  "w": 128, "h": 46, "color": "#0D9488", "ask": "the PASTE button",       "zone": "cluster" },
+        { "id": "cut",    "kind": "button", "label": "CUT",   "cx": 920,  "cy": 820,  "w": 128, "h": 46, "color": "#BE185D", "ask": "the CUT button",         "zone": "cluster" },
+        { "id": "dot",    "kind": "dot",    "label": "",      "cx": 1500, "cy": 350,  "w": 24,  "h": 24, "color": "#DC2626", "ask": "the small red dot",      "zone": "icon" },
+        { "id": "square", "kind": "square", "label": "",      "cx": 420,  "cy": 480,  "w": 16,  "h": 16, "color": "#1D4ED8", "ask": "the small blue square",  "zone": "icon" }
+      ]
+    },
+    "B": {
+      "targets": [
+        { "id": "save",   "kind": "button", "label": "SAVE",  "cx": 1880, "cy": 90,   "w": 130, "h": 48, "color": "#2563EB", "ask": "the SAVE button",        "zone": "corner" },
+        { "id": "open",   "kind": "button", "label": "OPEN",  "cx": 140,  "cy": 100,  "w": 130, "h": 48, "color": "#059669", "ask": "the OPEN button",        "zone": "corner" },
+        { "id": "help",   "kind": "button", "label": "HELP",  "cx": 1900, "cy": 1060, "w": 130, "h": 48, "color": "#7C3AED", "ask": "the HELP button",        "zone": "corner" },
+        { "id": "exit",   "kind": "button", "label": "EXIT",  "cx": 170,  "cy": 1030, "w": 130, "h": 48, "color": "#DC2626", "ask": "the EXIT button",        "zone": "corner" },
+        { "id": "start",  "kind": "button", "label": "START", "cx": 1120, "cy": 530,  "w": 150, "h": 52, "color": "#D97706", "ask": "the START button",       "zone": "center" },
+        { "id": "cart",   "kind": "button", "label": "CART",  "cx": 84,   "cy": 600,  "w": 130, "h": 46, "color": "#0891B2", "ask": "the CART button",        "zone": "edge" },
+        { "id": "send",   "kind": "button", "label": "SEND",  "cx": 1024, "cy": 1092, "w": 120, "h": 46, "color": "#4F46E5", "ask": "the SEND button",        "zone": "edge" },
+        { "id": "copy",   "kind": "button", "label": "COPY",  "cx": 1450, "cy": 300,  "w": 128, "h": 46, "color": "#334155", "ask": "the COPY button",        "zone": "cluster" },
+        { "id": "paste",  "kind": "button", "label": "PASTE", "cx": 1600, "cy": 300,  "w": 128, "h": 46, "color": "#0D9488", "ask": "the PASTE button",       "zone": "cluster" },
+        { "id": "cut",    "kind": "button", "label": "CUT",   "cx": 1750, "cy": 300,  "w": 128, "h": 46, "color": "#BE185D", "ask": "the CUT button",         "zone": "cluster" },
+        { "id": "dot",    "kind": "dot",    "label": "",      "cx": 500,  "cy": 900,  "w": 24,  "h": 24, "color": "#DC2626", "ask": "the small red dot",      "zone": "icon" },
+        { "id": "square", "kind": "square", "label": "",      "cx": 1650, "cy": 750,  "w": 16,  "h": 16, "color": "#1D4ED8", "ask": "the small blue square",  "zone": "icon" }
+      ]
+    }
+  },
+  "fiducials": [
+    [200, 150], [1024, 150], [1848, 150],
+    [200, 576], [760, 400], [1848, 576],
+    [200, 1000], [1300, 1000], [1848, 1000]
+  ]
+}

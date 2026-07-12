@@ -1,0 +1,624 @@
+{
+  "model": "gpt-realtime-2.1",
+  "condition": "fiducials",
+  "layout": "A",
+  "imageDims": {
+    "W": 2048,
+    "H": 1152
+  },
+  "timestamp": "2026-07-12T20:24:38.213Z",
+  "records": [
+    {
+      "id": "save",
+      "ask": "the SAVE button",
+      "zone": "corner",
+      "gt": {
+        "x": 180,
+        "y": 96
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 200,
+        "y": 120
+      },
+      "rawArgs": {
+        "x": 200,
+        "y": 120,
+        "label": "the SAVE button",
+        "screen": 0
+      },
+      "errX": 20,
+      "errY": 24,
+      "err": 31.240998703626623,
+      "hit": true,
+      "latencyMs": 2320,
+      "extraCalls": 0,
+      "modelText": "I’m going to line up the center of the SAVE button based on the nearby marker and its position.",
+      "status": "completed",
+      "totalMs": 2322
+    },
+    {
+      "id": "open",
+      "ask": "the OPEN button",
+      "zone": "corner",
+      "gt": {
+        "x": 1900,
+        "y": 110
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 1848,
+        "y": 120
+      },
+      "rawArgs": {
+        "x": 1848,
+        "y": 120,
+        "label": "the OPEN button",
+        "screen": 0
+      },
+      "errX": -52,
+      "errY": 10,
+      "err": 52.952809179494906,
+      "hit": true,
+      "latencyMs": 946,
+      "extraCalls": 0,
+      "modelText": "I’m aligning the pointer with the center of the OPEN button using the nearby reference marker.",
+      "status": "completed",
+      "totalMs": 951
+    },
+    {
+      "id": "help",
+      "ask": "the HELP button",
+      "zone": "corner",
+      "gt": {
+        "x": 150,
+        "y": 1050
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 200,
+        "y": 1025
+      },
+      "rawArgs": {
+        "x": 200,
+        "y": 1025,
+        "label": "the HELP button",
+        "screen": 0
+      },
+      "errX": 50,
+      "errY": -25,
+      "err": 55.90169943749474,
+      "hit": false,
+      "latencyMs": 2199,
+      "extraCalls": 0,
+      "modelText": "I’m aiming for the center of the HELP button using the nearby marker as a reference.",
+      "status": "completed",
+      "totalMs": 2201
+    },
+    {
+      "id": "exit",
+      "ask": "the EXIT button",
+      "zone": "corner",
+      "gt": {
+        "x": 1890,
+        "y": 1040
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 1848,
+        "y": 1040
+      },
+      "rawArgs": {
+        "x": 1848,
+        "y": 1040,
+        "label": "the EXIT button",
+        "screen": 0
+      },
+      "errX": -42,
+      "errY": 0,
+      "err": 42,
+      "hit": true,
+      "latencyMs": 1038,
+      "extraCalls": 0,
+      "modelText": "I’m lining up the pointer with the center of the EXIT button from the nearby labeled marker.",
+      "status": "completed",
+      "totalMs": 1041
+    },
+    {
+      "id": "start",
+      "ask": "the START button",
+      "zone": "center",
+      "gt": {
+        "x": 1010,
+        "y": 590
+      },
+      "w": 150,
+      "h": 52,
+      "pred": {
+        "x": 960,
+        "y": 470
+      },
+      "rawArgs": {
+        "x": 960,
+        "y": 470,
+        "label": "the START button",
+        "screen": 0
+      },
+      "errX": -50,
+      "errY": -120,
+      "err": 130,
+      "hit": false,
+      "latencyMs": 1874,
+      "extraCalls": 0,
+      "modelText": "I’m finding the center of the START button using nearby reference points before moving the pointer.",
+      "status": "completed",
+      "totalMs": 1877
+    },
+    {
+      "id": "cart",
+      "ask": "the CART button",
+      "zone": "edge",
+      "gt": {
+        "x": 1024,
+        "y": 70
+      },
+      "w": 130,
+      "h": 46,
+      "pred": {
+        "x": 1024,
+        "y": 120
+      },
+      "rawArgs": {
+        "x": 1024,
+        "y": 120,
+        "label": "the CART button",
+        "screen": 0
+      },
+      "errX": 0,
+      "errY": 50,
+      "err": 50,
+      "hit": false,
+      "latencyMs": 1668,
+      "extraCalls": 0,
+      "modelText": "I’m lining up the pointer with the center of the CART button using the nearby marker.",
+      "status": "completed",
+      "totalMs": 1669
+    },
+    {
+      "id": "send",
+      "ask": "the SEND button",
+      "zone": "edge",
+      "gt": {
+        "x": 1966,
+        "y": 620
+      },
+      "w": 120,
+      "h": 46,
+      "pred": {
+        "x": 1920,
+        "y": 576
+      },
+      "rawArgs": {
+        "x": 1920,
+        "y": 576,
+        "label": "the SEND button",
+        "screen": 0
+      },
+      "errX": -46,
+      "errY": -44,
+      "err": 63.655321851358195,
+      "hit": false,
+      "latencyMs": 2351,
+      "extraCalls": 0,
+      "modelText": "I’m aiming for the center of the SEND button using the closest reference marker.",
+      "status": "completed",
+      "totalMs": 2351
+    },
+    {
+      "id": "copy",
+      "ask": "the COPY button",
+      "zone": "cluster",
+      "gt": {
+        "x": 620,
+        "y": 820
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 820,
+        "y": 670
+      },
+      "rawArgs": {
+        "x": 820,
+        "y": 670,
+        "label": "the COPY button",
+        "screen": 0
+      },
+      "errX": 200,
+      "errY": -150,
+      "err": 250,
+      "hit": false,
+      "latencyMs": 2477,
+      "extraCalls": 0,
+      "modelText": "I’m lining up the pointer with the center of the COPY button based on its position relative to nearby reference points.",
+      "status": "completed",
+      "totalMs": 2479
+    },
+    {
+      "id": "paste",
+      "ask": "the PASTE button",
+      "zone": "cluster",
+      "gt": {
+        "x": 770,
+        "y": 820
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 960,
+        "y": 670
+      },
+      "rawArgs": {
+        "x": 960,
+        "y": 670,
+        "label": "the PASTE button",
+        "screen": 0
+      },
+      "errX": 190,
+      "errY": -150,
+      "err": 242.0743687382041,
+      "hit": false,
+      "latencyMs": 1594,
+      "extraCalls": 0,
+      "modelText": "I’m targeting the center of the PASTE button using its position between nearby controls.",
+      "status": "completed",
+      "totalMs": 1596
+    },
+    {
+      "id": "cut",
+      "ask": "the CUT button",
+      "zone": "cluster",
+      "gt": {
+        "x": 920,
+        "y": 820
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 1100,
+        "y": 670
+      },
+      "rawArgs": {
+        "x": 1100,
+        "y": 670,
+        "label": "the CUT button",
+        "screen": 0
+      },
+      "errX": 180,
+      "errY": -150,
+      "err": 234.30749027719966,
+      "hit": false,
+      "latencyMs": 1748,
+      "extraCalls": 0,
+      "modelText": "I’m pointing to the center of the CUT button based on its position relative to the other controls.",
+      "status": "completed",
+      "totalMs": 1751
+    },
+    {
+      "id": "dot",
+      "ask": "the small red dot",
+      "zone": "icon",
+      "gt": {
+        "x": 1500,
+        "y": 350
+      },
+      "w": 24,
+      "h": 24,
+      "pred": {
+        "x": 1360,
+        "y": 310
+      },
+      "rawArgs": {
+        "x": 1360,
+        "y": 310,
+        "label": "the small red dot",
+        "screen": 0
+      },
+      "errX": -140,
+      "errY": -40,
+      "err": 145.60219778561037,
+      "hit": false,
+      "latencyMs": 2382,
+      "extraCalls": 0,
+      "modelText": "I’m locating the center of the small red dot by interpolating from the nearby reference markers before moving the pointer.",
+      "status": "completed",
+      "totalMs": 2383
+    },
+    {
+      "id": "square",
+      "ask": "the small blue square",
+      "zone": "icon",
+      "gt": {
+        "x": 420,
+        "y": 480
+      },
+      "w": 16,
+      "h": 16,
+      "pred": {
+        "x": 500,
+        "y": 470
+      },
+      "rawArgs": {
+        "x": 500,
+        "y": 470,
+        "label": "the small blue square",
+        "screen": 0
+      },
+      "errX": 80,
+      "errY": -10,
+      "err": 80.62257748298549,
+      "hit": false,
+      "latencyMs": 2300,
+      "extraCalls": 0,
+      "modelText": "I’m locking onto the center of the small blue square using the nearby markers as reference.",
+      "status": "completed",
+      "totalMs": 2300
+    }
+  ],
+  "usage": [
+    {
+      "total_tokens": 1172,
+      "input_tokens": 982,
+      "output_tokens": 190,
+      "input_token_details": {
+        "text_tokens": 659,
+        "audio_tokens": 0,
+        "image_tokens": 323,
+        "cached_tokens": 0,
+        "cached_tokens_details": {
+          "text_tokens": 0,
+          "audio_tokens": 0,
+          "image_tokens": 0
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 190,
+        "audio_tokens": 0,
+        "reasoning_tokens": 130
+      }
+    },
+    {
+      "total_tokens": 1552,
+      "input_tokens": 1494,
+      "output_tokens": 58,
+      "input_token_details": {
+        "text_tokens": 848,
+        "audio_tokens": 0,
+        "image_tokens": 646,
+        "cached_tokens": 1027,
+        "cached_tokens_details": {
+          "text_tokens": 704,
+          "audio_tokens": 0,
+          "image_tokens": 323
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 58,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 2204,
+      "input_tokens": 2004,
+      "output_tokens": 200,
+      "input_token_details": {
+        "text_tokens": 1035,
+        "audio_tokens": 0,
+        "image_tokens": 969,
+        "cached_tokens": 1542,
+        "cached_tokens_details": {
+          "text_tokens": 896,
+          "audio_tokens": 0,
+          "image_tokens": 646
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 200,
+        "audio_tokens": 0,
+        "reasoning_tokens": 142
+      }
+    },
+    {
+      "total_tokens": 2574,
+      "input_tokens": 2514,
+      "output_tokens": 60,
+      "input_token_details": {
+        "text_tokens": 1222,
+        "audio_tokens": 0,
+        "image_tokens": 1292,
+        "cached_tokens": 2057,
+        "cached_tokens_details": {
+          "text_tokens": 1088,
+          "audio_tokens": 0,
+          "image_tokens": 969
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 60,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 3189,
+      "input_tokens": 3026,
+      "output_tokens": 163,
+      "input_token_details": {
+        "text_tokens": 1411,
+        "audio_tokens": 0,
+        "image_tokens": 1615,
+        "cached_tokens": 2572,
+        "cached_tokens_details": {
+          "text_tokens": 1280,
+          "audio_tokens": 0,
+          "image_tokens": 1292
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 163,
+        "audio_tokens": 0,
+        "reasoning_tokens": 106
+      }
+    },
+    {
+      "total_tokens": 3655,
+      "input_tokens": 3535,
+      "output_tokens": 120,
+      "input_token_details": {
+        "text_tokens": 1597,
+        "audio_tokens": 0,
+        "image_tokens": 1938,
+        "cached_tokens": 3023,
+        "cached_tokens_details": {
+          "text_tokens": 1408,
+          "audio_tokens": 0,
+          "image_tokens": 1615
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 120,
+        "audio_tokens": 0,
+        "reasoning_tokens": 62
+      }
+    },
+    {
+      "total_tokens": 4255,
+      "input_tokens": 4045,
+      "output_tokens": 210,
+      "input_token_details": {
+        "text_tokens": 1784,
+        "audio_tokens": 0,
+        "image_tokens": 2261,
+        "cached_tokens": 3538,
+        "cached_tokens_details": {
+          "text_tokens": 1600,
+          "audio_tokens": 0,
+          "image_tokens": 1938
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 210,
+        "audio_tokens": 0,
+        "reasoning_tokens": 154
+      }
+    },
+    {
+      "total_tokens": 4773,
+      "input_tokens": 4553,
+      "output_tokens": 220,
+      "input_token_details": {
+        "text_tokens": 1969,
+        "audio_tokens": 0,
+        "image_tokens": 2584,
+        "cached_tokens": 4053,
+        "cached_tokens_details": {
+          "text_tokens": 1792,
+          "audio_tokens": 0,
+          "image_tokens": 2261
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 220,
+        "audio_tokens": 0,
+        "reasoning_tokens": 158
+      }
+    },
+    {
+      "total_tokens": 5167,
+      "input_tokens": 5068,
+      "output_tokens": 99,
+      "input_token_details": {
+        "text_tokens": 2161,
+        "audio_tokens": 0,
+        "image_tokens": 2907,
+        "cached_tokens": 4565,
+        "cached_tokens_details": {
+          "text_tokens": 1984,
+          "audio_tokens": 0,
+          "image_tokens": 2581
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 99,
+        "audio_tokens": 0,
+        "reasoning_tokens": 42
+      }
+    },
+    {
+      "total_tokens": 5699,
+      "input_tokens": 5577,
+      "output_tokens": 122,
+      "input_token_details": {
+        "text_tokens": 2347,
+        "audio_tokens": 0,
+        "image_tokens": 3230,
+        "cached_tokens": 5083,
+        "cached_tokens_details": {
+          "text_tokens": 2176,
+          "audio_tokens": 0,
+          "image_tokens": 2907
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 122,
+        "audio_tokens": 0,
+        "reasoning_tokens": 62
+      }
+    },
+    {
+      "total_tokens": 6279,
+      "input_tokens": 6090,
+      "output_tokens": 189,
+      "input_token_details": {
+        "text_tokens": 2537,
+        "audio_tokens": 0,
+        "image_tokens": 3553,
+        "cached_tokens": 5595,
+        "cached_tokens_details": {
+          "text_tokens": 2368,
+          "audio_tokens": 0,
+          "image_tokens": 3227
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 189,
+        "audio_tokens": 0,
+        "reasoning_tokens": 125
+      }
+    },
+    {
+      "total_tokens": 6784,
+      "input_tokens": 6607,
+      "output_tokens": 177,
+      "input_token_details": {
+        "text_tokens": 2731,
+        "audio_tokens": 0,
+        "image_tokens": 3876,
+        "cached_tokens": 6113,
+        "cached_tokens_details": {
+          "text_tokens": 2560,
+          "audio_tokens": 0,
+          "image_tokens": 3553
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 177,
+        "audio_tokens": 0,
+        "reasoning_tokens": 119
+      }
+    }
+  ]
+}

@@ -1,0 +1,624 @@
+{
+  "model": "gpt-realtime-2.1-mini",
+  "condition": "grid-100",
+  "layout": "A",
+  "imageDims": {
+    "W": 2048,
+    "H": 1152
+  },
+  "timestamp": "2026-07-12T20:28:03.619Z",
+  "records": [
+    {
+      "id": "save",
+      "ask": "the SAVE button",
+      "zone": "corner",
+      "gt": {
+        "x": 180,
+        "y": 96
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 280,
+        "y": 120
+      },
+      "rawArgs": {
+        "x": 280,
+        "y": 120,
+        "label": "SAVE button",
+        "screen": 0
+      },
+      "errX": 100,
+      "errY": 24,
+      "err": 102.83968105745953,
+      "hit": false,
+      "latencyMs": 1879,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1884
+    },
+    {
+      "id": "open",
+      "ask": "the OPEN button",
+      "zone": "corner",
+      "gt": {
+        "x": 1900,
+        "y": 110
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 1850,
+        "y": 1060
+      },
+      "rawArgs": {
+        "x": 1850,
+        "y": 1060,
+        "label": "OPEN button",
+        "screen": 0
+      },
+      "errX": -50,
+      "errY": 950,
+      "err": 951.3148795220224,
+      "hit": false,
+      "latencyMs": 1440,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1443
+    },
+    {
+      "id": "help",
+      "ask": "the HELP button",
+      "zone": "corner",
+      "gt": {
+        "x": 150,
+        "y": 1050
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 130,
+        "y": 1080
+      },
+      "rawArgs": {
+        "x": 130,
+        "y": 1080,
+        "label": "HELP button",
+        "screen": 0
+      },
+      "errX": -20,
+      "errY": 30,
+      "err": 36.05551275463989,
+      "hit": false,
+      "latencyMs": 1178,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1182
+    },
+    {
+      "id": "exit",
+      "ask": "the EXIT button",
+      "zone": "corner",
+      "gt": {
+        "x": 1890,
+        "y": 1040
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 1880,
+        "y": 1080
+      },
+      "rawArgs": {
+        "x": 1880,
+        "y": 1080,
+        "label": "EXIT button",
+        "screen": 0
+      },
+      "errX": -10,
+      "errY": 40,
+      "err": 41.23105625617661,
+      "hit": false,
+      "latencyMs": 1702,
+      "extraCalls": 0,
+      "modelText": "Let me quickly pick the center of that button based on its position in the grid.",
+      "status": "completed",
+      "totalMs": 1707
+    },
+    {
+      "id": "start",
+      "ask": "the START button",
+      "zone": "center",
+      "gt": {
+        "x": 1010,
+        "y": 590
+      },
+      "w": 150,
+      "h": 52,
+      "pred": {
+        "x": 1130,
+        "y": 620
+      },
+      "rawArgs": {
+        "x": 1130,
+        "y": 620,
+        "label": "START button",
+        "screen": 0
+      },
+      "errX": 120,
+      "errY": 30,
+      "err": 123.69316876852982,
+      "hit": false,
+      "latencyMs": 1473,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1479
+    },
+    {
+      "id": "cart",
+      "ask": "the CART button",
+      "zone": "edge",
+      "gt": {
+        "x": 1024,
+        "y": 70
+      },
+      "w": 130,
+      "h": 46,
+      "pred": {
+        "x": 1150,
+        "y": 150
+      },
+      "rawArgs": {
+        "x": 1150,
+        "y": 150,
+        "label": "CART button",
+        "screen": 0
+      },
+      "errX": 126,
+      "errY": 80,
+      "err": 149.2514656544451,
+      "hit": false,
+      "latencyMs": 1379,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1388
+    },
+    {
+      "id": "send",
+      "ask": "the SEND button",
+      "zone": "edge",
+      "gt": {
+        "x": 1966,
+        "y": 620
+      },
+      "w": 120,
+      "h": 46,
+      "pred": {
+        "x": 1820,
+        "y": 760
+      },
+      "rawArgs": {
+        "x": 1820,
+        "y": 760,
+        "label": "SEND button",
+        "screen": 0
+      },
+      "errX": -146,
+      "errY": 140,
+      "err": 202.27703774773843,
+      "hit": false,
+      "latencyMs": 1623,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1628
+    },
+    {
+      "id": "copy",
+      "ask": "the COPY button",
+      "zone": "cluster",
+      "gt": {
+        "x": 620,
+        "y": 820
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 910,
+        "y": 580
+      },
+      "rawArgs": {
+        "x": 910,
+        "y": 580,
+        "label": "COPY button",
+        "screen": 0
+      },
+      "errX": 290,
+      "errY": -240,
+      "err": 376.4306044943742,
+      "hit": false,
+      "latencyMs": 2150,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 2155
+    },
+    {
+      "id": "paste",
+      "ask": "the PASTE button",
+      "zone": "cluster",
+      "gt": {
+        "x": 770,
+        "y": 820
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 1020,
+        "y": 580
+      },
+      "rawArgs": {
+        "x": 1020,
+        "y": 580,
+        "label": "PASTE button",
+        "screen": 0
+      },
+      "errX": 250,
+      "errY": -240,
+      "err": 346.5544690232691,
+      "hit": false,
+      "latencyMs": 1842,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1848
+    },
+    {
+      "id": "cut",
+      "ask": "the CUT button",
+      "zone": "cluster",
+      "gt": {
+        "x": 920,
+        "y": 820
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 1120,
+        "y": 580
+      },
+      "rawArgs": {
+        "x": 1120,
+        "y": 580,
+        "label": "CUT button",
+        "screen": 0
+      },
+      "errX": 200,
+      "errY": -240,
+      "err": 312.4099870362662,
+      "hit": false,
+      "latencyMs": 1528,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1535
+    },
+    {
+      "id": "dot",
+      "ask": "the small red dot",
+      "zone": "icon",
+      "gt": {
+        "x": 1500,
+        "y": 350
+      },
+      "w": 24,
+      "h": 24,
+      "pred": {
+        "x": 1450,
+        "y": 380
+      },
+      "rawArgs": {
+        "x": 1450,
+        "y": 380,
+        "label": "small red dot",
+        "screen": 0
+      },
+      "errX": -50,
+      "errY": 30,
+      "err": 58.309518948453,
+      "hit": false,
+      "latencyMs": 1587,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1592
+    },
+    {
+      "id": "square",
+      "ask": "the small blue square",
+      "zone": "icon",
+      "gt": {
+        "x": 420,
+        "y": 480
+      },
+      "w": 16,
+      "h": 16,
+      "pred": {
+        "x": 350,
+        "y": 450
+      },
+      "rawArgs": {
+        "x": 350,
+        "y": 450,
+        "label": "small blue square",
+        "screen": 0
+      },
+      "errX": -70,
+      "errY": -30,
+      "err": 76.15773105863909,
+      "hit": false,
+      "latencyMs": 2090,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 2097
+    }
+  ],
+  "usage": [
+    {
+      "total_tokens": 1295,
+      "input_tokens": 991,
+      "output_tokens": 304,
+      "input_token_details": {
+        "text_tokens": 668,
+        "audio_tokens": 0,
+        "image_tokens": 323,
+        "cached_tokens": 0,
+        "cached_tokens_details": {
+          "text_tokens": 0,
+          "audio_tokens": 0,
+          "image_tokens": 0
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 304,
+        "audio_tokens": 0,
+        "reasoning_tokens": 273
+      }
+    },
+    {
+      "total_tokens": 1586,
+      "input_tokens": 1483,
+      "output_tokens": 103,
+      "input_token_details": {
+        "text_tokens": 837,
+        "audio_tokens": 0,
+        "image_tokens": 646,
+        "cached_tokens": 954,
+        "cached_tokens_details": {
+          "text_tokens": 640,
+          "audio_tokens": 0,
+          "image_tokens": 314
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 103,
+        "audio_tokens": 0,
+        "reasoning_tokens": 70
+      }
+    },
+    {
+      "total_tokens": 2098,
+      "input_tokens": 1977,
+      "output_tokens": 121,
+      "input_token_details": {
+        "text_tokens": 1008,
+        "audio_tokens": 0,
+        "image_tokens": 969,
+        "cached_tokens": 1478,
+        "cached_tokens_details": {
+          "text_tokens": 832,
+          "audio_tokens": 0,
+          "image_tokens": 646
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 121,
+        "audio_tokens": 0,
+        "reasoning_tokens": 89
+      }
+    },
+    {
+      "total_tokens": 2527,
+      "input_tokens": 2470,
+      "output_tokens": 57,
+      "input_token_details": {
+        "text_tokens": 1178,
+        "audio_tokens": 0,
+        "image_tokens": 1292,
+        "cached_tokens": 1990,
+        "cached_tokens_details": {
+          "text_tokens": 1024,
+          "audio_tokens": 0,
+          "image_tokens": 966
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 57,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 3161,
+      "input_tokens": 2988,
+      "output_tokens": 173,
+      "input_token_details": {
+        "text_tokens": 1373,
+        "audio_tokens": 0,
+        "image_tokens": 1615,
+        "cached_tokens": 2444,
+        "cached_tokens_details": {
+          "text_tokens": 1152,
+          "audio_tokens": 0,
+          "image_tokens": 1292
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 173,
+        "audio_tokens": 0,
+        "reasoning_tokens": 141
+      }
+    },
+    {
+      "total_tokens": 3621,
+      "input_tokens": 3481,
+      "output_tokens": 140,
+      "input_token_details": {
+        "text_tokens": 1543,
+        "audio_tokens": 0,
+        "image_tokens": 1938,
+        "cached_tokens": 2959,
+        "cached_tokens_details": {
+          "text_tokens": 1344,
+          "audio_tokens": 0,
+          "image_tokens": 1615
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 140,
+        "audio_tokens": 0,
+        "reasoning_tokens": 107
+      }
+    },
+    {
+      "total_tokens": 4054,
+      "input_tokens": 3975,
+      "output_tokens": 79,
+      "input_token_details": {
+        "text_tokens": 1714,
+        "audio_tokens": 0,
+        "image_tokens": 2261,
+        "cached_tokens": 3471,
+        "cached_tokens_details": {
+          "text_tokens": 1536,
+          "audio_tokens": 0,
+          "image_tokens": 1935
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 79,
+        "audio_tokens": 0,
+        "reasoning_tokens": 47
+      }
+    },
+    {
+      "total_tokens": 4665,
+      "input_tokens": 4468,
+      "output_tokens": 197,
+      "input_token_details": {
+        "text_tokens": 1884,
+        "audio_tokens": 0,
+        "image_tokens": 2584,
+        "cached_tokens": 3972,
+        "cached_tokens_details": {
+          "text_tokens": 1728,
+          "audio_tokens": 0,
+          "image_tokens": 2244
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 197,
+        "audio_tokens": 0,
+        "reasoning_tokens": 166
+      }
+    },
+    {
+      "total_tokens": 5104,
+      "input_tokens": 4961,
+      "output_tokens": 143,
+      "input_token_details": {
+        "text_tokens": 2054,
+        "audio_tokens": 0,
+        "image_tokens": 2907,
+        "cached_tokens": 4440,
+        "cached_tokens_details": {
+          "text_tokens": 1856,
+          "audio_tokens": 0,
+          "image_tokens": 2584
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 143,
+        "audio_tokens": 0,
+        "reasoning_tokens": 110
+      }
+    },
+    {
+      "total_tokens": 5487,
+      "input_tokens": 5455,
+      "output_tokens": 32,
+      "input_token_details": {
+        "text_tokens": 2225,
+        "audio_tokens": 0,
+        "image_tokens": 3230,
+        "cached_tokens": 4945,
+        "cached_tokens_details": {
+          "text_tokens": 2048,
+          "audio_tokens": 0,
+          "image_tokens": 2897
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 32,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 6071,
+      "input_tokens": 5949,
+      "output_tokens": 122,
+      "input_token_details": {
+        "text_tokens": 2396,
+        "audio_tokens": 0,
+        "image_tokens": 3553,
+        "cached_tokens": 5470,
+        "cached_tokens_details": {
+          "text_tokens": 2240,
+          "audio_tokens": 0,
+          "image_tokens": 3230
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 122,
+        "audio_tokens": 0,
+        "reasoning_tokens": 89
+      }
+    },
+    {
+      "total_tokens": 6591,
+      "input_tokens": 6444,
+      "output_tokens": 147,
+      "input_token_details": {
+        "text_tokens": 2568,
+        "audio_tokens": 0,
+        "image_tokens": 3876,
+        "cached_tokens": 5915,
+        "cached_tokens_details": {
+          "text_tokens": 2368,
+          "audio_tokens": 0,
+          "image_tokens": 3547
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 147,
+        "audio_tokens": 0,
+        "reasoning_tokens": 115
+      }
+    }
+  ]
+}

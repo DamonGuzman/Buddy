@@ -1,0 +1,9 @@
+{
+  "name": "coord-study",
+  "private": true,
+  "type": "module",
+  "description": "Controlled experiment: raw realtime-model coordinate estimation vs overlay/framing interventions",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

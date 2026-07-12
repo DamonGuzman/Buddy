@@ -1,0 +1,614 @@
+{
+  "model": "gpt-realtime-2.1",
+  "condition": "think-first",
+  "layout": "B",
+  "imageDims": {
+    "W": 2048,
+    "H": 1152
+  },
+  "timestamp": "2026-07-12T20:26:00.704Z",
+  "records": [
+    {
+      "id": "save",
+      "ask": "the SAVE button",
+      "zone": "corner",
+      "gt": {
+        "x": 1880,
+        "y": 90
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 1820,
+        "y": 80
+      },
+      "rawArgs": {
+        "x": 1820,
+        "y": 80,
+        "label": "SAVE button",
+        "screen": 0
+      },
+      "errX": -60,
+      "errY": -10,
+      "err": 60.82762530298219,
+      "hit": true,
+      "latencyMs": 1034,
+      "extraCalls": 0,
+      "modelText": "Top-right quadrant, about 7/8 across and 1/12 down, just left of the screen’s right edge near the top.",
+      "status": "completed",
+      "totalMs": 1035
+    },
+    {
+      "id": "open",
+      "ask": "the OPEN button",
+      "zone": "corner",
+      "gt": {
+        "x": 140,
+        "y": 100
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 140,
+        "y": 70
+      },
+      "rawArgs": {
+        "x": 140,
+        "y": 70,
+        "label": "OPEN button",
+        "screen": 0
+      },
+      "errX": 0,
+      "errY": -30,
+      "err": 30,
+      "hit": false,
+      "latencyMs": 962,
+      "extraCalls": 0,
+      "modelText": "Top-left quadrant, about 1/12 across and 1/16 down, just above a large light gray panel.",
+      "status": "completed",
+      "totalMs": 965
+    },
+    {
+      "id": "help",
+      "ask": "the HELP button",
+      "zone": "corner",
+      "gt": {
+        "x": 1900,
+        "y": 1060
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 1920,
+        "y": 1080
+      },
+      "rawArgs": {
+        "x": 1920,
+        "y": 1080,
+        "label": "HELP button",
+        "screen": 0
+      },
+      "errX": 20,
+      "errY": 20,
+      "err": 28.284271247461902,
+      "hit": true,
+      "latencyMs": 1052,
+      "extraCalls": 0,
+      "modelText": "Bottom-right quadrant, about 9/10 across and 19/20 down, near the lower-right corner below a light gray panel.",
+      "status": "completed",
+      "totalMs": 1055
+    },
+    {
+      "id": "exit",
+      "ask": "the EXIT button",
+      "zone": "corner",
+      "gt": {
+        "x": 170,
+        "y": 1030
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 140,
+        "y": 1010
+      },
+      "rawArgs": {
+        "x": 140,
+        "y": 1010,
+        "label": "EXIT button",
+        "screen": 0
+      },
+      "errX": -30,
+      "errY": -20,
+      "err": 36.05551275463989,
+      "hit": true,
+      "latencyMs": 1087,
+      "extraCalls": 0,
+      "modelText": "Bottom-left quadrant, about 1/8 across and 9/10 down, just left of the red dot and near the lower-left edge.",
+      "status": "completed",
+      "totalMs": 1092
+    },
+    {
+      "id": "start",
+      "ask": "the START button",
+      "zone": "center",
+      "gt": {
+        "x": 1120,
+        "y": 530
+      },
+      "w": 150,
+      "h": 52,
+      "pred": {
+        "x": 1230,
+        "y": 380
+      },
+      "rawArgs": {
+        "x": 1230,
+        "y": 380,
+        "label": "START button",
+        "screen": 0
+      },
+      "errX": 110,
+      "errY": -150,
+      "err": 186.01075237738272,
+      "hit": false,
+      "latencyMs": 1210,
+      "extraCalls": 0,
+      "modelText": "Center-right area, about 3/5 across and 1/3 down, between the top buttons and the lower gray panel.",
+      "status": "completed",
+      "totalMs": 1212
+    },
+    {
+      "id": "cart",
+      "ask": "the CART button",
+      "zone": "edge",
+      "gt": {
+        "x": 84,
+        "y": 600
+      },
+      "w": 130,
+      "h": 46,
+      "pred": {
+        "x": 90,
+        "y": 390
+      },
+      "rawArgs": {
+        "x": 90,
+        "y": 390,
+        "label": "CART button",
+        "screen": 0
+      },
+      "errX": 6,
+      "errY": -210,
+      "err": 210.08569680013917,
+      "hit": false,
+      "latencyMs": 1147,
+      "extraCalls": 0,
+      "modelText": "Left-middle quadrant, about 1/20 across and 1/3 down, just left of the large left gray panel.",
+      "status": "completed",
+      "totalMs": 1149
+    },
+    {
+      "id": "send",
+      "ask": "the SEND button",
+      "zone": "edge",
+      "gt": {
+        "x": 1024,
+        "y": 1092
+      },
+      "w": 120,
+      "h": 46,
+      "pred": {
+        "x": 1024,
+        "y": 1080
+      },
+      "rawArgs": {
+        "x": 1024,
+        "y": 1080,
+        "label": "SEND button",
+        "screen": 0
+      },
+      "errX": 0,
+      "errY": -12,
+      "err": 12,
+      "hit": true,
+      "latencyMs": 1228,
+      "extraCalls": 0,
+      "modelText": "Bottom-center, about 1/2 across and 19/20 down, between the EXIT and HELP buttons.",
+      "status": "completed",
+      "totalMs": 1233
+    },
+    {
+      "id": "copy",
+      "ask": "the COPY button",
+      "zone": "cluster",
+      "gt": {
+        "x": 1450,
+        "y": 300
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 1320,
+        "y": 240
+      },
+      "rawArgs": {
+        "x": 1320,
+        "y": 240,
+        "label": "COPY button",
+        "screen": 0
+      },
+      "errX": -130,
+      "errY": -60,
+      "err": 143.17821063276352,
+      "hit": false,
+      "latencyMs": 1285,
+      "extraCalls": 0,
+      "modelText": "Upper-right quadrant, about 2/3 across and 1/5 down, just left of the PASTE and CUT buttons.",
+      "status": "completed",
+      "totalMs": 1288
+    },
+    {
+      "id": "paste",
+      "ask": "the PASTE button",
+      "zone": "cluster",
+      "gt": {
+        "x": 1600,
+        "y": 300
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 1410,
+        "y": 240
+      },
+      "rawArgs": {
+        "x": 1410,
+        "y": 240,
+        "label": "PASTE button",
+        "screen": 0
+      },
+      "errX": -190,
+      "errY": -60,
+      "err": 199.24858845171275,
+      "hit": false,
+      "latencyMs": 1335,
+      "extraCalls": 0,
+      "modelText": "Upper-right quadrant, about 5/8 across and 1/5 down, between the COPY and CUT buttons.",
+      "status": "completed",
+      "totalMs": 1340
+    },
+    {
+      "id": "cut",
+      "ask": "the CUT button",
+      "zone": "cluster",
+      "gt": {
+        "x": 1750,
+        "y": 300
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 1500,
+        "y": 240
+      },
+      "rawArgs": {
+        "x": 1500,
+        "y": 240,
+        "label": "CUT button",
+        "screen": 0
+      },
+      "errX": -250,
+      "errY": -60,
+      "err": 257.0992026436488,
+      "hit": false,
+      "latencyMs": 1391,
+      "extraCalls": 0,
+      "modelText": "Upper-right quadrant, about 11/16 across and 1/5 down, just right of the PASTE button.",
+      "status": "completed",
+      "totalMs": 1394
+    },
+    {
+      "id": "dot",
+      "ask": "the small red dot",
+      "zone": "icon",
+      "gt": {
+        "x": 500,
+        "y": 900
+      },
+      "w": 24,
+      "h": 24,
+      "pred": {
+        "x": 820,
+        "y": 740
+      },
+      "rawArgs": {
+        "x": 820,
+        "y": 740,
+        "label": "small red dot",
+        "screen": 0
+      },
+      "errX": 320,
+      "errY": -160,
+      "err": 357.77087639996637,
+      "hit": false,
+      "latencyMs": 1898,
+      "extraCalls": 0,
+      "modelText": "Left-of-center lower-middle, about 2/5 across and 2/3 down, slightly above the EXIT button.",
+      "status": "completed",
+      "totalMs": 1900
+    },
+    {
+      "id": "square",
+      "ask": "the small blue square",
+      "zone": "icon",
+      "gt": {
+        "x": 1650,
+        "y": 750
+      },
+      "w": 16,
+      "h": 16,
+      "pred": {
+        "x": 1520,
+        "y": 700
+      },
+      "rawArgs": {
+        "x": 1520,
+        "y": 700,
+        "label": "small blue square",
+        "screen": 0
+      },
+      "errX": -130,
+      "errY": -50,
+      "err": 139.2838827718412,
+      "hit": false,
+      "latencyMs": 1449,
+      "extraCalls": 0,
+      "modelText": "Right-middle quadrant, about 3/4 across and 3/4 down, inside the lower-right light gray panel.",
+      "status": "completed",
+      "totalMs": 1452
+    }
+  ],
+  "usage": [
+    {
+      "total_tokens": 1067,
+      "input_tokens": 999,
+      "output_tokens": 68,
+      "input_token_details": {
+        "text_tokens": 676,
+        "audio_tokens": 0,
+        "image_tokens": 323,
+        "cached_tokens": 64,
+        "cached_tokens_details": {
+          "text_tokens": 64,
+          "audio_tokens": 0,
+          "image_tokens": 0
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 68,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 1536,
+      "input_tokens": 1473,
+      "output_tokens": 63,
+      "input_token_details": {
+        "text_tokens": 827,
+        "audio_tokens": 0,
+        "image_tokens": 646,
+        "cached_tokens": 1027,
+        "cached_tokens_details": {
+          "text_tokens": 704,
+          "audio_tokens": 0,
+          "image_tokens": 323
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 63,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 2010,
+      "input_tokens": 1942,
+      "output_tokens": 68,
+      "input_token_details": {
+        "text_tokens": 973,
+        "audio_tokens": 0,
+        "image_tokens": 969,
+        "cached_tokens": 1542,
+        "cached_tokens_details": {
+          "text_tokens": 896,
+          "audio_tokens": 0,
+          "image_tokens": 646
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 68,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 2485,
+      "input_tokens": 2416,
+      "output_tokens": 69,
+      "input_token_details": {
+        "text_tokens": 1124,
+        "audio_tokens": 0,
+        "image_tokens": 1292,
+        "cached_tokens": 1993,
+        "cached_tokens_details": {
+          "text_tokens": 1024,
+          "audio_tokens": 0,
+          "image_tokens": 969
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 69,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 2957,
+      "input_tokens": 2891,
+      "output_tokens": 66,
+      "input_token_details": {
+        "text_tokens": 1276,
+        "audio_tokens": 0,
+        "image_tokens": 1615,
+        "cached_tokens": 2444,
+        "cached_tokens_details": {
+          "text_tokens": 1152,
+          "audio_tokens": 0,
+          "image_tokens": 1292
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 66,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 3428,
+      "input_tokens": 3363,
+      "output_tokens": 65,
+      "input_token_details": {
+        "text_tokens": 1425,
+        "audio_tokens": 0,
+        "image_tokens": 1938,
+        "cached_tokens": 2959,
+        "cached_tokens_details": {
+          "text_tokens": 1344,
+          "audio_tokens": 0,
+          "image_tokens": 1615
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 65,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 3897,
+      "input_tokens": 3834,
+      "output_tokens": 63,
+      "input_token_details": {
+        "text_tokens": 1573,
+        "audio_tokens": 0,
+        "image_tokens": 2261,
+        "cached_tokens": 3410,
+        "cached_tokens_details": {
+          "text_tokens": 1472,
+          "audio_tokens": 0,
+          "image_tokens": 1938
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 63,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 4369,
+      "input_tokens": 4303,
+      "output_tokens": 66,
+      "input_token_details": {
+        "text_tokens": 1719,
+        "audio_tokens": 0,
+        "image_tokens": 2584,
+        "cached_tokens": 3861,
+        "cached_tokens_details": {
+          "text_tokens": 1600,
+          "audio_tokens": 0,
+          "image_tokens": 2261
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 66,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 4840,
+      "input_tokens": 4776,
+      "output_tokens": 64,
+      "input_token_details": {
+        "text_tokens": 1869,
+        "audio_tokens": 0,
+        "image_tokens": 2907,
+        "cached_tokens": 4376,
+        "cached_tokens_details": {
+          "text_tokens": 1792,
+          "audio_tokens": 0,
+          "image_tokens": 2584
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 64,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 5310,
+      "input_tokens": 5246,
+      "output_tokens": 64,
+      "input_token_details": {
+        "text_tokens": 2016,
+        "audio_tokens": 0,
+        "image_tokens": 3230,
+        "cached_tokens": 4827,
+        "cached_tokens_details": {
+          "text_tokens": 1920,
+          "audio_tokens": 0,
+          "image_tokens": 2907
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 64,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 5781,
+      "input_tokens": 5717,
+      "output_tokens": 64,
+      "input_token_details": {
+        "text_tokens": 2164,
+        "audio_tokens": 0,
+        "image_tokens": 3553,
+        "cached_tokens": 5278,
+        "cached_tokens_details": {
+          "text_tokens": 2048,
+          "audio_tokens": 0,
+          "image_tokens": 3230
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 64,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 6253,
+      "input_tokens": 6188,
+      "output_tokens": 65,
+      "input_token_details": {
+        "text_tokens": 2312,
+        "audio_tokens": 0,
+        "image_tokens": 3876,
+        "cached_tokens": 5729,
+        "cached_tokens_details": {
+          "text_tokens": 2176,
+          "audio_tokens": 0,
+          "image_tokens": 3553
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 65,
+        "audio_tokens": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,617 @@
+{
+  "model": "gpt-realtime-2.1",
+  "condition": "baseline-anchors",
+  "layout": "A",
+  "imageDims": {
+    "W": 2048,
+    "H": 1152
+  },
+  "timestamp": "2026-07-12T18:05:08.205Z",
+  "records": [
+    {
+      "id": "save",
+      "ask": "the SAVE button",
+      "zone": "corner",
+      "gt": {
+        "x": 180,
+        "y": 96
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 156,
+        "y": 81
+      },
+      "rawArgs": {
+        "x": 156,
+        "y": 81,
+        "label": "SAVE button",
+        "screen": 0
+      },
+      "errX": -24,
+      "errY": -15,
+      "err": 28.30194339616981,
+      "hit": true,
+      "latencyMs": 1162,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1168
+    },
+    {
+      "id": "open",
+      "ask": "the OPEN button",
+      "zone": "corner",
+      "gt": {
+        "x": 1900,
+        "y": 110
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 1910,
+        "y": 81
+      },
+      "rawArgs": {
+        "x": 1910,
+        "y": 81,
+        "label": "OPEN button",
+        "screen": 0
+      },
+      "errX": 10,
+      "errY": -29,
+      "err": 30.675723300355937,
+      "hit": false,
+      "latencyMs": 778,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 782
+    },
+    {
+      "id": "help",
+      "ask": "the HELP button",
+      "zone": "corner",
+      "gt": {
+        "x": 150,
+        "y": 1050
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 115,
+        "y": 1067
+      },
+      "rawArgs": {
+        "x": 115,
+        "y": 1067,
+        "label": "HELP button",
+        "screen": 0
+      },
+      "errX": -35,
+      "errY": 17,
+      "err": 38.91015291668744,
+      "hit": true,
+      "latencyMs": 1684,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1686
+    },
+    {
+      "id": "exit",
+      "ask": "the EXIT button",
+      "zone": "corner",
+      "gt": {
+        "x": 1890,
+        "y": 1040
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 1870,
+        "y": 1067
+      },
+      "rawArgs": {
+        "x": 1870,
+        "y": 1067,
+        "label": "EXIT button",
+        "screen": 0
+      },
+      "errX": -20,
+      "errY": 27,
+      "err": 33.60059523282288,
+      "hit": false,
+      "latencyMs": 839,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 841
+    },
+    {
+      "id": "start",
+      "ask": "the START button",
+      "zone": "center",
+      "gt": {
+        "x": 1010,
+        "y": 590
+      },
+      "w": 150,
+      "h": 52,
+      "pred": {
+        "x": 1065,
+        "y": 546
+      },
+      "rawArgs": {
+        "x": 1065,
+        "y": 546,
+        "label": "START button",
+        "screen": 0
+      },
+      "errX": 55,
+      "errY": -44,
+      "err": 70.43436661176133,
+      "hit": false,
+      "latencyMs": 970,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 976
+    },
+    {
+      "id": "cart",
+      "ask": "the CART button",
+      "zone": "edge",
+      "gt": {
+        "x": 1024,
+        "y": 70
+      },
+      "w": 130,
+      "h": 46,
+      "pred": {
+        "x": 1024,
+        "y": 81
+      },
+      "rawArgs": {
+        "x": 1024,
+        "y": 81,
+        "label": "CART button",
+        "screen": 0
+      },
+      "errX": 0,
+      "errY": 11,
+      "err": 11,
+      "hit": true,
+      "latencyMs": 1026,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1031
+    },
+    {
+      "id": "send",
+      "ask": "the SEND button",
+      "zone": "edge",
+      "gt": {
+        "x": 1966,
+        "y": 620
+      },
+      "w": 120,
+      "h": 46,
+      "pred": {
+        "x": 1930,
+        "y": 517
+      },
+      "rawArgs": {
+        "x": 1930,
+        "y": 517,
+        "label": "SEND button",
+        "screen": 0
+      },
+      "errX": -36,
+      "errY": -103,
+      "err": 109.11003620199199,
+      "hit": false,
+      "latencyMs": 1067,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1069
+    },
+    {
+      "id": "copy",
+      "ask": "the COPY button",
+      "zone": "cluster",
+      "gt": {
+        "x": 620,
+        "y": 820
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 783,
+        "y": 721
+      },
+      "rawArgs": {
+        "x": 783,
+        "y": 721,
+        "label": "COPY button",
+        "screen": 0
+      },
+      "errX": 163,
+      "errY": -99,
+      "err": 190.70920271449936,
+      "hit": false,
+      "latencyMs": 1119,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1125
+    },
+    {
+      "id": "paste",
+      "ask": "the PASTE button",
+      "zone": "cluster",
+      "gt": {
+        "x": 770,
+        "y": 820
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 1015,
+        "y": 721
+      },
+      "rawArgs": {
+        "x": 1015,
+        "y": 721,
+        "label": "PASTE button",
+        "screen": 0
+      },
+      "errX": 245,
+      "errY": -99,
+      "err": 264.2460974167831,
+      "hit": false,
+      "latencyMs": 1825,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1831
+    },
+    {
+      "id": "cut",
+      "ask": "the CUT button",
+      "zone": "cluster",
+      "gt": {
+        "x": 920,
+        "y": 820
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 1215,
+        "y": 721
+      },
+      "rawArgs": {
+        "x": 1215,
+        "y": 721,
+        "label": "CUT button",
+        "screen": 0
+      },
+      "errX": 295,
+      "errY": -99,
+      "err": 311.16876449926656,
+      "hit": false,
+      "latencyMs": 1590,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1593
+    },
+    {
+      "id": "dot",
+      "ask": "the small red dot",
+      "zone": "icon",
+      "gt": {
+        "x": 1500,
+        "y": 350
+      },
+      "w": 24,
+      "h": 24,
+      "pred": {
+        "x": 1276,
+        "y": 332
+      },
+      "rawArgs": {
+        "x": 1276,
+        "y": 332,
+        "label": "small red dot",
+        "screen": 0
+      },
+      "errX": -224,
+      "errY": -18,
+      "err": 224.72205054244233,
+      "hit": false,
+      "latencyMs": 1186,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1192
+    },
+    {
+      "id": "square",
+      "ask": "the small blue square",
+      "zone": "icon",
+      "gt": {
+        "x": 420,
+        "y": 480
+      },
+      "w": 16,
+      "h": 16,
+      "pred": {
+        "x": 430,
+        "y": 430
+      },
+      "rawArgs": {
+        "x": 430,
+        "y": 430,
+        "label": "small blue square",
+        "screen": 0
+      },
+      "errX": 10,
+      "errY": -50,
+      "err": 50.99019513592785,
+      "hit": false,
+      "latencyMs": 2669,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 2672
+    }
+  ],
+  "usage": [
+    {
+      "total_tokens": 1068,
+      "input_tokens": 1037,
+      "output_tokens": 31,
+      "input_token_details": {
+        "text_tokens": 714,
+        "audio_tokens": 0,
+        "image_tokens": 323,
+        "cached_tokens": 0,
+        "cached_tokens_details": {
+          "text_tokens": 0,
+          "audio_tokens": 0,
+          "image_tokens": 0
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 31,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 1607,
+      "input_tokens": 1575,
+      "output_tokens": 32,
+      "input_token_details": {
+        "text_tokens": 929,
+        "audio_tokens": 0,
+        "image_tokens": 646,
+        "cached_tokens": 1027,
+        "cached_tokens_details": {
+          "text_tokens": 704,
+          "audio_tokens": 0,
+          "image_tokens": 323
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 32,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 2146,
+      "input_tokens": 2114,
+      "output_tokens": 32,
+      "input_token_details": {
+        "text_tokens": 1145,
+        "audio_tokens": 0,
+        "image_tokens": 969,
+        "cached_tokens": 1606,
+        "cached_tokens_details": {
+          "text_tokens": 960,
+          "audio_tokens": 0,
+          "image_tokens": 646
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 32,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 2686,
+      "input_tokens": 2653,
+      "output_tokens": 33,
+      "input_token_details": {
+        "text_tokens": 1361,
+        "audio_tokens": 0,
+        "image_tokens": 1292,
+        "cached_tokens": 2121,
+        "cached_tokens_details": {
+          "text_tokens": 1152,
+          "audio_tokens": 0,
+          "image_tokens": 969
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 33,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 3225,
+      "input_tokens": 3193,
+      "output_tokens": 32,
+      "input_token_details": {
+        "text_tokens": 1578,
+        "audio_tokens": 0,
+        "image_tokens": 1615,
+        "cached_tokens": 2700,
+        "cached_tokens_details": {
+          "text_tokens": 1408,
+          "audio_tokens": 0,
+          "image_tokens": 1292
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 32,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 3765,
+      "input_tokens": 3732,
+      "output_tokens": 33,
+      "input_token_details": {
+        "text_tokens": 1794,
+        "audio_tokens": 0,
+        "image_tokens": 1938,
+        "cached_tokens": 3215,
+        "cached_tokens_details": {
+          "text_tokens": 1600,
+          "audio_tokens": 0,
+          "image_tokens": 1615
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 33,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 4304,
+      "input_tokens": 4272,
+      "output_tokens": 32,
+      "input_token_details": {
+        "text_tokens": 2011,
+        "audio_tokens": 0,
+        "image_tokens": 2261,
+        "cached_tokens": 3730,
+        "cached_tokens_details": {
+          "text_tokens": 1792,
+          "audio_tokens": 0,
+          "image_tokens": 1938
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 32,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 4842,
+      "input_tokens": 4811,
+      "output_tokens": 31,
+      "input_token_details": {
+        "text_tokens": 2227,
+        "audio_tokens": 0,
+        "image_tokens": 2584,
+        "cached_tokens": 4309,
+        "cached_tokens_details": {
+          "text_tokens": 2048,
+          "audio_tokens": 0,
+          "image_tokens": 2261
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 31,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 5461,
+      "input_tokens": 5350,
+      "output_tokens": 111,
+      "input_token_details": {
+        "text_tokens": 2443,
+        "audio_tokens": 0,
+        "image_tokens": 2907,
+        "cached_tokens": 4824,
+        "cached_tokens_details": {
+          "text_tokens": 2240,
+          "audio_tokens": 0,
+          "image_tokens": 2584
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 111,
+        "audio_tokens": 0,
+        "reasoning_tokens": 78
+      }
+    },
+    {
+      "total_tokens": 5974,
+      "input_tokens": 5890,
+      "output_tokens": 84,
+      "input_token_details": {
+        "text_tokens": 2660,
+        "audio_tokens": 0,
+        "image_tokens": 3230,
+        "cached_tokens": 5339,
+        "cached_tokens_details": {
+          "text_tokens": 2432,
+          "audio_tokens": 0,
+          "image_tokens": 2907
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 84,
+        "audio_tokens": 0,
+        "reasoning_tokens": 52
+      }
+    },
+    {
+      "total_tokens": 6463,
+      "input_tokens": 6430,
+      "output_tokens": 33,
+      "input_token_details": {
+        "text_tokens": 2877,
+        "audio_tokens": 0,
+        "image_tokens": 3553,
+        "cached_tokens": 5854,
+        "cached_tokens_details": {
+          "text_tokens": 2624,
+          "audio_tokens": 0,
+          "image_tokens": 3230
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 33,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 7141,
+      "input_tokens": 6971,
+      "output_tokens": 170,
+      "input_token_details": {
+        "text_tokens": 3095,
+        "audio_tokens": 0,
+        "image_tokens": 3876,
+        "cached_tokens": 6433,
+        "cached_tokens_details": {
+          "text_tokens": 2880,
+          "audio_tokens": 0,
+          "image_tokens": 3553
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 170,
+        "audio_tokens": 0,
+        "reasoning_tokens": 138
+      }
+    }
+  ]
+}

@@ -1,0 +1,620 @@
+{
+  "model": "gpt-realtime-2.1",
+  "condition": "fiducials",
+  "layout": "B",
+  "imageDims": {
+    "W": 2048,
+    "H": 1152
+  },
+  "timestamp": "2026-07-12T20:25:00.358Z",
+  "records": [
+    {
+      "id": "save",
+      "ask": "the SAVE button",
+      "zone": "corner",
+      "gt": {
+        "x": 1880,
+        "y": 90
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 1910,
+        "y": 150
+      },
+      "rawArgs": {
+        "x": 1910,
+        "y": 150,
+        "label": "the SAVE button",
+        "screen": 0
+      },
+      "errX": 30,
+      "errY": 60,
+      "err": 67.0820393249937,
+      "hit": false,
+      "latencyMs": 2350,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 2353
+    },
+    {
+      "id": "open",
+      "ask": "the OPEN button",
+      "zone": "corner",
+      "gt": {
+        "x": 140,
+        "y": 100
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 260,
+        "y": 150
+      },
+      "rawArgs": {
+        "x": 260,
+        "y": 150,
+        "label": "the OPEN button",
+        "screen": 0
+      },
+      "errX": 120,
+      "errY": 50,
+      "err": 130,
+      "hit": false,
+      "latencyMs": 896,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 902
+    },
+    {
+      "id": "help",
+      "ask": "the HELP button",
+      "zone": "corner",
+      "gt": {
+        "x": 1900,
+        "y": 1060
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 1898,
+        "y": 1040
+      },
+      "rawArgs": {
+        "x": 1898,
+        "y": 1040,
+        "label": "the HELP button",
+        "screen": 0
+      },
+      "errX": -2,
+      "errY": -20,
+      "err": 20.09975124224178,
+      "hit": true,
+      "latencyMs": 918,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 918
+    },
+    {
+      "id": "exit",
+      "ask": "the EXIT button",
+      "zone": "corner",
+      "gt": {
+        "x": 170,
+        "y": 1030
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 230,
+        "y": 1040
+      },
+      "rawArgs": {
+        "x": 230,
+        "y": 1040,
+        "label": "the EXIT button",
+        "screen": 0
+      },
+      "errX": 60,
+      "errY": 10,
+      "err": 60.82762530298219,
+      "hit": true,
+      "latencyMs": 1052,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1058
+    },
+    {
+      "id": "start",
+      "ask": "the START button",
+      "zone": "center",
+      "gt": {
+        "x": 1120,
+        "y": 530
+      },
+      "w": 150,
+      "h": 52,
+      "pred": {
+        "x": 1024,
+        "y": 576
+      },
+      "rawArgs": {
+        "x": 1024,
+        "y": 576,
+        "label": "the START button",
+        "screen": 0
+      },
+      "errX": -96,
+      "errY": 46,
+      "err": 106.45186705737011,
+      "hit": false,
+      "latencyMs": 1027,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1031
+    },
+    {
+      "id": "cart",
+      "ask": "the CART button",
+      "zone": "edge",
+      "gt": {
+        "x": 84,
+        "y": 600
+      },
+      "w": 130,
+      "h": 46,
+      "pred": {
+        "x": 120,
+        "y": 576
+      },
+      "rawArgs": {
+        "x": 120,
+        "y": 576,
+        "label": "the CART button",
+        "screen": 0
+      },
+      "errX": 36,
+      "errY": -24,
+      "err": 43.266615305567875,
+      "hit": false,
+      "latencyMs": 2717,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 2722
+    },
+    {
+      "id": "send",
+      "ask": "the SEND button",
+      "zone": "edge",
+      "gt": {
+        "x": 1024,
+        "y": 1092
+      },
+      "w": 120,
+      "h": 46,
+      "pred": {
+        "x": 1024,
+        "y": 1040
+      },
+      "rawArgs": {
+        "x": 1024,
+        "y": 1040,
+        "label": "the SEND button",
+        "screen": 0
+      },
+      "errX": 0,
+      "errY": -52,
+      "err": 52,
+      "hit": false,
+      "latencyMs": 3441,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 3445
+    },
+    {
+      "id": "copy",
+      "ask": "the COPY button",
+      "zone": "cluster",
+      "gt": {
+        "x": 1450,
+        "y": 300
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 1120,
+        "y": 350
+      },
+      "rawArgs": {
+        "x": 1120,
+        "y": 350,
+        "label": "the COPY button",
+        "screen": 0
+      },
+      "errX": -330,
+      "errY": 50,
+      "err": 333.7663853655728,
+      "hit": false,
+      "latencyMs": 1131,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1137
+    },
+    {
+      "id": "paste",
+      "ask": "the PASTE button",
+      "zone": "cluster",
+      "gt": {
+        "x": 1600,
+        "y": 300
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 1210,
+        "y": 350
+      },
+      "rawArgs": {
+        "x": 1210,
+        "y": 350,
+        "label": "the PASTE button",
+        "screen": 0
+      },
+      "errX": -390,
+      "errY": 50,
+      "err": 393.19206502674996,
+      "hit": false,
+      "latencyMs": 1759,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1765
+    },
+    {
+      "id": "cut",
+      "ask": "the CUT button",
+      "zone": "cluster",
+      "gt": {
+        "x": 1750,
+        "y": 300
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 1300,
+        "y": 350
+      },
+      "rawArgs": {
+        "x": 1300,
+        "y": 350,
+        "label": "the CUT button",
+        "screen": 0
+      },
+      "errX": -450,
+      "errY": 50,
+      "err": 452.76925690687085,
+      "hit": false,
+      "latencyMs": 1786,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 1791
+    },
+    {
+      "id": "dot",
+      "ask": "the small red dot",
+      "zone": "icon",
+      "gt": {
+        "x": 500,
+        "y": 900
+      },
+      "w": 24,
+      "h": 24,
+      "pred": {
+        "x": 580,
+        "y": 760
+      },
+      "rawArgs": {
+        "x": 580,
+        "y": 760,
+        "label": "the small red dot",
+        "screen": 0
+      },
+      "errX": 80,
+      "errY": -140,
+      "err": 161.24515496597098,
+      "hit": false,
+      "latencyMs": 2534,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 2540
+    },
+    {
+      "id": "square",
+      "ask": "the small blue square",
+      "zone": "icon",
+      "gt": {
+        "x": 1650,
+        "y": 750
+      },
+      "w": 16,
+      "h": 16,
+      "pred": {
+        "x": 1570,
+        "y": 700
+      },
+      "rawArgs": {
+        "x": 1570,
+        "y": 700,
+        "label": "the small blue square",
+        "screen": 0
+      },
+      "errX": -80,
+      "errY": -50,
+      "err": 94.33981132056603,
+      "hit": false,
+      "latencyMs": 2243,
+      "extraCalls": 0,
+      "modelText": "",
+      "status": "completed",
+      "totalMs": 2246
+    }
+  ],
+  "usage": [
+    {
+      "total_tokens": 1204,
+      "input_tokens": 982,
+      "output_tokens": 222,
+      "input_token_details": {
+        "text_tokens": 659,
+        "audio_tokens": 0,
+        "image_tokens": 323,
+        "cached_tokens": 128,
+        "cached_tokens_details": {
+          "text_tokens": 128,
+          "audio_tokens": 0,
+          "image_tokens": 0
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 222,
+        "audio_tokens": 0,
+        "reasoning_tokens": 189
+      }
+    },
+    {
+      "total_tokens": 1499,
+      "input_tokens": 1467,
+      "output_tokens": 32,
+      "input_token_details": {
+        "text_tokens": 821,
+        "audio_tokens": 0,
+        "image_tokens": 646,
+        "cached_tokens": 963,
+        "cached_tokens_details": {
+          "text_tokens": 640,
+          "audio_tokens": 0,
+          "image_tokens": 323
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 32,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 1985,
+      "input_tokens": 1951,
+      "output_tokens": 34,
+      "input_token_details": {
+        "text_tokens": 982,
+        "audio_tokens": 0,
+        "image_tokens": 969,
+        "cached_tokens": 1473,
+        "cached_tokens_details": {
+          "text_tokens": 832,
+          "audio_tokens": 0,
+          "image_tokens": 641
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 34,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 2470,
+      "input_tokens": 2437,
+      "output_tokens": 33,
+      "input_token_details": {
+        "text_tokens": 1145,
+        "audio_tokens": 0,
+        "image_tokens": 1292,
+        "cached_tokens": 1993,
+        "cached_tokens_details": {
+          "text_tokens": 1024,
+          "audio_tokens": 0,
+          "image_tokens": 969
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 33,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 2955,
+      "input_tokens": 2922,
+      "output_tokens": 33,
+      "input_token_details": {
+        "text_tokens": 1307,
+        "audio_tokens": 0,
+        "image_tokens": 1615,
+        "cached_tokens": 2444,
+        "cached_tokens_details": {
+          "text_tokens": 1152,
+          "audio_tokens": 0,
+          "image_tokens": 1292
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 33,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 3629,
+      "input_tokens": 3407,
+      "output_tokens": 222,
+      "input_token_details": {
+        "text_tokens": 1469,
+        "audio_tokens": 0,
+        "image_tokens": 1938,
+        "cached_tokens": 2959,
+        "cached_tokens_details": {
+          "text_tokens": 1344,
+          "audio_tokens": 0,
+          "image_tokens": 1615
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 222,
+        "audio_tokens": 0,
+        "reasoning_tokens": 190
+      }
+    },
+    {
+      "total_tokens": 4210,
+      "input_tokens": 3891,
+      "output_tokens": 319,
+      "input_token_details": {
+        "text_tokens": 1630,
+        "audio_tokens": 0,
+        "image_tokens": 2261,
+        "cached_tokens": 3410,
+        "cached_tokens_details": {
+          "text_tokens": 1472,
+          "audio_tokens": 0,
+          "image_tokens": 1938
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 319,
+        "audio_tokens": 0,
+        "reasoning_tokens": 285
+      }
+    },
+    {
+      "total_tokens": 4410,
+      "input_tokens": 4377,
+      "output_tokens": 33,
+      "input_token_details": {
+        "text_tokens": 1793,
+        "audio_tokens": 0,
+        "image_tokens": 2584,
+        "cached_tokens": 3861,
+        "cached_tokens_details": {
+          "text_tokens": 1600,
+          "audio_tokens": 0,
+          "image_tokens": 2261
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 33,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 4958,
+      "input_tokens": 4863,
+      "output_tokens": 95,
+      "input_token_details": {
+        "text_tokens": 1956,
+        "audio_tokens": 0,
+        "image_tokens": 2907,
+        "cached_tokens": 4376,
+        "cached_tokens_details": {
+          "text_tokens": 1792,
+          "audio_tokens": 0,
+          "image_tokens": 2584
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 95,
+        "audio_tokens": 0,
+        "reasoning_tokens": 61
+      }
+    },
+    {
+      "total_tokens": 5382,
+      "input_tokens": 5349,
+      "output_tokens": 33,
+      "input_token_details": {
+        "text_tokens": 2119,
+        "audio_tokens": 0,
+        "image_tokens": 3230,
+        "cached_tokens": 4891,
+        "cached_tokens_details": {
+          "text_tokens": 1984,
+          "audio_tokens": 0,
+          "image_tokens": 2907
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 33,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 6015,
+      "input_tokens": 5835,
+      "output_tokens": 180,
+      "input_token_details": {
+        "text_tokens": 2282,
+        "audio_tokens": 0,
+        "image_tokens": 3553,
+        "cached_tokens": 5342,
+        "cached_tokens_details": {
+          "text_tokens": 2112,
+          "audio_tokens": 0,
+          "image_tokens": 3230
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 180,
+        "audio_tokens": 0,
+        "reasoning_tokens": 147
+      }
+    },
+    {
+      "total_tokens": 6451,
+      "input_tokens": 6321,
+      "output_tokens": 130,
+      "input_token_details": {
+        "text_tokens": 2445,
+        "audio_tokens": 0,
+        "image_tokens": 3876,
+        "cached_tokens": 5857,
+        "cached_tokens_details": {
+          "text_tokens": 2304,
+          "audio_tokens": 0,
+          "image_tokens": 3553
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 130,
+        "audio_tokens": 0,
+        "reasoning_tokens": 96
+      }
+    }
+  ]
+}

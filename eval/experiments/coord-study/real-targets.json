@@ -1,0 +1,12 @@
+{
+  "width": 2048,
+  "height": 1152,
+  "note": "hand-derived from images/real-plain.jpg (2048x1152, 3840x2160 physical desktop downscaled 0.5333) by 1:1 crop inspection + crosshair verification (crops/verify-*.png). Tolerances: centers accurate to ~±3px; w/h are the clickable element extents used for hit scoring.",
+  "targets": [
+    { "id": "startbtn", "kind": "icon",   "cx": 706,  "cy": 1130, "w": 44,  "h": 44, "ask": "the Windows Start button in the taskbar",                  "zone": "edge" },
+    { "id": "clock",    "kind": "text",   "cx": 2011, "cy": 1130, "w": 90,  "h": 44, "ask": "the clock in the system tray (bottom-right corner)",       "zone": "corner" },
+    { "id": "review",   "kind": "button", "cx": 1466, "cy": 640,  "w": 58,  "h": 26, "ask": "the Review button in the 'Edited 5 files' card",           "zone": "center" },
+    { "id": "newtask",  "kind": "menu",   "cx": 46,   "cy": 82,   "w": 120, "h": 24, "ask": "the 'New task' item at the top of the left sidebar",       "zone": "corner" },
+    { "id": "openin",   "kind": "button", "cx": 1920, "cy": 50,   "w": 80,  "h": 26, "ask": "the 'Open in' button in the top-right toolbar",            "zone": "corner" }
+  ]
+}
