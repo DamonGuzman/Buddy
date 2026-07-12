@@ -1,0 +1,355 @@
+{
+  "backend": "LIVE OPENAI API",
+  "startedAt": "2026-07-12T16:22:15.015Z",
+  "voiceTurns": [
+    {
+      "turnId": "turn_1",
+      "chunksIn": 54,
+      "chunksOut": 53,
+      "committedAudioSec": null,
+      "userTranscript": "Point at the Save button. Point at the Save button.",
+      "captureMs": 737,
+      "releaseToCommitMs": 1,
+      "releaseToFirstUserTranscriptMs": 466,
+      "releaseToFirstAudioDeltaMs": 1496,
+      "firstDeltaToFirstPlayedMs": 3,
+      "releaseToFirstTranscriptMs": 1371,
+      "releaseToFirstToolCallMs": null,
+      "releaseToDoneMs": 3816,
+      "usage": {
+        "inputTokens": 1238,
+        "outputTokens": 737,
+        "totalTokens": 1975,
+        "inputTextTokens": 883,
+        "inputAudioTokens": 32,
+        "inputImageTokens": 323,
+        "cachedTokens": 0,
+        "outputTextTokens": 318,
+        "outputAudioTokens": 419,
+        "responses": 1
+      },
+      "playback": {
+        "rms": 0.06591427107531363,
+        "peak": 0.440216064453125,
+        "underruns": 0,
+        "samplesPlayed": 502800
+      },
+      "spectral": {
+        "pass": false,
+        "notes": [
+          {
+            "freq": 523.25,
+            "marginDb": 1.8,
+            "pass": false
+          },
+          {
+            "freq": 659.25,
+            "marginDb": -7.1,
+            "pass": false
+          },
+          {
+            "freq": 783.99,
+            "marginDb": -7.6,
+            "pass": false
+          }
+        ],
+        "playedSeconds": 10.86
+      }
+    },
+    {
+      "turnId": "turn_2",
+      "chunksIn": 56,
+      "chunksOut": 76,
+      "committedAudioSec": null,
+      "userTranscript": "Point at the Save button. Point at the Save button.",
+      "captureMs": 704,
+      "releaseToCommitMs": 2,
+      "releaseToFirstUserTranscriptMs": 441,
+      "releaseToFirstAudioDeltaMs": 899,
+      "firstDeltaToFirstPlayedMs": 97,
+      "releaseToFirstTranscriptMs": 737,
+      "releaseToFirstToolCallMs": null,
+      "releaseToDoneMs": 4247,
+      "usage": {
+        "inputTokens": 1761,
+        "outputTokens": 836,
+        "totalTokens": 2597,
+        "inputTextTokens": 1050,
+        "inputAudioTokens": 65,
+        "inputImageTokens": 646,
+        "cachedTokens": 1219,
+        "outputTextTokens": 231,
+        "outputAudioTokens": 605,
+        "responses": 1
+      },
+      "playback": {
+        "rms": 0.06306376530438405,
+        "peak": 0.478363037109375,
+        "underruns": 0,
+        "samplesPlayed": 726000
+      },
+      "spectral": {
+        "pass": false,
+        "notes": [
+          {
+            "freq": 523.25,
+            "marginDb": -2.7,
+            "pass": false
+          },
+          {
+            "freq": 659.25,
+            "marginDb": -5.7,
+            "pass": false
+          },
+          {
+            "freq": 783.99,
+            "marginDb": -8.9,
+            "pass": false
+          }
+        ],
+        "playedSeconds": 10.6
+      }
+    },
+    {
+      "turnId": "turn_3",
+      "chunksIn": 57,
+      "chunksOut": 54,
+      "committedAudioSec": null,
+      "userTranscript": "Point at the Save button. Point at the Save button.",
+      "captureMs": 540,
+      "releaseToCommitMs": 1,
+      "releaseToFirstUserTranscriptMs": 568,
+      "releaseToFirstAudioDeltaMs": 1415,
+      "firstDeltaToFirstPlayedMs": 94,
+      "releaseToFirstTranscriptMs": 1232,
+      "releaseToFirstToolCallMs": null,
+      "releaseToDoneMs": 3744,
+      "usage": {
+        "inputTokens": 2329,
+        "outputTokens": 656,
+        "totalTokens": 2985,
+        "inputTextTokens": 1261,
+        "inputAudioTokens": 99,
+        "inputImageTokens": 969,
+        "cachedTokens": 1725,
+        "outputTextTokens": 228,
+        "outputAudioTokens": 428,
+        "responses": 1
+      },
+      "playback": {
+        "rms": 0.06647771184656855,
+        "peak": 0.572235107421875,
+        "underruns": 0,
+        "samplesPlayed": 513600
+      },
+      "spectral": {
+        "pass": false,
+        "notes": [
+          {
+            "freq": 523.25,
+            "marginDb": -2.2,
+            "pass": false
+          },
+          {
+            "freq": 659.25,
+            "marginDb": -9.2,
+            "pass": false
+          },
+          {
+            "freq": 783.99,
+            "marginDb": -15.5,
+            "pass": false
+          }
+        ],
+        "playedSeconds": 9.76
+      }
+    },
+    {
+      "turnId": "turn_4",
+      "chunksIn": 57,
+      "chunksOut": 50,
+      "committedAudioSec": null,
+      "userTranscript": "Point at the Save button. Point at the Save button.",
+      "captureMs": 589,
+      "releaseToCommitMs": 1,
+      "releaseToFirstUserTranscriptMs": 427,
+      "releaseToFirstAudioDeltaMs": 1825,
+      "firstDeltaToFirstPlayedMs": 65,
+      "releaseToFirstTranscriptMs": 1717,
+      "releaseToFirstToolCallMs": null,
+      "releaseToDoneMs": 4136,
+      "usage": {
+        "inputTokens": 2861,
+        "outputTokens": 717,
+        "totalTokens": 3578,
+        "inputTextTokens": 1436,
+        "inputAudioTokens": 133,
+        "inputImageTokens": 1292,
+        "cachedTokens": 2376,
+        "outputTextTokens": 324,
+        "outputAudioTokens": 393,
+        "responses": 1
+      },
+      "playback": {
+        "rms": 0.06401470142714998,
+        "peak": 0.46905517578125,
+        "underruns": 0,
+        "samplesPlayed": 471600
+      },
+      "spectral": {
+        "pass": false,
+        "notes": [
+          {
+            "freq": 523.25,
+            "marginDb": 1.7,
+            "pass": false
+          },
+          {
+            "freq": 659.25,
+            "marginDb": -6.6,
+            "pass": false
+          },
+          {
+            "freq": 783.99,
+            "marginDb": -11.6,
+            "pass": false
+          }
+        ],
+        "playedSeconds": 10.4
+      }
+    },
+    {
+      "turnId": "turn_5",
+      "chunksIn": 57,
+      "chunksOut": 62,
+      "committedAudioSec": null,
+      "userTranscript": "Point at the Save button. Point at the Save button.",
+      "captureMs": 572,
+      "releaseToCommitMs": 2,
+      "releaseToFirstUserTranscriptMs": 449,
+      "releaseToFirstAudioDeltaMs": 1623,
+      "firstDeltaToFirstPlayedMs": 61,
+      "releaseToFirstTranscriptMs": 1487,
+      "releaseToFirstToolCallMs": null,
+      "releaseToDoneMs": 4323,
+      "usage": {
+        "inputTokens": 3389,
+        "outputTokens": 767,
+        "totalTokens": 4156,
+        "inputTextTokens": 1607,
+        "inputAudioTokens": 167,
+        "inputImageTokens": 1615,
+        "cachedTokens": 2807,
+        "outputTextTokens": 278,
+        "outputAudioTokens": 489,
+        "responses": 1
+      },
+      "playback": {
+        "rms": 0.06782513376270194,
+        "peak": 0.512725830078125,
+        "underruns": 0,
+        "samplesPlayed": 586800
+      },
+      "spectral": {
+        "pass": false,
+        "notes": [
+          {
+            "freq": 523.25,
+            "marginDb": -0.4,
+            "pass": false
+          },
+          {
+            "freq": 659.25,
+            "marginDb": -13.7,
+            "pass": false
+          },
+          {
+            "freq": 783.99,
+            "marginDb": -6.7,
+            "pass": false
+          }
+        ],
+        "playedSeconds": 10.18
+      }
+    }
+  ],
+  "bargeIns": [
+    {
+      "turnId": "turn_6",
+      "bargeInStopMs": 16
+    },
+    {
+      "turnId": "turn_6",
+      "bargeInStopMs": 16
+    },
+    {
+      "turnId": "turn_6",
+      "bargeInStopMs": 16
+    }
+  ],
+  "textTurns": [
+    {
+      "turnId": "turn_12",
+      "captureMs": 745,
+      "askToCommitMs": 745,
+      "askToFirstTranscriptMs": 1941,
+      "askToFirstAudioDeltaMs": 2088,
+      "firstDeltaToFirstPlayedMs": 141,
+      "askToDoneMs": 3241
+    },
+    {
+      "turnId": "turn_13",
+      "captureMs": 858,
+      "askToCommitMs": 858,
+      "askToFirstTranscriptMs": 1817,
+      "askToFirstAudioDeltaMs": 1972,
+      "firstDeltaToFirstPlayedMs": 61,
+      "askToDoneMs": 3490
+    },
+    {
+      "turnId": "turn_14",
+      "captureMs": 519,
+      "askToCommitMs": 520,
+      "askToFirstTranscriptMs": 1525,
+      "askToFirstAudioDeltaMs": 1679,
+      "firstDeltaToFirstPlayedMs": 214,
+      "askToDoneMs": 2940
+    }
+  ],
+  "shortHold": {
+    "turnCreated": false,
+    "assistantState": "idle",
+    "pass": true
+  },
+  "silenceHold": {
+    "turnId": "turn_1",
+    "chunksIn": 53,
+    "committedAudioSec": null,
+    "responseDone": true,
+    "assistantStateAfter": "speaking",
+    "pass": true
+  },
+  "medians": {
+    "captureMs": 589,
+    "releaseToCommitMs": 1,
+    "releaseToFirstUserTranscriptMs": 449,
+    "releaseToFirstToolCallMs": null,
+    "releaseToFirstAudioDeltaMs": 1496,
+    "firstDeltaToFirstPlayedMs": 65,
+    "releaseToDoneMs": 4136,
+    "bargeInStopMs": 16,
+    "textAskToFirstAudioDeltaMs": 1972,
+    "textFirstDeltaToFirstPlayedMs": 141
+  },
+  "gates": {
+    "audioIn": true,
+    "audioOutRms": true,
+    "underruns": true,
+    "spectral": true,
+    "spectralNote": "live: playedSeconds > 0.5 (speech), melody check is mock-only",
+    "bargeInUnder300": true,
+    "shortHold": true,
+    "silenceHold": true
+  },
+  "finishedAt": "2026-07-12T16:25:35.257Z"
+}

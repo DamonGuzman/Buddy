@@ -1,0 +1,253 @@
+{
+  "backend": "LIVE OPENAI API",
+  "mode": "text",
+  "startedAt": "2026-07-12T16:26:42.906Z",
+  "scenes": [
+    {
+      "scene": "app-toolbar",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "menu-file",
+          "desc": "the File menu",
+          "rect": {
+            "x": 24,
+            "y": 10,
+            "width": 30,
+            "height": 27
+          },
+          "pointed": {
+            "x": 92,
+            "y": 58,
+            "screenIndex": 0,
+            "label": "the file menu"
+          },
+          "verdict": "miss",
+          "errorPx": 63,
+          "rectDistPx": 43,
+          "userText": "point at the File menu",
+          "assistantText": "the file menu is up in the top left, so click that, then choose what you need from there. if you’d like, next try exporting or saving a copy to check how it looks in a file.",
+          "latency": {
+            "askToFirstToolCallMs": 1541,
+            "askToFirstAudioDeltaMs": 2165,
+            "askToDoneMs": 3150
+          },
+          "usage": {
+            "inputTokens": 2458,
+            "outputTokens": 299,
+            "totalTokens": 2757,
+            "inputTextTokens": 1812,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 646,
+            "cachedTokens": 1219,
+            "outputTextTokens": 95,
+            "outputAudioTokens": 204,
+            "responses": 2
+          }
+        },
+        {
+          "name": "save",
+          "desc": "the save button in the toolbar",
+          "rect": {
+            "x": 24,
+            "y": 66,
+            "width": 163,
+            "height": 73
+          },
+          "pointed": {
+            "x": 144,
+            "y": 70,
+            "screenIndex": 0,
+            "label": "the save button"
+          },
+          "verdict": "hit",
+          "errorPx": 50,
+          "userText": "point at the save button in the toolbar",
+          "assistantText": "the save button is in the toolbar up top, so click it to save your changes. and maybe next, try exporting to check how it looks as a document—little preview, big payoff.",
+          "latency": {
+            "askToFirstToolCallMs": 2313,
+            "askToFirstAudioDeltaMs": 3468,
+            "askToDoneMs": 4626
+          },
+          "usage": {
+            "inputTokens": 3460,
+            "outputTokens": 561,
+            "totalTokens": 4021,
+            "inputTextTokens": 2168,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1292,
+            "cachedTokens": 2881,
+            "outputTextTokens": 337,
+            "outputAudioTokens": 224,
+            "responses": 2
+          }
+        },
+        {
+          "name": "open",
+          "desc": "the open button in the toolbar",
+          "rect": {
+            "x": 211,
+            "y": 66,
+            "width": 173,
+            "height": 73
+          },
+          "pointed": {
+            "x": 300,
+            "y": 70,
+            "screenIndex": 0,
+            "label": "the open button"
+          },
+          "verdict": "hit",
+          "errorPx": 33,
+          "userText": "point at the open button in the toolbar",
+          "assistantText": "the open button is in the top toolbar, so click it to bring up your options. and then if you want to dig deeper, try opening a specific file next and see if it opens right where you want it.",
+          "latency": {
+            "askToFirstToolCallMs": 1507,
+            "askToFirstAudioDeltaMs": 2208,
+            "askToDoneMs": 3216
+          },
+          "usage": {
+            "inputTokens": 4454,
+            "outputTokens": 403,
+            "totalTokens": 4857,
+            "inputTextTokens": 2516,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1938,
+            "cachedTokens": 3919,
+            "outputTextTokens": 185,
+            "outputAudioTokens": 218,
+            "responses": 2
+          }
+        },
+        {
+          "name": "export",
+          "desc": "the export button in the toolbar",
+          "rect": {
+            "x": 408,
+            "y": 65,
+            "width": 161,
+            "height": 75
+          },
+          "pointed": {
+            "x": 640,
+            "y": 70,
+            "screenIndex": 0,
+            "label": "the export button"
+          },
+          "verdict": "miss",
+          "errorPx": 155,
+          "rectDistPx": 71,
+          "userText": "point at the export button in the toolbar",
+          "assistantText": "the export button is up there, so click it to export your draft. then, if you're feeling adventurous, we can try sharing it or tweaking the settings a bit.",
+          "latency": {
+            "askToFirstToolCallMs": 1112,
+            "askToFirstAudioDeltaMs": 1906,
+            "askToDoneMs": 2666
+          },
+          "usage": {
+            "inputTokens": 5458,
+            "outputTokens": 258,
+            "totalTokens": 5716,
+            "inputTextTokens": 2874,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 2584,
+            "cachedTokens": 4949,
+            "outputTextTokens": 86,
+            "outputAudioTokens": 172,
+            "responses": 2
+          }
+        },
+        {
+          "name": "settings",
+          "desc": "the settings button in the toolbar",
+          "rect": {
+            "x": 593,
+            "y": 66,
+            "width": 185,
+            "height": 73
+          },
+          "pointed": {
+            "x": 910,
+            "y": 70,
+            "screenIndex": 0,
+            "label": "the settings button"
+          },
+          "verdict": "miss",
+          "errorPx": 227,
+          "rectDistPx": 132,
+          "userText": "point at the settings button in the toolbar",
+          "assistantText": "the settings button is right in the toolbar, so click that to open your options. And hey, after you dabble in settings, you could take it one step further and try tweaking the notes layout too.",
+          "latency": {
+            "askToFirstToolCallMs": 1462,
+            "askToFirstAudioDeltaMs": 2266,
+            "askToDoneMs": 3820
+          },
+          "usage": {
+            "inputTokens": 6442,
+            "outputTokens": 345,
+            "totalTokens": 6787,
+            "inputTextTokens": 3212,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 3230,
+            "cachedTokens": 5979,
+            "outputTextTokens": 150,
+            "outputAudioTokens": 195,
+            "responses": 2
+          }
+        },
+        {
+          "name": "share",
+          "desc": "the share button in the toolbar",
+          "rect": {
+            "x": 802,
+            "y": 66,
+            "width": 174,
+            "height": 73
+          },
+          "pointed": {
+            "x": 1182,
+            "y": 70,
+            "screenIndex": 0,
+            "label": "the share button"
+          },
+          "verdict": "miss",
+          "errorPx": 295,
+          "rectDistPx": 206,
+          "userText": "point at the share button in the toolbar",
+          "assistantText": "the share button is in the toolbar, so click it to share your work. and then, if you want a bit more, try exporting first and compare the final look.",
+          "latency": {
+            "askToFirstToolCallMs": 1423,
+            "askToFirstAudioDeltaMs": 2696,
+            "askToDoneMs": 3452
+          },
+          "usage": {
+            "inputTokens": 7442,
+            "outputTokens": 306,
+            "totalTokens": 7748,
+            "inputTextTokens": 3566,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 3876,
+            "cachedTokens": 6866,
+            "outputTextTokens": 136,
+            "outputAudioTokens": 170,
+            "responses": 2
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "hit": 2,
+    "near": 0,
+    "miss": 4,
+    "error": 0
+  },
+  "finishedAt": "2026-07-12T16:27:11.973Z"
+}

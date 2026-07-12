@@ -1,0 +1,64 @@
+{
+  "backend": "LIVE OPENAI API",
+  "mode": "text",
+  "startedAt": "2026-07-12T16:26:18.434Z",
+  "scenes": [
+    {
+      "scene": "calibration",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "calibration-center",
+          "desc": "the big green square in the center of the screen",
+          "rect": {
+            "x": 768,
+            "y": 475,
+            "width": 1024,
+            "height": 490
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "big green square (display center)"
+          },
+          "verdict": "hit",
+          "errorPx": 0,
+          "userText": "point at the big green square in the center of the screen",
+          "assistantText": "Okay, cool, you’re on that big green square in the middle. If you want, you could try clicking somewhere else and seeing what changes, or try tweaking the calibration settings or resetting it to explore different options. And hey, if you’d like, we can walk through it together step by step.",
+          "latency": {
+            "askToFirstToolCallMs": 1496,
+            "askToFirstAudioDeltaMs": 2139,
+            "askToDoneMs": 3730
+          },
+          "usage": {
+            "inputTokens": 2484,
+            "outputTokens": 432,
+            "totalTokens": 2916,
+            "inputTextTokens": 1838,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 646,
+            "cachedTokens": 1219,
+            "outputTextTokens": 128,
+            "outputAudioTokens": 304,
+            "responses": 2
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "hit": 1,
+    "near": 0,
+    "miss": 0,
+    "error": 0
+  },
+  "finishedAt": "2026-07-12T16:26:28.827Z"
+}

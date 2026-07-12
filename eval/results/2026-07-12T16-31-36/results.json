@@ -1,0 +1,179 @@
+{
+  "backend": "LIVE OPENAI API",
+  "mode": "text",
+  "startedAt": "2026-07-12T16:31:36.221Z",
+  "scenes": [
+    {
+      "scene": "form",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "email",
+          "desc": "the email address field",
+          "rect": {
+            "x": 1025,
+            "y": 622,
+            "width": 511,
+            "height": 64
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 600,
+            "screenIndex": 0,
+            "label": "email address field"
+          },
+          "verdict": "near",
+          "errorPx": 54,
+          "rectDistPx": 22,
+          "userText": "point at the email address field",
+          "assistantText": "okay, i've got the email address field pointed. just type in your address, and hey, after that, we can also add a password and try hitting create account together.",
+          "latency": {
+            "askToFirstToolCallMs": 11997,
+            "askToFirstAudioDeltaMs": 13033,
+            "askToDoneMs": 17833
+          },
+          "usage": {
+            "inputTokens": 2460,
+            "outputTokens": 544,
+            "totalTokens": 3004,
+            "inputTextTokens": 1814,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 646,
+            "cachedTokens": 1219,
+            "outputTextTokens": 355,
+            "outputAudioTokens": 189,
+            "responses": 2
+          }
+        },
+        {
+          "name": "password",
+          "desc": "the password field",
+          "rect": {
+            "x": 1025,
+            "y": 741,
+            "width": 511,
+            "height": 64
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "password field"
+          },
+          "verdict": "near",
+          "errorPx": 53,
+          "rectDistPx": 21,
+          "userText": "point at the password field",
+          "assistantText": "hey, over here at the password field. go ahead and type a strong one with at least 12 characters. and once that’s done, you could check the newsletter box too, if you want, before you click create account.",
+          "latency": {
+            "askToFirstToolCallMs": 7292,
+            "askToFirstAudioDeltaMs": 8541,
+            "askToDoneMs": 12410
+          },
+          "usage": {
+            "inputTokens": 3438,
+            "outputTokens": 434,
+            "totalTokens": 3872,
+            "inputTextTokens": 2146,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1292,
+            "cachedTokens": 2888,
+            "outputTextTokens": 198,
+            "outputAudioTokens": 236,
+            "responses": 2
+          }
+        },
+        {
+          "name": "subscribe",
+          "desc": "the subscribe to newsletter checkbox",
+          "rect": {
+            "x": 1025,
+            "y": 835,
+            "width": 26,
+            "height": 26
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 910,
+            "screenIndex": 0,
+            "label": "newsletter checkbox"
+          },
+          "verdict": "miss",
+          "errorPx": 250,
+          "rectDistPx": 234,
+          "userText": "point at the subscribe to newsletter checkbox",
+          "assistantText": "pointing to the newsletter checkbox. if you want, toggle it on, and then you can click create account. and once you’re in, we can try adding a profile picture or explore settings together.",
+          "latency": {
+            "askToFirstToolCallMs": 6536,
+            "askToFirstAudioDeltaMs": 7829,
+            "askToDoneMs": 11540
+          },
+          "usage": {
+            "inputTokens": 4442,
+            "outputTokens": 380,
+            "totalTokens": 4822,
+            "inputTextTokens": 2504,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1938,
+            "cachedTokens": 3919,
+            "outputTextTokens": 164,
+            "outputAudioTokens": 216,
+            "responses": 2
+          }
+        },
+        {
+          "name": "submit",
+          "desc": "the create account button",
+          "rect": {
+            "x": 1025,
+            "y": 899,
+            "width": 511,
+            "height": 67
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 1040,
+            "screenIndex": 0,
+            "label": "create account button"
+          },
+          "verdict": "miss",
+          "errorPx": 108,
+          "rectDistPx": 74,
+          "userText": "point at the create account button",
+          "assistantText": "pointing at the create account button. once you’ve filled in the fields, click it and see what happens. and then we can take a tiny next step, like checking if there’s a confirmation email or exploring onboarding.",
+          "latency": {
+            "askToFirstToolCallMs": 5416,
+            "askToFirstAudioDeltaMs": 6409,
+            "askToDoneMs": 10556
+          },
+          "usage": {
+            "inputTokens": 5434,
+            "outputTokens": 365,
+            "totalTokens": 5799,
+            "inputTextTokens": 2850,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 2584,
+            "cachedTokens": 4949,
+            "outputTextTokens": 99,
+            "outputAudioTokens": 266,
+            "responses": 2
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "hit": 0,
+    "near": 2,
+    "miss": 2,
+    "error": 0
+  },
+  "finishedAt": "2026-07-12T16:33:04.666Z"
+}

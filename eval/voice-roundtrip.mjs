@@ -96,6 +96,16 @@ async function committedAudioSeconds() {
   return null;
 }
 
+/** Live mode: the latest REAL ASR transcript of the user's audio (or null). */
+async function latestUserTranscript() {
+  const transcript = await api.get('/transcript');
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    const e = transcript[i];
+    if (e.role === 'user' && e.text && e.text !== '…' && e.text !== '(voice message)') return e.text;
+  }
+  return null;
+}
+
 /** Wait until a NEW turn (id != prevId) reaches tResponseDone. */
 async function waitTurnDone(prevTurnId, { needAudioPlayed = true, timeoutMs = 25_000 } = {}) {
   return waitFor(
@@ -164,7 +174,8 @@ try {
     await sleep(3500);
     await api.post('/hotkey/release');
     const t = await waitTurnDone(prev);
-    await waitPlaybackFinished();
+    // Live speech can drain for tens of seconds after response.done.
+    await waitPlaybackFinished(live ? 90_000 : 20_000);
     const { analysis } = await fetchAndVerifyOutput();
     const stats = (await api.get('/audio/output-stats')).items.at(-1);
     const committedSec = await committedAudioSeconds();
@@ -173,13 +184,19 @@ try {
       chunksIn: t.chunksIn,
       chunksOut: t.chunksOut,
       committedAudioSec: committedSec,
+      userTranscript: live ? await latestUserTranscript() : null,
       captureMs: t.captureMs ?? null,
       releaseToCommitMs: t.tCommitSent - t.tHoldEnd,
+      releaseToFirstUserTranscriptMs:
+        t.tFirstUserTranscript !== undefined ? t.tFirstUserTranscript - t.tHoldEnd : null,
       releaseToFirstAudioDeltaMs: t.tFirstAudioDelta - t.tHoldEnd,
       firstDeltaToFirstPlayedMs: t.tFirstAudioPlayed - t.tFirstAudioDelta,
       releaseToFirstTranscriptMs:
         t.tFirstAssistantTranscript !== undefined ? t.tFirstAssistantTranscript - t.tHoldEnd : null,
+      releaseToFirstToolCallMs:
+        t.tFirstToolCall !== undefined ? t.tFirstToolCall - t.tHoldEnd : null,
       releaseToDoneMs: t.tResponseDone - t.tHoldEnd,
+      ...(t.usage ? { usage: t.usage } : {}),
       playback: { rms: stats.rms, peak: stats.peak, underruns: stats.underruns, samplesPlayed: stats.samplesPlayed },
       spectral: { pass: analysis.spectralPass, notes: analysis.notes, playedSeconds: analysis.playedSeconds },
     };
@@ -313,6 +330,10 @@ const v = results.voiceTurns;
 results.medians = {
   captureMs: median(v.map((t) => t.captureMs).filter((x) => x !== null)),
   releaseToCommitMs: median(v.map((t) => t.releaseToCommitMs)),
+  releaseToFirstUserTranscriptMs: median(
+    v.map((t) => t.releaseToFirstUserTranscriptMs).filter((x) => x !== null),
+  ),
+  releaseToFirstToolCallMs: median(v.map((t) => t.releaseToFirstToolCallMs).filter((x) => x !== null)),
   releaseToFirstAudioDeltaMs: median(v.map((t) => t.releaseToFirstAudioDeltaMs)),
   firstDeltaToFirstPlayedMs: median(v.map((t) => t.firstDeltaToFirstPlayedMs)),
   releaseToDoneMs: median(v.map((t) => t.releaseToDoneMs)),
@@ -321,10 +342,18 @@ results.medians = {
   textFirstDeltaToFirstPlayedMs: median(results.textTurns.map((t) => t.firstDeltaToFirstPlayedMs)),
 };
 results.gates = {
-  audioIn: v.every((t) => t.chunksIn > 0 && (t.committedAudioSec ?? 0) > 2.5),
+  // Mock: committed seconds parsed from the mock's ASR line. Live: the mock
+  // line does not exist — audio IN is proven by a real, non-empty ASR
+  // transcript of the spoken WAV instead.
+  audioIn: live
+    ? v.every((t) => t.chunksIn > 0 && (t.userTranscript ?? '').length > 0)
+    : v.every((t) => t.chunksIn > 0 && (t.committedAudioSec ?? 0) > 2.5),
   audioOutRms: v.every((t) => t.playback.rms > 0.05),
   underruns: v.every((t) => t.playback.underruns === 0),
-  spectral: v.every((t) => t.spectral.pass),
+  // The spectral melody check is mock-only (live output is speech, not the
+  // mock's three-note melody): in live mode require audible played speech.
+  spectral: live ? v.every((t) => t.spectral.playedSeconds > 0.5) : v.every((t) => t.spectral.pass),
+  ...(live ? { spectralNote: 'live: playedSeconds > 0.5 (speech), melody check is mock-only' } : {}),
   bargeInUnder300: results.bargeIns.every((b) => b.bargeInStopMs < 300),
   shortHold: results.shortHold?.pass ?? false,
   silenceHold: results.silenceHold?.pass ?? false,

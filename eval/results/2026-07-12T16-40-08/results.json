@@ -1,0 +1,179 @@
+{
+  "backend": "LIVE OPENAI API",
+  "mode": "voice",
+  "startedAt": "2026-07-12T16:40:08.298Z",
+  "scenes": [
+    {
+      "scene": "form",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "email",
+          "desc": "the email address field",
+          "rect": {
+            "x": 1025,
+            "y": 622,
+            "width": 511,
+            "height": 64
+          },
+          "pointed": {
+            "x": 1278,
+            "y": 702,
+            "screenIndex": 0,
+            "label": "the email address field"
+          },
+          "verdict": "near",
+          "errorPx": 48,
+          "rectDistPx": 16,
+          "userText": "Point at the email address field. Point at the",
+          "assistantText": "okay, i pointed at the email address field for you. it’s the box just above the password line, with “you@company.com” inside it. if you’re filling out your details, go ahead and type your real address, and then try using a password that includes letters, numbers, and a symbol next.",
+          "latency": {
+            "askToFirstToolCallMs": 1306,
+            "askToFirstAudioDeltaMs": 1981,
+            "askToDoneMs": 3911
+          },
+          "usage": {
+            "inputTokens": 2632,
+            "outputTokens": 486,
+            "totalTokens": 3118,
+            "inputTextTokens": 1920,
+            "inputAudioTokens": 66,
+            "inputImageTokens": 646,
+            "cachedTokens": 1283,
+            "outputTextTokens": 126,
+            "outputAudioTokens": 360,
+            "responses": 2
+          }
+        },
+        {
+          "name": "password",
+          "desc": "the password field",
+          "rect": {
+            "x": 1025,
+            "y": 741,
+            "width": 511,
+            "height": 64
+          },
+          "pointed": {
+            "x": 1200,
+            "y": 680,
+            "screenIndex": 0,
+            "label": "the password input field"
+          },
+          "verdict": "miss",
+          "errorPx": 123,
+          "rectDistPx": 61,
+          "userText": "Point at the password field. Point at the password field.",
+          "assistantText": "Cool, pointing at the password field now. Just start typing your new password. If you want, you can make it a little stronger by adding a couple extra characters, like a symbol, to make it harder to guess.",
+          "latency": {
+            "askToFirstToolCallMs": 1397,
+            "askToFirstAudioDeltaMs": 2409,
+            "askToDoneMs": 3616
+          },
+          "usage": {
+            "inputTokens": 4034,
+            "outputTokens": 434,
+            "totalTokens": 4468,
+            "inputTextTokens": 2966,
+            "inputAudioTokens": 99,
+            "inputImageTokens": 969,
+            "cachedTokens": 2613,
+            "outputTextTokens": 215,
+            "outputAudioTokens": 219,
+            "responses": 3
+          }
+        },
+        {
+          "name": "subscribe",
+          "desc": "the subscribe to newsletter checkbox",
+          "rect": {
+            "x": 1025,
+            "y": 835,
+            "width": 26,
+            "height": 26
+          },
+          "pointed": {
+            "x": 1680,
+            "y": 1200,
+            "screenIndex": 0,
+            "label": "the newsletter checkbox"
+          },
+          "verdict": "miss",
+          "errorPx": 732,
+          "rectDistPx": 715,
+          "userText": "Point at the Subscribe to newsletter checkbox.",
+          "assistantText": "Got it. I pointed at the “send me the monthly product newsletter” checkbox. If you click it, you’ll see the little check mark appear. And hey, once you’re done, you could try adding a stronger password too, like a phrase with numbers, to keep things extra secure.",
+          "latency": {
+            "askToFirstToolCallMs": 2468,
+            "askToFirstAudioDeltaMs": 2981,
+            "askToDoneMs": 4705
+          },
+          "usage": {
+            "inputTokens": 2986,
+            "outputTokens": 861,
+            "totalTokens": 3847,
+            "inputTextTokens": 2274,
+            "inputAudioTokens": 66,
+            "inputImageTokens": 646,
+            "cachedTokens": 1603,
+            "outputTextTokens": 535,
+            "outputAudioTokens": 326,
+            "responses": 2
+          }
+        },
+        {
+          "name": "submit",
+          "desc": "the create account button",
+          "rect": {
+            "x": 1025,
+            "y": 899,
+            "width": 511,
+            "height": 67
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 1170,
+            "screenIndex": 0,
+            "label": "the create account button"
+          },
+          "verdict": "miss",
+          "errorPx": 238,
+          "rectDistPx": 204,
+          "userText": "Point at the Create Account button. Point at the Create Account.",
+          "assistantText": "There, I’ve pointed at the “Create account” button. It’s right under the form fields.\n\nIf you want, next you could try clicking it, and if it’s not working, we can check if the form is missing anything or try a different button, like logging in instead.",
+          "latency": {
+            "askToFirstToolCallMs": 1045,
+            "askToFirstAudioDeltaMs": 1471,
+            "askToDoneMs": 3069
+          },
+          "usage": {
+            "inputTokens": 2632,
+            "outputTokens": 510,
+            "totalTokens": 3142,
+            "inputTextTokens": 1920,
+            "inputAudioTokens": 66,
+            "inputImageTokens": 646,
+            "cachedTokens": 1266,
+            "outputTextTokens": 224,
+            "outputAudioTokens": 286,
+            "responses": 2
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "hit": 0,
+    "near": 1,
+    "miss": 3,
+    "error": 0
+  },
+  "finishedAt": "2026-07-12T16:41:03.554Z"
+}

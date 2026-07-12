@@ -1,0 +1,215 @@
+{
+  "backend": "LIVE OPENAI API",
+  "mode": "text",
+  "startedAt": "2026-07-12T16:38:20.653Z",
+  "scenes": [
+    {
+      "scene": "shop",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "search",
+          "desc": "the search box",
+          "rect": {
+            "x": 188,
+            "y": 25,
+            "width": 760,
+            "height": 55
+          },
+          "pointed": {
+            "x": 400,
+            "y": 80,
+            "screenIndex": 0,
+            "label": "the search box"
+          },
+          "verdict": "hit",
+          "errorPx": 170,
+          "userText": "point at the search box",
+          "assistantText": "there you go, that’s the search box near the top. if you want, try typing a brand or feature, like “noise cancelling,” and see what else pops up.",
+          "latency": {
+            "askToFirstToolCallMs": 1642,
+            "askToFirstAudioDeltaMs": 2106,
+            "askToDoneMs": 3608
+          },
+          "usage": {
+            "inputTokens": 2458,
+            "outputTokens": 246,
+            "totalTokens": 2704,
+            "inputTextTokens": 1812,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 646,
+            "cachedTokens": 1219,
+            "outputTextTokens": 86,
+            "outputAudioTokens": 160,
+            "responses": 2
+          }
+        },
+        {
+          "name": "cart",
+          "desc": "the shopping cart icon",
+          "rect": {
+            "x": 2427,
+            "y": 20,
+            "width": 85,
+            "height": 64
+          },
+          "pointed": {
+            "x": 2480,
+            "y": 80,
+            "screenIndex": 0,
+            "label": "the shopping cart icon"
+          },
+          "verdict": "hit",
+          "errorPx": 30,
+          "userText": "point at the shopping cart icon",
+          "assistantText": "that’s the shopping cart icon up in the top right. if you add something, you can pop back here to review it. next, you could click the product image or name to open the details and double-check specs before buying.",
+          "latency": {
+            "askToFirstToolCallMs": 1089,
+            "askToFirstAudioDeltaMs": 1579,
+            "askToDoneMs": 3828
+          },
+          "usage": {
+            "inputTokens": 3445,
+            "outputTokens": 342,
+            "totalTokens": 3787,
+            "inputTextTokens": 2153,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1292,
+            "cachedTokens": 2953,
+            "outputTextTokens": 103,
+            "outputAudioTokens": 239,
+            "responses": 2
+          }
+        },
+        {
+          "name": "reviews",
+          "desc": "the customer reviews link",
+          "rect": {
+            "x": 856,
+            "y": 235,
+            "width": 216,
+            "height": 28
+          },
+          "pointed": {
+            "x": 1080,
+            "y": 330,
+            "screenIndex": 0,
+            "label": "the customer reviews link"
+          },
+          "verdict": "miss",
+          "errorPx": 141,
+          "rectDistPx": 67,
+          "userText": "point at the customer reviews link",
+          "assistantText": "that’s the customer reviews link right under the rating. after you read a few, you could compare with another model by using the search box to see if anything else fits your budget better.",
+          "latency": {
+            "askToFirstToolCallMs": 1013,
+            "askToFirstAudioDeltaMs": 1529,
+            "askToDoneMs": 3379
+          },
+          "usage": {
+            "inputTokens": 4456,
+            "outputTokens": 292,
+            "totalTokens": 4748,
+            "inputTextTokens": 2518,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1938,
+            "cachedTokens": 3886,
+            "outputTextTokens": 91,
+            "outputAudioTokens": 201,
+            "responses": 2
+          }
+        },
+        {
+          "name": "price",
+          "desc": "the price of the headphones",
+          "rect": {
+            "x": 720,
+            "y": 289,
+            "width": 164,
+            "height": 59
+          },
+          "pointed": {
+            "x": 660,
+            "y": 340,
+            "screenIndex": 0,
+            "label": "the price"
+          },
+          "verdict": "miss",
+          "errorPx": 144,
+          "rectDistPx": 60,
+          "userText": "point at the price of the headphones",
+          "assistantText": "that’s the price, $249 right under the product name. if you’re curious, you could also check the old crossed-out price to see how big the discount is.",
+          "latency": {
+            "askToFirstToolCallMs": 1068,
+            "askToFirstAudioDeltaMs": 1657,
+            "askToDoneMs": 3192
+          },
+          "usage": {
+            "inputTokens": 5446,
+            "outputTokens": 254,
+            "totalTokens": 5700,
+            "inputTextTokens": 2862,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 2584,
+            "cachedTokens": 4885,
+            "outputTextTokens": 84,
+            "outputAudioTokens": 170,
+            "responses": 2
+          }
+        },
+        {
+          "name": "add-to-cart",
+          "desc": "the add to cart button",
+          "rect": {
+            "x": 720,
+            "y": 532,
+            "width": 220,
+            "height": 73
+          },
+          "pointed": {
+            "x": 660,
+            "y": 570,
+            "screenIndex": 0,
+            "label": "the add to cart button"
+          },
+          "verdict": "miss",
+          "errorPx": 170,
+          "rectDistPx": 60,
+          "userText": "point at the add to cart button",
+          "assistantText": "that’s the add to cart button. once it’s in your cart, you could peek at the shipping and returns info below to make sure it fits your timing.",
+          "latency": {
+            "askToFirstToolCallMs": 1060,
+            "askToFirstAudioDeltaMs": 1678,
+            "askToDoneMs": 2910
+          },
+          "usage": {
+            "inputTokens": 6432,
+            "outputTokens": 217,
+            "totalTokens": 6649,
+            "inputTextTokens": 3202,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 3230,
+            "cachedTokens": 5979,
+            "outputTextTokens": 83,
+            "outputAudioTokens": 134,
+            "responses": 2
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "hit": 2,
+    "near": 0,
+    "miss": 3,
+    "error": 0
+  },
+  "finishedAt": "2026-07-12T16:38:45.282Z"
+}

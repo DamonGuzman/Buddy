@@ -6,7 +6,7 @@
 
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -119,6 +119,23 @@ export function electronBinary() {
 }
 
 /**
+ * Live mode (M8.5): CLICKY_SEED_USERDATA=<dir> — top-level files in that dir
+ * (settings.json with the safeStorage-encrypted API key + the matching
+ * "Local State" os_crypt key file) are copied into every fresh userData dir
+ * before launch, so `--live` runs have the key without ever passing it
+ * through env or IPC. Existing files in the target are overwritten.
+ */
+function seedUserData(userDataDir) {
+  const seedDir = process.env.CLICKY_SEED_USERDATA;
+  if (!seedDir) return;
+  if (!existsSync(seedDir)) throw new Error(`CLICKY_SEED_USERDATA dir not found: ${seedDir}`);
+  for (const name of readdirSync(seedDir)) {
+    const src = path.join(seedDir, name);
+    if (statSync(src).isFile()) copyFileSync(src, path.join(userDataDir, name));
+  }
+}
+
+/**
  * Launch the built app (out/main/index.js) with an isolated userData dir and
  * the debug server enabled. Returns { proc, kill }.
  */
@@ -127,6 +144,7 @@ export function launchApp({ token, mockUrl, fakeMicWav, userDataDir, debugPort, 
     throw new Error('out/main/index.js missing — run `npm run build` first');
   }
   mkdirSync(userDataDir, { recursive: true });
+  seedUserData(userDataDir);
   const env = {
     ...process.env,
     CLICKY_DEBUG: '1',

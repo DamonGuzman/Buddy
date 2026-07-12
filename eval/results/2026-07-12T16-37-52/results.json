@@ -1,0 +1,179 @@
+{
+  "backend": "LIVE OPENAI API",
+  "mode": "text",
+  "startedAt": "2026-07-12T16:37:52.348Z",
+  "scenes": [
+    {
+      "scene": "tricky",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "small-icon",
+          "desc": "the small bell notification icon",
+          "rect": {
+            "x": 2504,
+            "y": 22,
+            "width": 24,
+            "height": 24
+          },
+          "pointed": {
+            "x": 2480,
+            "y": 60,
+            "screenIndex": 0,
+            "label": "notification bell icon"
+          },
+          "verdict": "near",
+          "errorPx": 44,
+          "rectDistPx": 28,
+          "userText": "point at the small bell notification icon",
+          "assistantText": "okay, i’ll point to that tiny bell and then we can decide if you want to open it. there it is, that little bell in the top right. if you click it, you can see any recent alerts. after that, you could try opening the help button in the bottom right to see if there are tips for exporting.",
+          "latency": {
+            "askToFirstToolCallMs": 3530,
+            "askToFirstAudioDeltaMs": 1620,
+            "askToDoneMs": 6701
+          },
+          "usage": {
+            "inputTokens": 2491,
+            "outputTokens": 549,
+            "totalTokens": 3040,
+            "inputTextTokens": 1845,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 646,
+            "cachedTokens": 1219,
+            "outputTextTokens": 241,
+            "outputAudioTokens": 308,
+            "responses": 2
+          }
+        },
+        {
+          "name": "save",
+          "desc": "the save button (not save as)",
+          "rect": {
+            "x": 973,
+            "y": 291,
+            "width": 112,
+            "height": 59
+          },
+          "pointed": {
+            "x": 1092,
+            "y": 554,
+            "screenIndex": 0,
+            "label": "save button"
+          },
+          "verdict": "miss",
+          "errorPx": 242,
+          "rectDistPx": 204,
+          "userText": "point at the save button (not save as)",
+          "assistantText": "got it, i’ll point to the save button you want, not the save as one. that’s the one, the save button on the left. click it to overwrite the current report. if you want a safer option next time, try save as so you keep the original too.",
+          "latency": {
+            "askToFirstToolCallMs": 2200,
+            "askToFirstAudioDeltaMs": 1016,
+            "askToDoneMs": 4577
+          },
+          "usage": {
+            "inputTokens": 3558,
+            "outputTokens": 430,
+            "totalTokens": 3988,
+            "inputTextTokens": 2266,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1292,
+            "cachedTokens": 3017,
+            "outputTextTokens": 128,
+            "outputAudioTokens": 302,
+            "responses": 2
+          }
+        },
+        {
+          "name": "save-as",
+          "desc": "the save as button",
+          "rect": {
+            "x": 1105,
+            "y": 291,
+            "width": 140,
+            "height": 59
+          },
+          "pointed": {
+            "x": 1264,
+            "y": 554,
+            "screenIndex": 0,
+            "label": "save as button"
+          },
+          "verdict": "miss",
+          "errorPx": 250,
+          "rectDistPx": 205,
+          "userText": "point at the save as button",
+          "assistantText": "i’ll point to the save as button so you can grab a copy instead of overwriting. that’s the save as button in the middle. click it to create a copy with a new name. if you want to stay extra organized, you could add a date or version to the filename so it’s easier to track later.",
+          "latency": {
+            "askToFirstToolCallMs": 1925,
+            "askToFirstAudioDeltaMs": 954,
+            "askToDoneMs": 4579
+          },
+          "usage": {
+            "inputTokens": 4598,
+            "outputTokens": 450,
+            "totalTokens": 5048,
+            "inputTextTokens": 2660,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1938,
+            "cachedTokens": 4047,
+            "outputTextTokens": 137,
+            "outputAudioTokens": 313,
+            "responses": 2
+          }
+        },
+        {
+          "name": "edge-button",
+          "desc": "the help button in the bottom right corner of the screen",
+          "rect": {
+            "x": 2466,
+            "y": 1388,
+            "width": 86,
+            "height": 44
+          },
+          "pointed": {
+            "x": 2480,
+            "y": 1380,
+            "screenIndex": 0,
+            "label": "help button"
+          },
+          "verdict": "near",
+          "errorPx": 42,
+          "rectDistPx": 8,
+          "userText": "point at the help button in the bottom right corner of the screen",
+          "assistantText": "i’ll point to the help button in the corner so you can open it. that’s the help button down in the bottom right. click it to see tips or support options. if you’re exploring, you could also check for export settings inside before you save, like format or destination, to make sure it goes exactly where you want.",
+          "latency": {
+            "askToFirstToolCallMs": 1861,
+            "askToFirstAudioDeltaMs": 1040,
+            "askToDoneMs": 5162
+          },
+          "usage": {
+            "inputTokens": 5666,
+            "outputTokens": 506,
+            "totalTokens": 6172,
+            "inputTextTokens": 3082,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 2584,
+            "cachedTokens": 5077,
+            "outputTextTokens": 141,
+            "outputAudioTokens": 365,
+            "responses": 2
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "hit": 0,
+    "near": 2,
+    "miss": 2,
+    "error": 0
+  },
+  "finishedAt": "2026-07-12T16:38:20.536Z"
+}

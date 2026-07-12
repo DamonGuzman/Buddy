@@ -1,0 +1,217 @@
+{
+  "backend": "LIVE OPENAI API",
+  "mode": "text",
+  "startedAt": "2026-07-12T16:39:26.685Z",
+  "scenes": [
+    {
+      "scene": "shop",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "search",
+          "desc": "the search box",
+          "rect": {
+            "x": 188,
+            "y": 25,
+            "width": 760,
+            "height": 55
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 100,
+            "screenIndex": 0,
+            "label": "search box in the top navigation bar"
+          },
+          "verdict": "miss",
+          "errorPx": 714,
+          "rectDistPx": 333,
+          "userText": "point at the search box",
+          "assistantText": "Okay, I’ve got the top search field in view. It’s in the navigation bar near the top of the page, right where you’d start typing what you’re looking for. If you’re feeling adventurous, try typing the brand or the product name next and see what auto-suggestions appear.",
+          "latency": {
+            "askToFirstToolCallMs": 1710,
+            "askToFirstAudioDeltaMs": 2446,
+            "askToDoneMs": 3914
+          },
+          "usage": {
+            "inputTokens": 2566,
+            "outputTokens": 503,
+            "totalTokens": 3069,
+            "inputTextTokens": 1920,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 646,
+            "cachedTokens": 1211,
+            "outputTextTokens": 223,
+            "outputAudioTokens": 280,
+            "responses": 2
+          }
+        },
+        {
+          "name": "cart",
+          "desc": "the shopping cart icon",
+          "rect": {
+            "x": 2427,
+            "y": 20,
+            "width": 85,
+            "height": 64
+          },
+          "pointed": {
+            "x": 2400,
+            "y": 52,
+            "screenIndex": 0,
+            "label": "shopping cart icon in the top right"
+          },
+          "verdict": "near",
+          "errorPx": 70,
+          "rectDistPx": 27,
+          "userText": "point at the shopping cart icon",
+          "assistantText": "I’m pointing at the shopping cart icon in the top right. If you click it, you should see items you’ve added. If you want to keep exploring, try clicking the reviews count next and read what people love about these headphones.",
+          "latency": {
+            "askToFirstToolCallMs": 1302,
+            "askToFirstAudioDeltaMs": 2070,
+            "askToDoneMs": 3311
+          },
+          "usage": {
+            "inputTokens": 3615,
+            "outputTokens": 434,
+            "totalTokens": 4049,
+            "inputTextTokens": 2323,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1292,
+            "cachedTokens": 3062,
+            "outputTextTokens": 182,
+            "outputAudioTokens": 252,
+            "responses": 2
+          }
+        },
+        {
+          "name": "reviews",
+          "desc": "the customer reviews link",
+          "rect": {
+            "x": 856,
+            "y": 235,
+            "width": 216,
+            "height": 28
+          },
+          "pointed": {
+            "x": 1000,
+            "y": 380,
+            "screenIndex": 0,
+            "label": "customer reviews link under the product name"
+          },
+          "verdict": "miss",
+          "errorPx": 136,
+          "rectDistPx": 117,
+          "userText": "point at the customer reviews link",
+          "assistantText": "I'm pointing at the customer reviews link right under the product name. If you click that, you'll see what folks are saying about the sound, comfort, and overall experience. And hey, as a next step, you could compare it with a similar model in a new tab to see how they stack up.",
+          "latency": {
+            "askToFirstToolCallMs": 827,
+            "askToFirstAudioDeltaMs": 1235,
+            "askToDoneMs": 2861
+          },
+          "usage": {
+            "inputTokens": 4640,
+            "outputTokens": 437,
+            "totalTokens": 5077,
+            "inputTextTokens": 2702,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1938,
+            "cachedTokens": 4111,
+            "outputTextTokens": 123,
+            "outputAudioTokens": 314,
+            "responses": 2
+          }
+        },
+        {
+          "name": "price",
+          "desc": "the price of the headphones",
+          "rect": {
+            "x": 720,
+            "y": 289,
+            "width": 164,
+            "height": 59
+          },
+          "pointed": {
+            "x": 1000,
+            "y": 250,
+            "screenIndex": 0,
+            "label": "the headphones price $249.00 on the product card"
+          },
+          "verdict": "miss",
+          "errorPx": 210,
+          "rectDistPx": 122,
+          "userText": "point at the price of the headphones",
+          "assistantText": "I’m pointing at the $249 price on the product card. That’s the current listed price. If you want a deeper look, you could also check whether there’s a deal somewhere on the page, like a coupon or message, and decide if it’s worth waiting.",
+          "latency": {
+            "askToFirstToolCallMs": 993,
+            "askToFirstAudioDeltaMs": 1427,
+            "askToDoneMs": 2869
+          },
+          "usage": {
+            "inputTokens": 5700,
+            "outputTokens": 394,
+            "totalTokens": 6094,
+            "inputTextTokens": 3116,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 2584,
+            "cachedTokens": 5141,
+            "outputTextTokens": 119,
+            "outputAudioTokens": 275,
+            "responses": 2
+          }
+        },
+        {
+          "name": "add-to-cart",
+          "desc": "the add to cart button",
+          "rect": {
+            "x": 720,
+            "y": 532,
+            "width": 220,
+            "height": 73
+          },
+          "pointed": {
+            "x": 1240,
+            "y": 520,
+            "screenIndex": 0,
+            "label": "add to cart button"
+          },
+          "verdict": "miss",
+          "errorPx": 413,
+          "rectDistPx": 300,
+          "userText": "point at the add to cart button",
+          "assistantText": "I’m pointing at the “add to cart” button. If you click it, the headphones get added to your cart, and you can review it before checking out. And if you’re up for a little comparison mission, we could inspect a similar item right after to see what else is out there.",
+          "latency": {
+            "askToFirstToolCallMs": 1373,
+            "askToFirstAudioDeltaMs": 1846,
+            "askToDoneMs": 3223
+          },
+          "usage": {
+            "inputTokens": 6742,
+            "outputTokens": 370,
+            "totalTokens": 7112,
+            "inputTextTokens": 3512,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 3230,
+            "cachedTokens": 6235,
+            "outputTextTokens": 116,
+            "outputAudioTokens": 254,
+            "responses": 2
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "hit": 0,
+    "near": 1,
+    "miss": 4,
+    "error": 0
+  },
+  "finishedAt": "2026-07-12T16:39:50.387Z"
+}

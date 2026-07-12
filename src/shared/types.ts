@@ -256,6 +256,27 @@ export interface TurnTimings {
   chunksOut: number;
   /** Barge-in: cancel requested -> playback actually stopped (ms). */
   bargeInStopMs?: number;
+  /**
+   * M8.5 live eval: token usage summed over every response.done of the turn
+   * (a tool-call continuation is a second response). Absent until the first
+   * response.done that carries a usage block (the mock sends none).
+   */
+  usage?: TurnUsage;
+}
+
+/** Accumulated token usage for one turn (from response.done usage blocks). */
+export interface TurnUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  inputTextTokens: number;
+  inputAudioTokens: number;
+  inputImageTokens: number;
+  cachedTokens: number;
+  outputTextTokens: number;
+  outputAudioTokens: number;
+  /** Number of response.done events accumulated. */
+  responses: number;
 }
 
 // ---------------------------------------------------------------------------

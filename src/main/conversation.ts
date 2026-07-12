@@ -302,6 +302,12 @@ export class Conversation {
     if (this.closed || this.holding) return;
     // BARGE-IN: kill the in-flight response and its queued audio.
     if (this.pendingResponses > 0) this.cancelActiveResponse('stop');
+    // Live-eval finding (M8.5): response.done arrives long before the queued
+    // audio finishes PLAYING, so a hold can start while a COMPLETED response
+    // is still audibly speaking (pendingResponses == 0 — the branch above
+    // never runs) and the new turn's audio would queue behind the stale
+    // tail. Silence residual playback exactly like a barge-in.
+    else this.stopResidualPlayback('stop');
     this.holding = true;
     this.turnToken += 1; // F1 (M1): supersede any pending finishVoiceTurn/askText
     this.holdStartedAt = Date.now();
@@ -396,6 +402,9 @@ export class Conversation {
     if (this.holding) this.cancelHold();
     // Supersede: cancel the current response and drop its queued audio.
     if (this.pendingResponses > 0) this.cancelActiveResponse('flush');
+    // Same live-eval finding as holdStart: a completed response's audio may
+    // still be draining — the superseding text turn must silence it.
+    else this.stopResidualPlayback('flush');
     this.turnToken += 1; // F1 (m1): supersede any pre-commit turn
     const token = this.turnToken;
     this.epoch += 1;
@@ -579,6 +588,27 @@ export class Conversation {
     }
   }
 
+  /**
+   * Live-eval fix (M8.5): silence audio still draining from a COMPLETED
+   * response (pendingResponses == 0, so cancelActiveResponse never runs).
+   * When the old turn's audio was genuinely mid-play, arm the same bargeWatch
+   * so bargeInStopMs is measured for this path too.
+   */
+  private stopResidualPlayback(command: PlaybackCommand): void {
+    const stillPlaying = this.outputStatsList.some(
+      (s) => this.turnAudioItems.has(s.itemId) && !s.done,
+    );
+    if (stillPlaying && this.activeTurn) {
+      this.bargeWatch = {
+        t0: Date.now(),
+        itemIds: new Set(this.turnAudioItems),
+        turn: this.activeTurn,
+      };
+    }
+    this.playbackEpoch += 1;
+    this.panel.send('audio:playback', { command, epoch: this.playbackEpoch });
+  }
+
   /** F1 (m5): finalize the placeholder voice bubble in place. */
   private resolveVoicePlaceholder(text: string): void {
     if (this.pendingVoiceEntryId === null) return;
@@ -688,8 +718,33 @@ export class Conversation {
       this.handleToolCall(call);
     });
 
-    session.on('response-done', ({ status }) => {
+    session.on('response-done', ({ status, usage }) => {
       this.pendingResponses = Math.max(0, this.pendingResponses - 1);
+      // M8.5 live eval: accumulate token usage across the turn's responses.
+      if (usage && this.activeTurn) {
+        const u = (this.activeTurn.usage ??= {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          inputTextTokens: 0,
+          inputAudioTokens: 0,
+          inputImageTokens: 0,
+          cachedTokens: 0,
+          outputTextTokens: 0,
+          outputAudioTokens: 0,
+          responses: 0,
+        });
+        u.inputTokens += usage.input_tokens ?? 0;
+        u.outputTokens += usage.output_tokens ?? 0;
+        u.totalTokens += usage.total_tokens ?? 0;
+        u.inputTextTokens += usage.input_token_details?.text_tokens ?? 0;
+        u.inputAudioTokens += usage.input_token_details?.audio_tokens ?? 0;
+        u.inputImageTokens += usage.input_token_details?.image_tokens ?? 0;
+        u.cachedTokens += usage.input_token_details?.cached_tokens ?? 0;
+        u.outputTextTokens += usage.output_token_details?.text_tokens ?? 0;
+        u.outputAudioTokens += usage.output_token_details?.audio_tokens ?? 0;
+        u.responses += 1;
+      }
       // A cancelled response was superseded — the superseding turn owns the
       // assistant state from here; nothing to settle.
       if (status === 'cancelled') return;

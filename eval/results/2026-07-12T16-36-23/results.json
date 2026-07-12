@@ -1,0 +1,154 @@
+{
+  "backend": "LIVE OPENAI API",
+  "mode": "text",
+  "startedAt": "2026-07-12T16:36:24.002Z",
+  "scenes": [
+    {
+      "scene": "tricky",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "small-icon",
+          "desc": "the small bell notification icon",
+          "rect": {
+            "x": 2504,
+            "y": 22,
+            "width": 24,
+            "height": 24
+          },
+          "verdict": "error",
+          "error": "Error: timed out waiting for pointer for small-icon (25000ms)",
+          "assistantText": "I can’t see a small bell notification icon on this screenshot. What I do see is a help button in the bottom right corner. If the bell is there, it might be hidden by the window edges, or it could be on the top bar instead. Next, try going to the top area or the right side of the window, and see if a little bell icon shows up."
+        },
+        {
+          "name": "save",
+          "desc": "the save button (not save as)",
+          "rect": {
+            "x": 973,
+            "y": 291,
+            "width": 112,
+            "height": 59
+          },
+          "pointed": {
+            "x": 1180,
+            "y": 910,
+            "screenIndex": 0,
+            "label": "the save button"
+          },
+          "verdict": "miss",
+          "errorPx": 609,
+          "rectDistPx": 568,
+          "userText": "point at the save button (not save as)",
+          "assistantText": "There you go, I pointed at the save button. Tapping that will overwrite the current file, so you’re set if that’s what you want. If you ever need a new name for it, the “save as” button is right next to it and we can point at that too.",
+          "latency": {
+            "askToFirstToolCallMs": 1946,
+            "askToFirstAudioDeltaMs": 2638,
+            "askToDoneMs": 3999
+          },
+          "usage": {
+            "inputTokens": 3434,
+            "outputTokens": 584,
+            "totalTokens": 4018,
+            "inputTextTokens": 2142,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1292,
+            "cachedTokens": 2889,
+            "outputTextTokens": 305,
+            "outputAudioTokens": 279,
+            "responses": 2
+          }
+        },
+        {
+          "name": "save-as",
+          "desc": "the save as button",
+          "rect": {
+            "x": 1105,
+            "y": 291,
+            "width": 140,
+            "height": 59
+          },
+          "pointed": {
+            "x": 1364,
+            "y": 910,
+            "screenIndex": 0,
+            "label": "the save as button"
+          },
+          "verdict": "miss",
+          "errorPx": 619,
+          "rectDistPx": 573,
+          "userText": "point at the save as button",
+          "assistantText": "Okay, I pointed at the “Save As” button. That’s the one to click if you want to create a copy with a new name, which is a smart move if you want to keep the original untouched. Next, you could try giving it a slightly more descriptive name, like “exported_report_with_date,” so you can find it later.",
+          "latency": {
+            "askToFirstToolCallMs": 1437,
+            "askToFirstAudioDeltaMs": 2696,
+            "askToDoneMs": 4402
+          },
+          "usage": {
+            "inputTokens": 4468,
+            "outputTokens": 538,
+            "totalTokens": 5006,
+            "inputTextTokens": 2530,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1938,
+            "cachedTokens": 3918,
+            "outputTextTokens": 201,
+            "outputAudioTokens": 337,
+            "responses": 2
+          }
+        },
+        {
+          "name": "edge-button",
+          "desc": "the help button in the bottom right corner of the screen",
+          "rect": {
+            "x": 2466,
+            "y": 1388,
+            "width": 86,
+            "height": 44
+          },
+          "pointed": {
+            "x": 2240,
+            "y": 1360,
+            "screenIndex": 0,
+            "label": "help button in the bottom right corner"
+          },
+          "verdict": "miss",
+          "errorPx": 274,
+          "rectDistPx": 228,
+          "userText": "point at the help button in the bottom right corner of the screen",
+          "assistantText": "I pointed at the help button in the bottom right corner. It’s a handy spot if you want tips or support without leaving what you're doing. If you’re curious, we could next click “Save As” and try giving it a name like “final export,” then see what the file picker looks like.",
+          "latency": {
+            "askToFirstToolCallMs": 2085,
+            "askToFirstAudioDeltaMs": 2864,
+            "askToDoneMs": 4344
+          },
+          "usage": {
+            "inputTokens": 5549,
+            "outputTokens": 532,
+            "totalTokens": 6081,
+            "inputTextTokens": 2965,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 2584,
+            "cachedTokens": 4948,
+            "outputTextTokens": 229,
+            "outputAudioTokens": 303,
+            "responses": 2
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "hit": 0,
+    "near": 0,
+    "miss": 3,
+    "error": 1
+  },
+  "finishedAt": "2026-07-12T16:37:10.890Z"
+}

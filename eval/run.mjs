@@ -168,6 +168,9 @@ async function askByVoice(scene, targetName, mockUrl) {
   await api.post('/hotkey/press');
   await sleep(3500);
   await api.post('/hotkey/release');
+  // The relaunched app restarts turn ids at turn_1: the caller's prevTurnId
+  // (read from the PREVIOUS instance) must not be compared against it.
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,11 +234,12 @@ try {
       // Match by TURN: pointerHistory is capped (its length stops growing),
       // so wait for a new turnId whose tFirstToolCall fired, then read the
       // pointer it dispatched.
-      const prevTurnId = (await api.get('/timings')).last?.turnId ?? null;
+      let prevTurnId = (await api.get('/timings')).last?.turnId ?? null;
+      const txCountBefore = (await api.get('/transcript')).length;
       const desc = target.desc ?? target.name;
       process.stdout.write(`  ${target.name}: ask("point at ${desc}") ... `);
       try {
-        if (voice) await askByVoice(scene, target.name, mockUrl);
+        if (voice) prevTurnId = await askByVoice(scene, target.name, mockUrl);
         else await askByText(desc);
         await waitFor(
           async () => {
@@ -251,12 +255,61 @@ try {
         const p = pointerToGlobal(state);
         if (!p) throw new Error('pointer command had no mappable point');
         const score = scorePoint(p, target.rect);
-        sceneResult.targets.push({ name: target.name, desc, rect: target.rect, pointed: p, ...score });
-        console.log(`${score.verdict.toUpperCase()} (pointed ${p.x},${p.y}; err ${score.errorPx}px)`);
         await waitForIdle(api);
+        // M8.5 live eval: keep what was SAID (diagnosable mislabels), the
+        // final turn timings and (live) token usage alongside the score.
+        const t = (await api.get('/timings')).last ?? {};
+        const newEntries = (voice ? await api.get('/transcript') : (await api.get('/transcript')).slice(txCountBefore)) ?? [];
+        const userText = newEntries.find((e) => e.role === 'user')?.text ?? null;
+        const assistantText =
+          newEntries.filter((e) => e.role === 'assistant').map((e) => e.text).join(' ') || null;
+        const tBase = t.tHoldEnd ?? t.tAsk;
+        sceneResult.targets.push({
+          name: target.name,
+          desc,
+          rect: target.rect,
+          pointed: p,
+          ...score,
+          userText,
+          assistantText,
+          latency: {
+            askToFirstToolCallMs:
+              t.tFirstToolCall !== undefined && tBase !== undefined ? t.tFirstToolCall - tBase : null,
+            askToFirstAudioDeltaMs:
+              t.tFirstAudioDelta !== undefined && tBase !== undefined ? t.tFirstAudioDelta - tBase : null,
+            askToDoneMs:
+              t.tResponseDone !== undefined && tBase !== undefined ? t.tResponseDone - tBase : null,
+          },
+          ...(t.usage ? { usage: t.usage } : {}),
+        });
+        console.log(`${score.verdict.toUpperCase()} (pointed ${p.x},${p.y}; err ${score.errorPx}px; said "${(p.label || '').slice(0, 60)}")`);
+        // Live: spoken audio drains much longer than the response lifecycle —
+        // silence it between targets (keeps runs quiet + turns independent).
+        await api.post('/playback', { command: 'stop' });
       } catch (err) {
-        sceneResult.targets.push({ name: target.name, desc, rect: target.rect, verdict: 'error', error: String(err) });
-        console.log(`ERROR: ${err.message ?? err}`);
+        // Capture what was actually said (e.g. the model answered WITHOUT
+        // calling point_at) so no-pointer turns are diagnosable.
+        let assistantText = null;
+        try {
+          const tx = (await api.get('/transcript')).slice(voice ? 0 : txCountBefore);
+          assistantText = tx.filter((e) => e.role === 'assistant').map((e) => e.text).join(' ') || null;
+        } catch {
+          /* app may be gone */
+        }
+        sceneResult.targets.push({
+          name: target.name,
+          desc,
+          rect: target.rect,
+          verdict: 'error',
+          error: String(err),
+          assistantText,
+        });
+        console.log(`ERROR: ${err.message ?? err}${assistantText ? ` — said: "${assistantText.slice(0, 100)}"` : ''}`);
+        try {
+          await api.post('/playback', { command: 'stop' });
+        } catch {
+          /* ignore */
+        }
       }
     }
     results.scenes.push(sceneResult);
