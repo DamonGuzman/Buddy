@@ -323,6 +323,36 @@ Whole sweep (12 models, 263 calls, incl. probes/contrasts): ~1.1M input +
 verifiable from the API; band assumes $0.25-2.50/M input by tier). Running
 study total ≈ **$2.0-2.4** of the ~$6 cumulative budget.
 
+### 8.4 gpt-5.5 latency audit (2026-07-12 follow-up)
+
+The reported gpt-5.5 latency (p50 3.0s synthetic / 4.4s real) was challenged
+and audited against the raw run data (`results/gpt-5.5--rest-plain-low--*`):
+
+- **The figure is CONFIRMED as measured, at `reasoning_effort: 'low'`.** The
+  request really sent `reasoning_effort: "low"` (correct field for the chat
+  completions shape used) and the API honored it — this was not a config bug.
+- **But 'low' is NOT gpt-5.5's reasoning floor**: 39–187 reasoning tokens
+  flowed per call (median ~75; the 6.7s worst call burned 187), and per-call
+  latency tracks reasoning tokens almost monotonically. The busier real
+  screenshot provokes more reasoning, hence 4.4s there vs 3.0s synthetic.
+- **No cold-start inflation**: each process's call #1 — the only call paying
+  TLS/connection setup — was among the fastest in its batch (e.g. 2562ms vs
+  batch median 2768ms). The per-call totals are warm-path numbers.
+- Comparison basis: gpt-5.6-sol at 'low' emits 0–12 reasoning tokens for the
+  same task at ~1.4s, i.e. gpt-5.5's latency premium is reasoning-volume, not
+  serving speed.
+
+**Open item:** whether gpt-5.5 accepts a lower tier ('minimal'/'none') and
+stays pixel-accurate there. `audit-55.mjs` (this directory) is the ready-made
+re-measure: effort-enum probe, floor re-measure with warm-up split and
+TTFB/first-content/total timing on 12 synthetic + 3 real targets, plus a
+5-call warm 'low' reproduction. It could not be executed in this pass: the
+account returned `insufficient_quota` (billing-level, both gpt-4o-mini and
+gpt-5.5 probes) continuously for ~1h of polling. Run `node audit-55.mjs`
+when the account has credit (~$0.15). Verdict impact either way: none for
+the grounding slot — even a floored gpt-5.5 can at best tie gpt-5.4-mini's
+1.3s at a higher price tier (see §9).
+
 ## 9. Final recommendation (supersedes §7.5)
 
 **For the grounding fallback: gpt-5.4-mini at reasoning_effort low, bare
