@@ -1,0 +1,403 @@
+/*
+ * Overlay buddy styles. Everything animates on transform/opacity only
+ * (compositor-friendly). At rest the only animation is the CSS bob + blink —
+ * no rAF, near-zero CPU.
+ */
+
+:root {
+  --ink: rgba(17, 24, 39, 0.92);
+  --ink-border: rgba(148, 163, 184, 0.22);
+  --blue: #3b82f6;
+  --blue-soft: rgba(96, 165, 250, 0.85);
+  --listen: rgba(74, 222, 128, 0.9);
+  --privacy: rgba(245, 158, 11, 0.9);
+  --text: #f3f4f6;
+  --font:
+    'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+/* ------------------------------------------------------------------ buddy */
+
+.buddy-root {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  font-family: var(--font);
+}
+.buddy-root[data-visible] {
+  opacity: 1;
+}
+
+.buddy-rot,
+.buddy-fx {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+}
+
+.buddy-bob {
+  position: absolute;
+  left: -17px;
+  top: -17px;
+  width: 34px;
+  height: 34px;
+}
+
+/* gentle breathing bob while resting (only when actually visible — hidden
+   or non-primary overlays must not burn compositor time) */
+.buddy-root[data-visible][data-mode='rest'] .buddy-bob {
+  animation: buddy-bob 3.2s ease-in-out infinite;
+}
+@keyframes buddy-bob {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-3px) scale(1.045);
+  }
+}
+
+/* speaking: rhythmic subtle bounce (overrides bob) */
+.buddy-root[data-visible][data-state='speaking'] .buddy-bob {
+  animation: buddy-bounce 0.62s ease-in-out infinite;
+}
+@keyframes buddy-bounce {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  32% {
+    transform: translateY(-5px) scale(1.04, 0.98);
+  }
+  62% {
+    transform: translateY(1px) scale(0.985, 1.015);
+  }
+}
+
+/* thinking: gentle wobble on top of whatever rotation the flight left */
+.buddy-root[data-visible][data-state='thinking'] .buddy-fx {
+  animation: buddy-wobble 1.9s ease-in-out infinite;
+}
+@keyframes buddy-wobble {
+  0%,
+  100% {
+    transform: rotate(-7deg);
+  }
+  50% {
+    transform: rotate(7deg);
+  }
+}
+
+/* error: brief shake + red flash (data-flash is pulsed for ~650ms by JS) */
+.buddy-root[data-flash] .buddy-fx {
+  animation: buddy-shake 0.5s linear;
+}
+@keyframes buddy-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  12% {
+    transform: translateX(-5px) rotate(-4deg);
+  }
+  30% {
+    transform: translateX(5px) rotate(4deg);
+  }
+  48% {
+    transform: translateX(-4px) rotate(-3deg);
+  }
+  66% {
+    transform: translateX(3px) rotate(2deg);
+  }
+  84% {
+    transform: translateX(-2px);
+  }
+}
+.buddy-root[data-flash] .buddy-body {
+  fill: #ef4444;
+  stroke: #ef4444;
+}
+.buddy-root[data-flash] .buddy-svg {
+  filter: drop-shadow(0 3px 10px rgba(239, 68, 68, 0.75));
+}
+
+.buddy-svg {
+  display: block;
+  filter: drop-shadow(0 3px 7px rgba(15, 40, 90, 0.45))
+    drop-shadow(0 0 1px rgba(37, 99, 235, 0.35));
+}
+
+/* listening: steady glow + expanding pulse rings */
+.buddy-root[data-state='listening'] .buddy-svg {
+  filter: drop-shadow(0 3px 7px rgba(15, 40, 90, 0.45))
+    drop-shadow(0 0 9px rgba(74, 222, 128, 0.85));
+}
+.listen-ring {
+  position: absolute;
+  left: -27px;
+  top: -27px;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 2.5px solid var(--listen);
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+  opacity: 0;
+}
+.buddy-root[data-visible][data-state='listening'] .listen-ring {
+  animation: listen-pulse 1.5s ease-out infinite;
+}
+.buddy-root[data-visible][data-state='listening'] .listen-ring.r2 {
+  animation-delay: 0.5s;
+}
+@keyframes listen-pulse {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.95;
+  }
+  75% {
+    transform: scale(1.3);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.3);
+    opacity: 0;
+  }
+}
+
+/* Eyes blink: JS toggles data-blink for ~130ms every few seconds. Deliberately
+   NOT a CSS animation — a running transform animation inside the SVG re-rasters
+   the buddy (incl. its drop-shadow) at 60fps and burned ~60% of a core at idle.
+   An instant class flip costs two repaints per blink. */
+.buddy-eyes {
+  transform-origin: 20px 24.5px;
+}
+.buddy-root[data-blink] .buddy-eyes {
+  transform: scaleY(0.1);
+}
+
+/* thinking ellipsis dots above the buddy */
+.think-dots {
+  position: absolute;
+  left: -14px;
+  top: -46px;
+  display: none;
+  gap: 4px;
+}
+.buddy-root[data-visible][data-state='thinking'] .think-dots {
+  display: flex;
+}
+.think-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #cfe3ff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  animation: think-dot 1.25s ease-in-out infinite;
+}
+.think-dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.think-dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+@keyframes think-dot {
+  0%,
+  55%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  25% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+/* ------------------------------------------------- capture privacy signpost */
+
+.capture-pill {
+  position: absolute;
+  top: 30px;
+  transform: translateX(-50%);
+  background: rgba(24, 24, 27, 0.94);
+  color: #fff;
+  border: 1.5px solid var(--privacy);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45), 0 0 10px rgba(245, 158, 11, 0.35);
+  animation: pill-in 0.22s cubic-bezier(0.34, 1.5, 0.64, 1);
+}
+@keyframes pill-in {
+  from {
+    transform: translateX(-50%) scale(0.75);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(-50%) scale(1);
+    opacity: 1;
+  }
+}
+.buddy-root[data-v='below'] .capture-pill {
+  top: auto;
+  bottom: 30px;
+}
+
+/* thin pulsing border along the screen edge while capturing */
+.edge-pulse {
+  position: fixed;
+  inset: 0;
+  border: 3px solid var(--privacy);
+  box-shadow: inset 0 0 26px rgba(245, 158, 11, 0.3);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.edge-pulse[data-active] {
+  opacity: 1;
+  animation: edge-breathe 1.4s ease-in-out infinite;
+}
+@keyframes edge-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* --------------------------------------------------------- caption bubble */
+
+.caption-bubble {
+  position: absolute;
+  bottom: 32px;
+  right: -12px;
+  max-width: 360px;
+  width: max-content;
+  background: var(--ink);
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.5;
+  letter-spacing: 0.15px;
+  text-transform: lowercase;
+  padding: 9px 13px;
+  border-radius: 14px 14px 4px 14px;
+  border: 1px solid var(--ink-border);
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.45);
+  animation: bubble-in 0.3s cubic-bezier(0.34, 1.4, 0.64, 1);
+  transition: opacity 0.45s ease, transform 0.45s ease;
+}
+.caption-bubble[data-fading] {
+  opacity: 0;
+  transform: translateY(5px);
+}
+.buddy-root[data-h='left'] .caption-bubble {
+  right: auto;
+  left: -12px;
+  border-radius: 14px 14px 14px 4px;
+}
+.buddy-root[data-v='below'] .caption-bubble {
+  bottom: auto;
+  top: 52px;
+}
+
+/* ------------------------------------------------------- arrival pulse/chip */
+
+.point-pulse {
+  position: fixed;
+  width: 0;
+  height: 0;
+}
+.pp-dot {
+  position: absolute;
+  left: -4.5px;
+  top: -4.5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #7cb8ff;
+  box-shadow: 0 0 12px 3px rgba(96, 165, 250, 0.85);
+  animation: pop-in 0.2s ease-out;
+}
+.pp-ring {
+  position: absolute;
+  left: -24px;
+  top: -24px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 2.5px solid var(--blue-soft);
+  opacity: 0;
+  animation: point-ring 1.1s ease-out infinite;
+}
+.pp-ring.d2 {
+  animation-delay: 0.35s;
+}
+@keyframes point-ring {
+  0% {
+    transform: scale(0.3);
+    opacity: 0.95;
+  }
+  80% {
+    transform: scale(1.15);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.15);
+    opacity: 0;
+  }
+}
+.pp-chip {
+  position: absolute;
+  left: 18px;
+  top: 12px;
+  background: var(--ink);
+  color: #dbeafe;
+  font-family: var(--font);
+  font-size: 12px;
+  text-transform: lowercase;
+  letter-spacing: 0.15px;
+  padding: 3.5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  white-space: nowrap;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+  animation: pop-in 0.24s cubic-bezier(0.34, 1.5, 0.64, 1);
+}
+.point-pulse[data-side='left'] .pp-chip {
+  left: auto;
+  right: 18px;
+}
+
+/* ------------------------------------------------------------- shared bits */
+
+@keyframes pop-in {
+  from {
+    transform: scale(0.75);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes bubble-in {
+  from {
+    transform: translateY(7px) scale(0.94);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
