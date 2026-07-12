@@ -1,4 +1,9 @@
+import { ArrowLeft, Settings } from 'lucide-react';
 import { Triangle } from './Triangle';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 import type { AssistantState, SessionStatus } from '../../../shared/types';
 
 const STATE_LABEL: Record<AssistantState, string> = {
@@ -9,11 +14,35 @@ const STATE_LABEL: Record<AssistantState, string> = {
   error: 'uh oh',
 };
 
+/** Subtle per-state tint on the assistant-state badge (dark zinc base). */
+const STATE_BADGE: Record<AssistantState, string> = {
+  idle: 'border-border text-muted-foreground',
+  listening: 'border-clicky/40 bg-clicky/10 text-clicky',
+  thinking: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
+  speaking: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
+  error: 'border-destructive/40 bg-destructive/10 text-destructive',
+};
+
+const STATE_DOT: Record<AssistantState, string> = {
+  idle: 'bg-muted-foreground/60',
+  listening: 'bg-clicky animate-dot-pulse',
+  thinking: 'bg-amber-400 animate-dot-pulse',
+  speaking: 'bg-emerald-400 animate-dot-bounce',
+  error: 'bg-destructive',
+};
+
 const SESSION_TITLE: Record<SessionStatus['state'], string> = {
   disconnected: 'session: disconnected',
   connecting: 'session: connecting…',
   ready: 'session: ready',
   error: 'session: error',
+};
+
+const SESSION_DOT: Record<SessionStatus['state'], string> = {
+  disconnected: 'bg-muted-foreground/50',
+  connecting: 'bg-amber-400 animate-dot-pulse',
+  ready: 'bg-emerald-400',
+  error: 'bg-destructive',
 };
 
 interface HeaderProps {
@@ -34,66 +63,72 @@ export function Header(props: HeaderProps): React.JSX.Element {
       : SESSION_TITLE[sessionState];
 
   return (
-    <header className="header">
-      <div className="brand">
+    <header className="flex items-center gap-2 border-b px-4 pt-3.5 pb-3 [-webkit-app-region:drag]">
+      <div className="flex items-center gap-2">
         <Triangle size={22} />
-        <h1 className="brand-name">clicky</h1>
+        <h1 className="text-[17px] leading-none font-semibold tracking-tight">clicky</h1>
       </div>
-      <span className={`state-pill ${assistantState}`}>
-        <span className="dot" />
+
+      <Badge
+        variant="outline"
+        className={cn('ml-1 gap-1.5 rounded-full px-2.5 font-normal', STATE_BADGE[assistantState])}
+      >
+        <span className={cn('size-1.5 rounded-full', STATE_DOT[assistantState])} />
         {STATE_LABEL[assistantState]}
-      </span>
-      <div className="header-right">
-        {session?.usingMockServer ? <span className="mock-badge">mock</span> : null}
-        {/* M11: generic dev-flags chip — any CLICKY_* flag besides CLICKY_DEBUG
-            (reuses the mock-badge style; full list in the tooltip). */}
-        {devFlags.length > 0 ? (
-          <span className="mock-badge" title={devFlags.map((f) => `CLICKY_${f.toUpperCase()}`).join(', ')}>
-            dev:{devFlags.length}
-          </span>
+      </Badge>
+
+      <div className="ml-auto flex items-center gap-2 [-webkit-app-region:no-drag]">
+        {session?.usingMockServer ? (
+          <Badge
+            variant="outline"
+            className="rounded-full border-amber-400/40 bg-amber-400/10 px-2 text-[10px] tracking-wide text-amber-300"
+          >
+            mock
+          </Badge>
         ) : null}
-        <span className={`session-dot ${sessionState}`} title={sessionTitle} />
-        <button
-          type="button"
-          className={`icon-btn${settingsOpen ? ' active' : ''}`}
-          title={settingsOpen ? 'back to chat' : 'settings'}
-          onClick={onToggleSettings}
-        >
-          {settingsOpen ? <BackIcon /> : <GearIcon />}
-        </button>
+        {/* M11: generic dev-flags chip — any CLICKY_* flag besides CLICKY_DEBUG.
+            Mapped onto the shadcn Badge; full flag names live in the tooltip. */}
+        {devFlags.length > 0 ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge
+                variant="outline"
+                className="rounded-full border-violet-400/40 bg-violet-400/10 px-2 text-[10px] tracking-wide text-violet-300"
+              >
+                dev:{devFlags.length}
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {devFlags.map((f) => `CLICKY_${f.toUpperCase()}`).join(', ')}
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              aria-label={sessionTitle}
+              className={cn('size-2 shrink-0 rounded-full', SESSION_DOT[sessionState])}
+            />
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{sessionTitle}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn('size-7 text-muted-foreground', settingsOpen && 'bg-accent text-accent-foreground')}
+              onClick={onToggleSettings}
+            >
+              {settingsOpen ? <ArrowLeft className="size-4" /> : <Settings className="size-4" />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {settingsOpen ? 'back to chat' : 'settings'}
+          </TooltipContent>
+        </Tooltip>
       </div>
     </header>
-  );
-}
-
-function GearIcon(): React.JSX.Element {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
-        stroke="currentColor"
-        strokeWidth="1.7"
-      />
-      <path
-        d="M19.4 13.5a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56v.18a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.12-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03h-.18a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.56-1.12 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.08a1.7 1.7 0 0 0 1.03-1.56v-.18a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.08a1.7 1.7 0 0 0 1.56 1.03h.18a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.56 1.03Z"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-function BackIcon(): React.JSX.Element {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M15 5l-7 7 7 7"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }

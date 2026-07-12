@@ -14,6 +14,8 @@ import { Header } from './components/Header';
 import { Transcript } from './components/Transcript';
 import { Composer } from './components/Composer';
 import { SettingsView } from './components/SettingsView';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 import type {
   AssistantState,
   MicDevice,
@@ -159,11 +161,18 @@ export function App(): React.JSX.Element {
         return marks;
       },
       seedTranscript: () => SEED_ENTRIES.forEach(upsertEntry),
+      seedEntry: (entry: TranscriptEntry) => upsertEntry(entry),
       clearTranscript: () => setEntries([]),
       openSettings: () => setView('settings'),
       openChat: () => setView('chat'),
+      // Visual QA (dev-only): drive main-owned state locally for screenshots.
+      setAssistantState: (state: AssistantState) => setAssistantState(state),
+      setSession: (status: SessionStatus | null) => setSession(status),
+      setSettingsLocal: (s: Settings | null) => setSettings(s),
       scrollSettings: (px: number) => {
-        document.querySelector('.settings')?.scrollBy({ top: px });
+        document
+          .querySelector('[data-settings-scroll] [data-slot="scroll-area-viewport"]')
+          ?.scrollBy({ top: px });
       },
       startCapture: () => void micCapture.start(micDeviceIdRef.current),
       captureTone: () => void micCapture.startWithTestTone(),
@@ -180,7 +189,7 @@ export function App(): React.JSX.Element {
   const composerDisabled = session?.state === 'error' && noKey;
 
   return (
-    <div className="app">
+    <div className="flex h-full flex-col bg-background text-foreground">
       <Header
         assistantState={assistantState}
         session={session}
@@ -190,15 +199,17 @@ export function App(): React.JSX.Element {
       />
 
       {view === 'chat' && noKey ? (
-        <div className="callout">
-          <span className="grow">add your openai key to give clicky a voice</span>
-          <button type="button" onClick={() => setView('settings')}>
+        <Card className="mx-4 mt-3 flex-row items-center gap-2.5 rounded-lg border-clicky/30 bg-clicky/10 px-3.5 py-2.5 shadow-none">
+          <span className="flex-1 text-xs leading-relaxed">
+            add your openai key to give clicky a voice
+          </span>
+          <Button type="button" size="sm" className="h-7 rounded-full px-3 text-xs" onClick={() => setView('settings')}>
             open settings
-          </button>
-        </div>
+          </Button>
+        </Card>
       ) : null}
 
-      <main className="main">
+      <main className="flex min-h-0 flex-1 flex-col">
         {view === 'settings' ? (
           settings ? (
             <SettingsView settings={settings} micDevices={micDevices} micError={micError} />

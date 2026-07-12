@@ -1,4 +1,8 @@
 import { useState } from 'react';
+import { ArrowUp } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface ComposerProps {
   disabled: boolean;
@@ -24,14 +28,24 @@ export function Composer({
     setText('');
   };
 
+  const sendHint = disabled ? disabledReason : busy ? 'clicky is thinking…' : 'send';
+
   return (
-    <div className="composer" title={disabled ? disabledReason : undefined}>
-      {busy && <span className="composer-hint">clicky is thinking…</span>}
-      <input
+    <div
+      className="relative flex gap-2 border-t px-4 pt-3 pb-3.5"
+      title={disabled ? disabledReason : undefined}
+    >
+      {busy && (
+        <span className="animate-hint-in pointer-events-none absolute -top-[22px] left-4 rounded-full border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
+          clicky is thinking…
+        </span>
+      )}
+      <Input
         type="text"
         value={text}
         placeholder="ask clicky anything…"
         disabled={disabled}
+        className="h-9 rounded-full px-3.5 text-[13px]"
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) {
@@ -40,23 +54,23 @@ export function Composer({
           }
         }}
       />
-      <button
-        type="button"
-        className="send"
-        disabled={disabled || busy || text.trim().length === 0}
-        title={disabled ? disabledReason : busy ? 'clicky is thinking…' : 'send'}
-        onClick={send}
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path
-            d="M4.5 12h14m0 0-5.5-5.5M18.5 12 13 17.5"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {/* span wrapper: disabled buttons swallow pointer events, the hint must survive */}
+          <span title={sendHint}>
+            <Button
+              type="button"
+              size="icon"
+              className="size-9 rounded-full"
+              disabled={disabled || busy || text.trim().length === 0}
+              onClick={send}
+            >
+              <ArrowUp className="size-4" />
+            </Button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top">{sendHint}</TooltipContent>
+      </Tooltip>
     </div>
   );
 }

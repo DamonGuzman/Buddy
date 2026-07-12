@@ -15,7 +15,10 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "@/*": ["./src/renderer/panel/*"]
+    }
   },
   "include": ["src/renderer/**/*", "src/shared/**/*"]
 }
