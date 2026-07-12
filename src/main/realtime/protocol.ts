@@ -1,8 +1,58 @@
 /**
- * Typed subset of the OpenAI Realtime API (v1 GA, WebSocket) that Clicky
+ * Typed subset of the OpenAI Realtime API (GA v1, WebSocket) that Clicky
  * speaks (docs/ARCHITECTURE.md §7). The mock server in tools/mock-realtime
  * implements exactly this subset.
+ *
+ * Event names and payload shapes verified against the official reference at
+ * developers.openai.com/api/reference/resources/realtime/client-events and
+ * .../server-events (fetched 2026-07-11). Where the API is loose or we don't
+ * consume a field, types stay honest with `unknown` passthrough.
  */
+
+import type { CaptureMeta } from '../../shared/types';
+
+// ---------------------------------------------------------------------------
+// Session config (client -> server, inside session.update)
+// ---------------------------------------------------------------------------
+
+/** The only audio format Clicky uses: PCM16 mono @ 24kHz, both directions. */
+export interface AudioPcmFormat {
+  type: 'audio/pcm';
+  rate: 24000;
+}
+
+export interface RealtimeFunctionTool {
+  type: 'function';
+  name: string;
+  description: string;
+  /** JSON Schema for the arguments. */
+  parameters: Record<string, unknown>;
+}
+
+/** Back-compat alias used by persona.ts. */
+export type ToolDefinition = RealtimeFunctionTool;
+
+/** GA `session` object for `session.update` (type: 'realtime' sessions). */
+export interface RealtimeSessionConfig {
+  type: 'realtime';
+  instructions?: string;
+  output_modalities?: Array<'audio' | 'text'>;
+  audio?: {
+    input?: {
+      format?: AudioPcmFormat;
+      /** Async input transcription (separate ASR model), enabled for captions. */
+      transcription?: { model: string; language?: string } | null;
+      /** Push-to-talk: always null — the client commits manually. */
+      turn_detection?: null;
+    };
+    output?: {
+      format?: AudioPcmFormat;
+      voice?: string;
+      speed?: number;
+    };
+  };
+  tools?: RealtimeFunctionTool[];
+}
 
 // ---------------------------------------------------------------------------
 // Client -> server events
@@ -10,45 +60,60 @@
 
 export interface SessionUpdateEvent {
   type: 'session.update';
-  session: {
-    type: 'realtime';
-    instructions?: string;
-    output_modalities?: ['audio'];
-    audio?: {
-      input?: { format: { type: 'audio/pcm'; rate: 24000 }; turn_detection: null };
-      output?: { format: { type: 'audio/pcm'; rate: 24000 }; voice?: string };
-    };
-    tools?: ToolDefinition[];
-  };
+  event_id?: string;
+  session: RealtimeSessionConfig;
 }
 
 export interface InputAudioBufferAppendEvent {
   type: 'input_audio_buffer.append';
-  /** base64 PCM16 (24kHz mono). */
+  event_id?: string;
+  /** base64 PCM16 (24kHz mono). Max 15 MiB per event. */
   audio: string;
 }
 
 export interface InputAudioBufferCommitEvent {
   type: 'input_audio_buffer.commit';
+  event_id?: string;
 }
 
 export interface InputAudioBufferClearEvent {
   type: 'input_audio_buffer.clear';
+  event_id?: string;
 }
 
-export type ContentPart =
+/** Content parts of a user message item. */
+export type UserContentPart =
   | { type: 'input_text'; text: string }
-  | { type: 'input_image'; image_url: string };
+  | {
+      /** `image_url` is a data URI (data:image/jpeg;base64,...) or https URL. */
+      type: 'input_image';
+      image_url: string;
+      detail?: 'auto' | 'low' | 'high';
+    };
+
+export type ConversationItem =
+  | { type: 'message'; role: 'user'; content: UserContentPart[] }
+  | { type: 'message'; role: 'system'; content: Array<{ type: 'input_text'; text: string }> }
+  | { type: 'function_call_output'; call_id: string; output: string };
 
 export interface ConversationItemCreateEvent {
   type: 'conversation.item.create';
-  item:
-    | { type: 'message'; role: 'user' | 'system'; content: ContentPart[] }
-    | { type: 'function_call_output'; call_id: string; output: string };
+  event_id?: string;
+  previous_item_id?: string;
+  item: ConversationItem;
 }
 
 export interface ResponseCreateEvent {
   type: 'response.create';
+  event_id?: string;
+  /** Optional per-response overrides; Clicky doesn't use them. */
+  response?: Record<string, unknown>;
+}
+
+export interface ResponseCancelEvent {
+  type: 'response.cancel';
+  event_id?: string;
+  response_id?: string;
 }
 
 export type ClientEvent =
@@ -57,89 +122,272 @@ export type ClientEvent =
   | InputAudioBufferCommitEvent
   | InputAudioBufferClearEvent
   | ConversationItemCreateEvent
-  | ResponseCreateEvent;
+  | ResponseCreateEvent
+  | ResponseCancelEvent;
 
 // ---------------------------------------------------------------------------
 // Server -> client events
 // ---------------------------------------------------------------------------
 
+/** Usage block on response.done (all fields optional in practice). */
+export interface ResponseUsage {
+  total_tokens?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  input_token_details?: {
+    text_tokens?: number;
+    audio_tokens?: number;
+    image_tokens?: number;
+    cached_tokens?: number;
+    [k: string]: unknown;
+  };
+  output_token_details?: {
+    text_tokens?: number;
+    audio_tokens?: number;
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}
+
+export type ResponseStatus = 'completed' | 'cancelled' | 'failed' | 'incomplete' | 'in_progress';
+
+/** The RealtimeResponse resource (audio omitted; output items untyped). */
+export interface RealtimeResponse {
+  id?: string;
+  status?: ResponseStatus;
+  status_details?: unknown;
+  output?: unknown[];
+  usage?: ResponseUsage;
+  [k: string]: unknown;
+}
+
 export interface SessionCreatedEvent {
   type: 'session.created';
-  session: { id: string };
+  event_id?: string;
+  session: { id?: string; [k: string]: unknown };
 }
 
 export interface SessionUpdatedEvent {
   type: 'session.updated';
+  event_id?: string;
+  session?: Record<string, unknown>;
+}
+
+/** Async ASR transcript of the user's committed audio (may arrive any time). */
+export interface InputAudioTranscriptionCompletedEvent {
+  type: 'conversation.item.input_audio_transcription.completed';
+  event_id?: string;
+  item_id: string;
+  content_index?: number;
+  transcript: string;
+  usage?: unknown;
+}
+
+export interface ResponseCreatedEvent {
+  type: 'response.created';
+  event_id?: string;
+  response?: RealtimeResponse;
+}
+
+/** Used to learn function name/call_id early; item is loosely typed. */
+export interface ResponseOutputItemAddedEvent {
+  type: 'response.output_item.added';
+  event_id?: string;
+  response_id?: string;
+  output_index?: number;
+  item: { type?: string; id?: string; name?: string; call_id?: string; [k: string]: unknown };
 }
 
 export interface ResponseOutputAudioDeltaEvent {
   type: 'response.output_audio.delta';
-  response_id: string;
+  event_id?: string;
+  response_id?: string;
   item_id: string;
+  output_index?: number;
+  content_index?: number;
   /** base64 PCM16 (24kHz mono). */
   delta: string;
 }
 
+export interface ResponseOutputAudioDoneEvent {
+  type: 'response.output_audio.done';
+  event_id?: string;
+  response_id?: string;
+  item_id: string;
+  output_index?: number;
+  content_index?: number;
+}
+
 export interface ResponseOutputAudioTranscriptDeltaEvent {
   type: 'response.output_audio_transcript.delta';
-  response_id: string;
+  event_id?: string;
+  response_id?: string;
   item_id: string;
+  output_index?: number;
+  content_index?: number;
+  delta: string;
+}
+
+export interface ResponseOutputAudioTranscriptDoneEvent {
+  type: 'response.output_audio_transcript.done';
+  event_id?: string;
+  response_id?: string;
+  item_id: string;
+  output_index?: number;
+  content_index?: number;
+  transcript?: string;
+}
+
+/** Defensive: only sent when output_modalities includes 'text'. */
+export interface ResponseOutputTextDeltaEvent {
+  type: 'response.output_text.delta';
+  event_id?: string;
+  response_id?: string;
+  item_id: string;
+  output_index?: number;
+  content_index?: number;
+  delta: string;
+}
+
+export interface ResponseFunctionCallArgumentsDeltaEvent {
+  type: 'response.function_call_arguments.delta';
+  event_id?: string;
+  response_id?: string;
+  item_id?: string;
+  output_index?: number;
+  call_id: string;
   delta: string;
 }
 
 export interface ResponseFunctionCallArgumentsDoneEvent {
   type: 'response.function_call_arguments.done';
-  response_id: string;
-  item_id: string;
+  event_id?: string;
+  response_id?: string;
+  item_id?: string;
+  output_index?: number;
   call_id: string;
+  /** Function name (per GA docs, present on done). */
   name: string;
-  /** JSON-encoded arguments. */
+  /** The final arguments as a JSON string. */
   arguments: string;
 }
 
 export interface ResponseDoneEvent {
   type: 'response.done';
-  response: { id: string; status: 'completed' | 'cancelled' | 'failed' | 'incomplete' };
+  event_id?: string;
+  response: RealtimeResponse;
 }
 
-export interface ErrorEvent {
+export interface RealtimeErrorEvent {
   type: 'error';
-  error: { type: string; code?: string; message: string };
+  event_id?: string;
+  error: {
+    /** e.g. 'invalid_request_error', 'server_error'. */
+    type?: string;
+    code?: string | null;
+    message: string;
+    param?: string | null;
+    event_id?: string | null;
+  };
+}
+
+export interface RateLimitsUpdatedEvent {
+  type: 'rate_limits.updated';
+  event_id?: string;
+  rate_limits: Array<{
+    name?: string;
+    limit?: number;
+    remaining?: number;
+    reset_seconds?: number;
+  }>;
 }
 
 export type ServerEvent =
   | SessionCreatedEvent
   | SessionUpdatedEvent
+  | InputAudioTranscriptionCompletedEvent
+  | ResponseCreatedEvent
+  | ResponseOutputItemAddedEvent
   | ResponseOutputAudioDeltaEvent
+  | ResponseOutputAudioDoneEvent
   | ResponseOutputAudioTranscriptDeltaEvent
+  | ResponseOutputAudioTranscriptDoneEvent
+  | ResponseOutputTextDeltaEvent
+  | ResponseFunctionCallArgumentsDeltaEvent
   | ResponseFunctionCallArgumentsDoneEvent
   | ResponseDoneEvent
-  | ErrorEvent;
+  | RealtimeErrorEvent
+  | RateLimitsUpdatedEvent;
 
-// ---------------------------------------------------------------------------
-// Tools
-// ---------------------------------------------------------------------------
-
-export interface ToolDefinition {
-  type: 'function';
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>; // JSON Schema
-}
-
-/** Arguments of the `point_at` tool call (screenshot pixel space, §6). */
-export interface PointAtArgs {
-  screenIndex: number;
-  points: Array<{ x: number; y: number; label?: string }>;
-}
-
-/** Parse server event JSON; returns null for unknown/malformed frames. */
+/**
+ * Parse a server frame. Returns null for malformed JSON / missing type.
+ * Unknown event types are returned as-is (cast) — the session's switch
+ * ignores anything it doesn't know, logging once per type.
+ */
 export function parseServerEvent(raw: string): ServerEvent | null {
   try {
     const evt = JSON.parse(raw) as { type?: unknown };
-    if (typeof evt.type !== 'string') return null;
+    if (evt === null || typeof evt !== 'object' || typeof evt.type !== 'string') return null;
     return evt as ServerEvent;
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// point_at tool arguments
+// ---------------------------------------------------------------------------
+
+/**
+ * Arguments of the `point_at` tool call: pixel coords in the screenshot of
+ * screen `screen` (docs/ARCHITECTURE.md §6), plus a short human label.
+ */
+export interface PointAtArgs {
+  x: number;
+  y: number;
+  label?: string;
+  screen: number;
+}
+
+/**
+ * Validate + clamp raw point_at arguments from the model.
+ *
+ * - x/y must be finite numbers; rounded to integers, clamped to >= 0 and,
+ *   when `capture` metadata for that screen is known, to the image bounds.
+ * - screen must be a finite number; rounded, clamped to >= 0 and, when
+ *   capture metadata is known, to a valid screen index.
+ * - label is kept only if it's a non-empty string (trimmed, capped at 120).
+ *
+ * Returns null for fundamentally malformed input (missing/non-numeric x, y
+ * or screen) — the caller rejects the call rather than pointing at garbage.
+ */
+export function validatePointAtArgs(raw: unknown, capture?: CaptureMeta[]): PointAtArgs | null {
+  if (raw === null || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const xNum = toFiniteNumber(obj['x']);
+  const yNum = toFiniteNumber(obj['y']);
+  const screenNum = toFiniteNumber(obj['screen']);
+  if (xNum === null || yNum === null || screenNum === null) return null;
+
+  let screen = Math.max(0, Math.round(screenNum));
+  if (capture && capture.length > 0 && screen >= capture.length) {
+    screen = capture.length - 1;
+  }
+  const meta = capture?.[screen];
+  const maxX = meta ? Math.max(0, meta.imageW - 1) : Number.MAX_SAFE_INTEGER;
+  const maxY = meta ? Math.max(0, meta.imageH - 1) : Number.MAX_SAFE_INTEGER;
+  const x = Math.min(Math.max(0, Math.round(xNum)), maxX);
+  const y = Math.min(Math.max(0, Math.round(yNum)), maxY);
+
+  const rawLabel = obj['label'];
+  const label =
+    typeof rawLabel === 'string' && rawLabel.trim().length > 0
+      ? rawLabel.trim().slice(0, 120)
+      : undefined;
+
+  return { x, y, screen, ...(label !== undefined ? { label } : {}) };
+}
+
+function toFiniteNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
