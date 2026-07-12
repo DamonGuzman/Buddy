@@ -1,0 +1,285 @@
+{
+  "summary": [
+    {
+      "model": "gpt-realtime-2.1",
+      "condition": "baseline-anchors",
+      "n": 24,
+      "valid": 24,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 80.5,
+      "p90Err": 282.6,
+      "maxErr": 313,
+      "within40": 37.5,
+      "within100": 58.3,
+      "hitRate": 25,
+      "latencyP50": 1093,
+      "zones": {
+        "corner": {
+          "n": 8,
+          "median": 31.1,
+          "max": 58.3
+        },
+        "center": {
+          "n": 2,
+          "median": 85.2,
+          "max": 100
+        },
+        "edge": {
+          "n": 4,
+          "median": 64.6,
+          "max": 290.4
+        },
+        "cluster": {
+          "n": 6,
+          "median": 166.1,
+          "max": 311.2
+        },
+        "icon": {
+          "n": 4,
+          "median": 157.6,
+          "max": 313
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            0.9,
+            0.1,
+            8.8
+          ],
+          "yCoef": [
+            0,
+            1,
+            -25.8
+          ],
+          "r2": 1,
+          "rawRmsPx": 152.1,
+          "residualRmsPx": 128.5
+        },
+        "B": {
+          "xCoef": [
+            0.9,
+            0.1,
+            -19.8
+          ],
+          "yCoef": [
+            0.1,
+            1,
+            -145.3
+          ],
+          "r2": 1,
+          "rawRmsPx": 149,
+          "residualRmsPx": 111.1
+        }
+      }
+    },
+    {
+      "model": "gpt-realtime-2.1",
+      "condition": "baseline-plain",
+      "n": 24,
+      "valid": 24,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 82.8,
+      "p90Err": 243.4,
+      "maxErr": 291.5,
+      "within40": 29.2,
+      "within100": 54.2,
+      "hitRate": 33.3,
+      "latencyP50": 1235,
+      "zones": {
+        "corner": {
+          "n": 8,
+          "median": 40.1,
+          "max": 70.5
+        },
+        "center": {
+          "n": 2,
+          "median": 43.8,
+          "max": 55.9
+        },
+        "edge": {
+          "n": 4,
+          "median": 52.5,
+          "max": 120.1
+        },
+        "cluster": {
+          "n": 6,
+          "median": 236.8,
+          "max": 291.5
+        },
+        "icon": {
+          "n": 4,
+          "median": 160.5,
+          "max": 244.1
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            1,
+            0.1,
+            17.5
+          ],
+          "yCoef": [
+            0,
+            1,
+            -33.9
+          ],
+          "r2": 1,
+          "rawRmsPx": 146.2,
+          "residualRmsPx": 124.2
+        },
+        "B": {
+          "xCoef": [
+            0.9,
+            0.2,
+            -68.8
+          ],
+          "yCoef": [
+            0,
+            1,
+            -63.1
+          ],
+          "r2": 1,
+          "rawRmsPx": 148.7,
+          "residualRmsPx": 100.6
+        }
+      }
+    },
+    {
+      "model": "gpt-realtime-2.1",
+      "condition": "grid-100",
+      "n": 24,
+      "valid": 24,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 84,
+      "p90Err": 132.9,
+      "maxErr": 200,
+      "within40": 29.2,
+      "within100": 58.3,
+      "hitRate": 16.7,
+      "latencyP50": 1169,
+      "zones": {
+        "corner": {
+          "n": 8,
+          "median": 56.6,
+          "max": 100.5
+        },
+        "center": {
+          "n": 2,
+          "median": 72.1,
+          "max": 130
+        },
+        "edge": {
+          "n": 4,
+          "median": 39.2,
+          "max": 69
+        },
+        "cluster": {
+          "n": 6,
+          "median": 127.6,
+          "max": 181.1
+        },
+        "icon": {
+          "n": 4,
+          "median": 121.8,
+          "max": 200
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            0.9,
+            0.1,
+            54.2
+          ],
+          "yCoef": [
+            0,
+            0.9,
+            3.8
+          ],
+          "r2": 1,
+          "rawRmsPx": 97.4,
+          "residualRmsPx": 77.4
+        },
+        "B": {
+          "xCoef": [
+            1,
+            0.1,
+            -28
+          ],
+          "yCoef": [
+            0,
+            1,
+            -18.1
+          ],
+          "r2": 1,
+          "rawRmsPx": 103,
+          "residualRmsPx": 82.9
+        }
+      }
+    },
+    {
+      "model": "gpt-realtime-2.1",
+      "condition": "ruler-edge",
+      "n": 12,
+      "valid": 9,
+      "refused": 0,
+      "apiFailed": 3,
+      "medianErr": 82.1,
+      "p90Err": 240.2,
+      "maxErr": 280.2,
+      "within40": 11.1,
+      "within100": 66.7,
+      "hitRate": 22.2,
+      "latencyP50": 1021,
+      "zones": {
+        "corner": {
+          "n": 4,
+          "median": 57.7,
+          "max": 100.2
+        },
+        "center": {
+          "n": 1,
+          "median": 94.9,
+          "max": 94.9
+        },
+        "edge": {
+          "n": 2,
+          "median": 80.3,
+          "max": 82.1
+        },
+        "cluster": {
+          "n": 2,
+          "median": 255.2,
+          "max": 280.2
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            0.9,
+            0,
+            175.5
+          ],
+          "yCoef": [
+            0,
+            1,
+            10.4
+          ],
+          "r2": 1,
+          "rawRmsPx": 137.7,
+          "residualRmsPx": 93.6
+        }
+      }
+    }
+  ],
+  "usage": {
+    "inputTok": 292120,
+    "cachedTok": 249664,
+    "outputTok": 5371
+  }
+}
