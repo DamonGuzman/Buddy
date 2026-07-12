@@ -1,0 +1,503 @@
+{
+  "model": "gpt-5.6-terra",
+  "condition": "sub-plain-low",
+  "layout": "A",
+  "imageDims": {
+    "W": 2048,
+    "H": 1152
+  },
+  "transport": "codex-subscription",
+  "endpoint": "https://chatgpt.com/backend-api/codex/responses",
+  "timestamp": "2026-07-12T22:57:07.722Z",
+  "records": [
+    {
+      "id": "save",
+      "ask": "the SAVE button",
+      "zone": "corner",
+      "kind": "button",
+      "gt": {
+        "x": 180,
+        "y": 96
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 181,
+        "y": 96
+      },
+      "rawArgs": {
+        "x": 181,
+        "y": 96,
+        "label": "SAVE"
+      },
+      "errX": 1,
+      "errY": 0,
+      "err": 1,
+      "hit": true,
+      "latencyMs": 3450,
+      "ttfbMs": 1487,
+      "status": "completed",
+      "usage": {
+        "in": 2863,
+        "out": 17,
+        "reasoning": 0,
+        "cached": 0
+      }
+    },
+    {
+      "id": "open",
+      "ask": "the OPEN button",
+      "zone": "corner",
+      "kind": "button",
+      "gt": {
+        "x": 1900,
+        "y": 110
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 1901,
+        "y": 110
+      },
+      "rawArgs": {
+        "x": 1901,
+        "y": 110,
+        "label": "OPEN"
+      },
+      "errX": 1,
+      "errY": 0,
+      "err": 1,
+      "hit": true,
+      "latencyMs": 2843,
+      "ttfbMs": 2431,
+      "status": "completed",
+      "usage": {
+        "in": 2863,
+        "out": 44,
+        "reasoning": 24,
+        "cached": 0
+      }
+    },
+    {
+      "id": "help",
+      "ask": "the HELP button",
+      "zone": "corner",
+      "kind": "button",
+      "gt": {
+        "x": 150,
+        "y": 1050
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 150,
+        "y": 1051
+      },
+      "rawArgs": {
+        "x": 150,
+        "y": 1051,
+        "label": "HELP"
+      },
+      "errX": 0,
+      "errY": 1,
+      "err": 1,
+      "hit": true,
+      "latencyMs": 1377,
+      "ttfbMs": 970,
+      "status": "completed",
+      "usage": {
+        "in": 2863,
+        "out": 18,
+        "reasoning": 0,
+        "cached": 0
+      }
+    },
+    {
+      "id": "exit",
+      "ask": "the EXIT button",
+      "zone": "corner",
+      "kind": "button",
+      "gt": {
+        "x": 1890,
+        "y": 1040
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 1890,
+        "y": 1041
+      },
+      "rawArgs": {
+        "x": 1890,
+        "y": 1041,
+        "label": "EXIT"
+      },
+      "errX": 0,
+      "errY": 1,
+      "err": 1,
+      "hit": true,
+      "latencyMs": 1433,
+      "ttfbMs": 978,
+      "status": "completed",
+      "usage": {
+        "in": 2863,
+        "out": 19,
+        "reasoning": 0,
+        "cached": 0
+      }
+    },
+    {
+      "id": "start",
+      "ask": "the START button",
+      "zone": "center",
+      "kind": "button",
+      "gt": {
+        "x": 1010,
+        "y": 590
+      },
+      "w": 150,
+      "h": 52,
+      "pred": {
+        "x": 1010,
+        "y": 591
+      },
+      "rawArgs": {
+        "x": 1010,
+        "y": 591,
+        "label": "START"
+      },
+      "errX": 0,
+      "errY": 1,
+      "err": 1,
+      "hit": true,
+      "latencyMs": 2255,
+      "ttfbMs": 1874,
+      "status": "completed",
+      "usage": {
+        "in": 2863,
+        "out": 18,
+        "reasoning": 0,
+        "cached": 0
+      }
+    },
+    {
+      "id": "cart",
+      "ask": "the CART button",
+      "zone": "edge",
+      "kind": "button",
+      "gt": {
+        "x": 1024,
+        "y": 70
+      },
+      "w": 130,
+      "h": 46,
+      "pred": {
+        "x": 1024,
+        "y": 70
+      },
+      "rawArgs": {
+        "x": 1024,
+        "y": 70,
+        "label": "CART"
+      },
+      "errX": 0,
+      "errY": 0,
+      "err": 0,
+      "hit": true,
+      "latencyMs": 1607,
+      "ttfbMs": 1217,
+      "status": "completed",
+      "usage": {
+        "in": 2863,
+        "out": 19,
+        "reasoning": 0,
+        "cached": 0
+      }
+    },
+    {
+      "id": "send",
+      "ask": "the SEND button",
+      "zone": "edge",
+      "kind": "button",
+      "gt": {
+        "x": 1966,
+        "y": 620
+      },
+      "w": 120,
+      "h": 46,
+      "pred": {
+        "x": 1966,
+        "y": 620
+      },
+      "rawArgs": {
+        "x": 1966,
+        "y": 620,
+        "label": "SEND"
+      },
+      "errX": 0,
+      "errY": 0,
+      "err": 0,
+      "hit": true,
+      "latencyMs": 1521,
+      "ttfbMs": 1116,
+      "status": "completed",
+      "usage": {
+        "in": 2863,
+        "out": 18,
+        "reasoning": 0,
+        "cached": 0
+      }
+    },
+    {
+      "id": "copy",
+      "ask": "the COPY button",
+      "zone": "cluster",
+      "kind": "button",
+      "gt": {
+        "x": 620,
+        "y": 820
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 620,
+        "y": 821
+      },
+      "rawArgs": {
+        "x": 620,
+        "y": 821,
+        "label": "COPY"
+      },
+      "errX": 0,
+      "errY": 1,
+      "err": 1,
+      "hit": true,
+      "latencyMs": 1690,
+      "ttfbMs": 1296,
+      "status": "completed",
+      "usage": {
+        "in": 2863,
+        "out": 43,
+        "reasoning": 24,
+        "cached": 0
+      }
+    },
+    {
+      "id": "paste",
+      "ask": "the PASTE button",
+      "zone": "cluster",
+      "kind": "button",
+      "gt": {
+        "x": 770,
+        "y": 820
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 771,
+        "y": 821
+      },
+      "rawArgs": {
+        "x": 771,
+        "y": 821,
+        "label": "PASTE"
+      },
+      "errX": 1,
+      "errY": 1,
+      "err": 1.4142135623730951,
+      "hit": true,
+      "latencyMs": 1663,
+      "ttfbMs": 1242,
+      "status": "completed",
+      "usage": {
+        "in": 2864,
+        "out": 38,
+        "reasoning": 18,
+        "cached": 0
+      }
+    },
+    {
+      "id": "cut",
+      "ask": "the CUT button",
+      "zone": "cluster",
+      "kind": "button",
+      "gt": {
+        "x": 920,
+        "y": 820
+      },
+      "w": 128,
+      "h": 46,
+      "pred": {
+        "x": 921,
+        "y": 821
+      },
+      "rawArgs": {
+        "x": 921,
+        "y": 821,
+        "label": "CUT"
+      },
+      "errX": 1,
+      "errY": 1,
+      "err": 1.4142135623730951,
+      "hit": true,
+      "latencyMs": 2012,
+      "ttfbMs": 1638,
+      "status": "completed",
+      "usage": {
+        "in": 2863,
+        "out": 36,
+        "reasoning": 17,
+        "cached": 0
+      }
+    },
+    {
+      "id": "dot",
+      "ask": "the small red dot",
+      "zone": "icon",
+      "kind": "dot",
+      "gt": {
+        "x": 1500,
+        "y": 350
+      },
+      "w": 24,
+      "h": 24,
+      "pred": {
+        "x": 1500,
+        "y": 351
+      },
+      "rawArgs": {
+        "x": 1500,
+        "y": 351,
+        "label": "red dot"
+      },
+      "errX": 0,
+      "errY": 1,
+      "err": 1,
+      "hit": true,
+      "latencyMs": 1834,
+      "ttfbMs": 1452,
+      "status": "completed",
+      "usage": {
+        "in": 2864,
+        "out": 51,
+        "reasoning": 30,
+        "cached": 0
+      }
+    },
+    {
+      "id": "square",
+      "ask": "the small blue square",
+      "zone": "icon",
+      "kind": "square",
+      "gt": {
+        "x": 420,
+        "y": 480
+      },
+      "w": 16,
+      "h": 16,
+      "pred": {
+        "x": 420,
+        "y": 480
+      },
+      "rawArgs": {
+        "x": 420,
+        "y": 480,
+        "label": "small blue square"
+      },
+      "errX": 0,
+      "errY": 0,
+      "err": 0,
+      "hit": true,
+      "latencyMs": 2120,
+      "ttfbMs": 1672,
+      "status": "completed",
+      "usage": {
+        "in": 2864,
+        "out": 55,
+        "reasoning": 34,
+        "cached": 0
+      }
+    }
+  ],
+  "usage": [
+    {
+      "in": 2863,
+      "out": 17,
+      "reasoning": 0,
+      "cached": 0
+    },
+    {
+      "in": 2863,
+      "out": 44,
+      "reasoning": 24,
+      "cached": 0
+    },
+    {
+      "in": 2863,
+      "out": 18,
+      "reasoning": 0,
+      "cached": 0
+    },
+    {
+      "in": 2863,
+      "out": 19,
+      "reasoning": 0,
+      "cached": 0
+    },
+    {
+      "in": 2863,
+      "out": 18,
+      "reasoning": 0,
+      "cached": 0
+    },
+    {
+      "in": 2863,
+      "out": 19,
+      "reasoning": 0,
+      "cached": 0
+    },
+    {
+      "in": 2863,
+      "out": 18,
+      "reasoning": 0,
+      "cached": 0
+    },
+    {
+      "in": 2863,
+      "out": 43,
+      "reasoning": 24,
+      "cached": 0
+    },
+    {
+      "in": 2864,
+      "out": 38,
+      "reasoning": 18,
+      "cached": 0
+    },
+    {
+      "in": 2863,
+      "out": 36,
+      "reasoning": 17,
+      "cached": 0
+    },
+    {
+      "in": 2864,
+      "out": 51,
+      "reasoning": 30,
+      "cached": 0
+    },
+    {
+      "in": 2864,
+      "out": 55,
+      "reasoning": 34,
+      "cached": 0
+    }
+  ],
+  "quota": {
+    "x-codex-primary-used-percent": "7",
+    "x-codex-secondary-used-percent": "0",
+    "x-codex-primary-over-secondary-limit-percent": "0",
+    "x-codex-primary-window-minutes": "10080",
+    "x-codex-secondary-window-minutes": "0"
+  }
+}

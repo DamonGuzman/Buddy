@@ -1,0 +1,114 @@
+{
+  "generatedAt": "2026-07-12T23:01:32.856Z",
+  "transport": "codex-subscription",
+  "rows": [
+    {
+      "model": "gpt-5.6-luna",
+      "condition": "sub-plain-low",
+      "n": 29,
+      "valid": 29,
+      "invalid": 0,
+      "failed": 0,
+      "inElementPct": 100,
+      "inElementSmallPct": 100,
+      "smallN": 9,
+      "medianErr": 1,
+      "p90Err": 4.1,
+      "maxErr": 30,
+      "within40": 100,
+      "within100": 100,
+      "latencyP50": 1603,
+      "latencyP90": 3524,
+      "ttfbP50": 1202,
+      "tokens": {
+        "inMedian": 2863,
+        "outMedian": 18,
+        "reasoningMedian": 0,
+        "costMedian": 18,
+        "costTotal": 1438,
+        "reasoningTotal": 446,
+        "reasoningSmallTotal": 416
+      },
+      "misses": [],
+      "quota": {
+        "x-codex-primary-used-percent": "7",
+        "x-codex-secondary-used-percent": "0",
+        "x-codex-primary-over-secondary-limit-percent": "0",
+        "x-codex-primary-window-minutes": "10080",
+        "x-codex-secondary-window-minutes": "0"
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "condition": "sub-plain-low",
+      "n": 29,
+      "valid": 29,
+      "invalid": 0,
+      "failed": 0,
+      "inElementPct": 100,
+      "inElementSmallPct": 100,
+      "smallN": 9,
+      "medianErr": 1,
+      "p90Err": 3.2,
+      "maxErr": 6.4,
+      "within40": 100,
+      "within100": 100,
+      "latencyP50": 1698,
+      "latencyP90": 3702,
+      "ttfbP50": 1322,
+      "tokens": {
+        "inMedian": 2863,
+        "outMedian": 18,
+        "reasoningMedian": 0,
+        "costMedian": 18,
+        "costTotal": 575,
+        "reasoningTotal": 18,
+        "reasoningSmallTotal": 18
+      },
+      "misses": [],
+      "quota": {
+        "x-codex-primary-used-percent": "6",
+        "x-codex-secondary-used-percent": "0",
+        "x-codex-primary-over-secondary-limit-percent": "0",
+        "x-codex-primary-window-minutes": "10080",
+        "x-codex-secondary-window-minutes": "0"
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "condition": "sub-plain-low",
+      "n": 29,
+      "valid": 29,
+      "invalid": 0,
+      "failed": 0,
+      "inElementPct": 100,
+      "inElementSmallPct": 100,
+      "smallN": 9,
+      "medianErr": 1,
+      "p90Err": 2,
+      "maxErr": 6.4,
+      "within40": 100,
+      "within100": 100,
+      "latencyP50": 2012,
+      "latencyP90": 3450,
+      "ttfbP50": 1452,
+      "tokens": {
+        "inMedian": 2863,
+        "outMedian": 19,
+        "reasoningMedian": 0,
+        "costMedian": 19,
+        "costTotal": 1313,
+        "reasoningTotal": 377,
+        "reasoningSmallTotal": 294
+      },
+      "misses": [],
+      "quota": {
+        "x-codex-primary-used-percent": "7",
+        "x-codex-secondary-used-percent": "0",
+        "x-codex-primary-over-secondary-limit-percent": "0",
+        "x-codex-primary-window-minutes": "10080",
+        "x-codex-secondary-window-minutes": "0"
+      }
+    }
+  ]
+}

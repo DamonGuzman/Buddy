@@ -1,0 +1,223 @@
+{
+  "model": "gpt-5.6-sol",
+  "condition": "sub-plain-low",
+  "layout": "real",
+  "imageDims": {
+    "W": 2048,
+    "H": 1152
+  },
+  "transport": "codex-subscription",
+  "endpoint": "https://chatgpt.com/backend-api/codex/responses",
+  "timestamp": "2026-07-12T22:59:05.584Z",
+  "records": [
+    {
+      "id": "startbtn",
+      "ask": "the Windows Start button in the taskbar",
+      "zone": "edge",
+      "kind": "icon",
+      "gt": {
+        "x": 706,
+        "y": 1130
+      },
+      "w": 44,
+      "h": 44,
+      "pred": {
+        "x": 705,
+        "y": 1133
+      },
+      "rawArgs": {
+        "x": 705,
+        "y": 1133,
+        "label": "Windows Start button"
+      },
+      "errX": -1,
+      "errY": 3,
+      "err": 3.1622776601683795,
+      "hit": true,
+      "latencyMs": 2189,
+      "ttfbMs": 1757,
+      "status": "completed",
+      "usage": {
+        "in": 2868,
+        "out": 20,
+        "reasoning": 0,
+        "cached": 0
+      }
+    },
+    {
+      "id": "clock",
+      "ask": "the clock in the system tray (bottom-right corner)",
+      "zone": "corner",
+      "kind": "text",
+      "gt": {
+        "x": 2011,
+        "y": 1130
+      },
+      "w": 90,
+      "h": 44,
+      "pred": {
+        "x": 2010,
+        "y": 1131
+      },
+      "rawArgs": {
+        "x": 2010,
+        "y": 1131,
+        "label": "system tray clock"
+      },
+      "errX": -1,
+      "errY": 1,
+      "err": 1.4142135623730951,
+      "hit": true,
+      "latencyMs": 2065,
+      "ttfbMs": 1790,
+      "status": "completed",
+      "usage": {
+        "in": 2870,
+        "out": 41,
+        "reasoning": 18,
+        "cached": 0
+      }
+    },
+    {
+      "id": "review",
+      "ask": "the Review button in the 'Edited 5 files' card",
+      "zone": "center",
+      "kind": "button",
+      "gt": {
+        "x": 1466,
+        "y": 640
+      },
+      "w": 58,
+      "h": 26,
+      "pred": {
+        "x": 1466,
+        "y": 639
+      },
+      "rawArgs": {
+        "x": 1466,
+        "y": 639,
+        "label": "Review button"
+      },
+      "errX": 0,
+      "errY": -1,
+      "err": 1,
+      "hit": true,
+      "latencyMs": 1834,
+      "ttfbMs": 1596,
+      "status": "completed",
+      "usage": {
+        "in": 2872,
+        "out": 19,
+        "reasoning": 0,
+        "cached": 0
+      }
+    },
+    {
+      "id": "newtask",
+      "ask": "the 'New task' item at the top of the left sidebar",
+      "zone": "corner",
+      "kind": "menu",
+      "gt": {
+        "x": 46,
+        "y": 82
+      },
+      "w": 120,
+      "h": 24,
+      "pred": {
+        "x": 51,
+        "y": 78
+      },
+      "rawArgs": {
+        "x": 51,
+        "y": 78,
+        "label": "New task"
+      },
+      "errX": 5,
+      "errY": -4,
+      "err": 6.4031242374328485,
+      "hit": true,
+      "latencyMs": 3191,
+      "ttfbMs": 1391,
+      "status": "completed",
+      "usage": {
+        "in": 2873,
+        "out": 18,
+        "reasoning": 0,
+        "cached": 0
+      }
+    },
+    {
+      "id": "openin",
+      "ask": "the 'Open in' button in the top-right toolbar",
+      "zone": "corner",
+      "kind": "button",
+      "gt": {
+        "x": 1920,
+        "y": 50
+      },
+      "w": 80,
+      "h": 26,
+      "pred": {
+        "x": 1919,
+        "y": 46
+      },
+      "rawArgs": {
+        "x": 1919,
+        "y": 46,
+        "label": "Open in button"
+      },
+      "errX": -1,
+      "errY": -4,
+      "err": 4.123105625617661,
+      "hit": true,
+      "latencyMs": 3171,
+      "ttfbMs": 1775,
+      "status": "completed",
+      "usage": {
+        "in": 2871,
+        "out": 20,
+        "reasoning": 0,
+        "cached": 0
+      }
+    }
+  ],
+  "usage": [
+    {
+      "in": 2868,
+      "out": 20,
+      "reasoning": 0,
+      "cached": 0
+    },
+    {
+      "in": 2870,
+      "out": 41,
+      "reasoning": 18,
+      "cached": 0
+    },
+    {
+      "in": 2872,
+      "out": 19,
+      "reasoning": 0,
+      "cached": 0
+    },
+    {
+      "in": 2873,
+      "out": 18,
+      "reasoning": 0,
+      "cached": 0
+    },
+    {
+      "in": 2871,
+      "out": 20,
+      "reasoning": 0,
+      "cached": 0
+    }
+  ],
+  "quota": {
+    "x-codex-primary-used-percent": "7",
+    "x-codex-secondary-used-percent": "0",
+    "x-codex-primary-over-secondary-limit-percent": "0",
+    "x-codex-primary-window-minutes": "10080",
+    "x-codex-secondary-window-minutes": "0"
+  }
+}
