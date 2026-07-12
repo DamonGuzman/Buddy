@@ -1,0 +1,87 @@
+<!doctype html>
+<!-- M8.5 pointing-eval scene: realistic product page (search box, add-to-cart,
+     cart icon, price, reviews link). See app-toolbar.html for the
+     ground-truth reporting contract. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Soundly — Nimbus ANC Headphones</title>
+<style>
+  * { margin: 0; box-sizing: border-box; font-family: "Segoe UI", sans-serif; }
+  body { background: #fafafa; height: 100vh; display: flex; flex-direction: column; }
+  header { background: #111827; color: #fff; display: flex; align-items: center; gap: 40px; padding: 20px 48px; }
+  .logo { font-size: 26px; font-weight: 700; letter-spacing: 0.5px; }
+  #search { flex: 1; max-width: 760px; font-size: 20px; padding: 14px 20px; border-radius: 999px; border: none; background: #ffffff; }
+  #cart { margin-left: auto; font-size: 30px; background: #f59e0b; color: #111; border: none; border-radius: 12px; padding: 12px 22px; cursor: pointer; }
+  .page { display: flex; gap: 64px; padding: 64px 96px; align-items: flex-start; }
+  .photo { width: 560px; height: 560px; border-radius: 18px; background: linear-gradient(135deg, #e0e7ff, #c7d2fe); display: grid; place-items: center; font-size: 160px; }
+  .info { flex: 1; max-width: 720px; }
+  .info h1 { font-size: 40px; color: #111827; }
+  .rating { margin: 14px 0 26px; font-size: 21px; color: #b45309; }
+  .rating a { color: #2563eb; }
+  #price { font-size: 44px; font-weight: 700; color: #065f46; display: inline-block; margin-bottom: 10px; }
+  .was { color: #9ca3af; text-decoration: line-through; font-size: 22px; margin-left: 14px; }
+  .bullets { margin: 24px 0 36px; padding-left: 22px; color: #374151; font-size: 20px; line-height: 1.9; }
+  #add-to-cart { font-size: 25px; font-weight: 600; background: #dc2626; color: #fff; border: none; border-radius: 12px; padding: 20px 46px; cursor: pointer; }
+  .ship { margin-top: 22px; color: #6b7280; font-size: 18px; }
+</style>
+</head>
+<body>
+  <header>
+    <span class="logo">soundly</span>
+    <input id="search" data-target="search" data-desc="the search box" placeholder="Search headphones, speakers, accessories…" />
+    <button id="cart" data-target="cart" data-desc="the shopping cart icon">&#128722;</button>
+  </header>
+  <main class="page">
+    <div class="photo">&#127911;</div>
+    <section class="info">
+      <h1>Nimbus ANC Wireless Headphones</h1>
+      <div class="rating">&#9733;&#9733;&#9733;&#9733;&#9734; 4.3 &middot;
+        <a href="#reviews" id="reviews-link" data-target="reviews" data-desc="the customer reviews link">2,418 customer reviews</a>
+      </div>
+      <span id="price" data-target="price" data-desc="the price of the headphones">$249.00</span><span class="was">$329.00</span>
+      <ul class="bullets">
+        <li>42-hour battery with adaptive noise cancelling</li>
+        <li>Multipoint Bluetooth 5.4, USB-C fast charge</li>
+        <li>Memory-foam earcups, folds flat for travel</li>
+      </ul>
+      <button id="add-to-cart" data-target="add-to-cart" data-desc="the add to cart button">Add to cart</button>
+      <p class="ship">Free 2-day shipping &middot; 30-day returns</p>
+    </section>
+  </main>
+<script>
+  const SCENE = 'shop';
+  const q = new URLSearchParams(location.search);
+  const token = q.get('token') || '';
+  const port = q.get('port') || '8199';
+  function report() {
+    const chromeY = window.outerHeight - window.innerHeight;
+    const chromeX = Math.round((window.outerWidth - window.innerWidth) / 2);
+    const targets = [...document.querySelectorAll('[data-target]')].map((el) => {
+      const r = el.getBoundingClientRect();
+      return {
+        name: el.dataset.target,
+        desc: el.dataset.desc || el.dataset.target,
+        rect: {
+          x: Math.round(window.screenX + chromeX + r.left),
+          y: Math.round(window.screenY + chromeY + r.top),
+          width: Math.round(r.width),
+          height: Math.round(r.height),
+        },
+      };
+    });
+    fetch('http://127.0.0.1:' + port + '/eval/ground-truth?token=' + encodeURIComponent(token), {
+      method: 'POST',
+      mode: 'no-cors',
+      body: JSON.stringify({
+        scene: SCENE,
+        dpr: window.devicePixelRatio,
+        window: { screenX, screenY, innerWidth, innerHeight, outerWidth, outerHeight },
+        targets,
+      }),
+    }).catch(() => {});
+  }
+  window.addEventListener('load', () => { setTimeout(report, 400); setTimeout(report, 1500); });
+</script>
+</body>
+</html>

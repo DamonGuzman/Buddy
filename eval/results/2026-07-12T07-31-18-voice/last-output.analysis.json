@@ -1,0 +1,25 @@
+{
+  "sampleRate": 24000,
+  "totalSeconds": 7.45,
+  "playedSeconds": 7.14,
+  "expectedMelodySeconds": 1.4,
+  "melodiesHeard": 5.1,
+  "notes": [
+    {
+      "freq": 523.25,
+      "marginDb": 26.9,
+      "pass": true
+    },
+    {
+      "freq": 659.25,
+      "marginDb": 24.5,
+      "pass": true
+    },
+    {
+      "freq": 783.99,
+      "marginDb": 27.7,
+      "pass": true
+    }
+  ],
+  "spectralPass": true
+}

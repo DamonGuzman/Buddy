@@ -2,6 +2,16 @@
  * App bootstrap — WIRING ONLY. All behavior lives in the owned modules
  * (docs/ARCHITECTURE.md §5); this file just constructs them and connects
  * events to actions.
+ *
+ * Env flags handled here (must run before app ready):
+ * - CLICKY_USER_DATA=<dir>   separate userData dir (parallel dev/QA instances).
+ * - CLICKY_FAKE_MIC=<path.wav>  (M8.5 eval harness) route getUserMedia to
+ *   Chromium's fake capture device playing this file instead of a real mic.
+ *   The file MUST be a 16-bit PCM WAV (mono 24kHz preferred — matches the
+ *   session's audio format so no resampling artifacts). Chromium LOOPS the
+ *   file continuously; the push-to-talk hold window defines what is actually
+ *   sent, so keep utterances ~2-3s and holds ~3.5s. Also auto-grants the mic
+ *   permission prompt (use-fake-ui-for-media-stream).
  */
 
 import { app, ipcMain } from 'electron';
@@ -14,13 +24,22 @@ import { createTray } from './tray';
 import { OverlayManager } from './windows/overlay';
 import { PanelManager } from './windows/panel';
 import type { InvokeArgs, InvokeChannel, InvokeResult } from '../shared/ipc';
-import type { DebugState, MicDevice } from '../shared/types';
+import type { DebugState, MicDevice, PlaybackStatsUpdate } from '../shared/types';
 
 // CLICKY_USER_DATA=<dir>: separate userData dir (settings + the
 // single-instance lock) so parallel dev/QA instances don't fight over the
 // lock. MUST run before requestSingleInstanceLock below.
 if (process.env['CLICKY_USER_DATA']) {
   app.setPath('userData', process.env['CLICKY_USER_DATA']);
+}
+
+// M8.5 (orchestrator-approved): fake-mic audio injection for the audio eval
+// harness — real getUserMedia path, fake device fed from a WAV file. See the
+// file header for the contract. MUST run before app ready.
+if (process.env['CLICKY_FAKE_MIC']) {
+  app.commandLine.appendSwitch('use-fake-device-for-media-stream');
+  app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
+  app.commandLine.appendSwitch('use-file-for-fake-audio-capture', process.env['CLICKY_FAKE_MIC']);
 }
 
 // Single instance: a second launch just pops the panel of the first.
@@ -63,6 +82,13 @@ async function main(): Promise<void> {
   ipcMain.on('audio:chunk', (_event, chunk: ArrayBuffer) => {
     conversation.handleAudioChunk(chunk);
   });
+  // M8.5 (orchestrator-approved): playback tap reporting from the panel.
+  ipcMain.on('audio:playback-stats', (_event, stats: PlaybackStatsUpdate) => {
+    conversation.handlePlaybackStats(stats);
+  });
+  ipcMain.on('audio:playback-ring', (_event, ring: ArrayBuffer) => {
+    conversation.handlePlaybackRing(ring);
+  });
 
   // ---------------------------------------------------------------------
   // Module event wiring
@@ -102,6 +128,9 @@ async function main(): Promise<void> {
     hotkey: hotkey.status(),
     session: conversation.sessionStatus(),
     ...conversation.debugInfo(),
+    // M8.5 additions (orchestrator-approved): audio-experience eval.
+    lastTurnTimings: conversation.lastTurnTimings(),
+    turnTimingsHistory: conversation.turnTimingsHistory(),
   });
   startDebugServer({
     getState: getDebugState,
@@ -113,6 +142,15 @@ async function main(): Promise<void> {
       askText: (text) => conversation.askText(text),
       getTranscript: () => conversation.transcript(),
       playback: (command) => conversation.playback(command),
+    },
+    // M8.5 (orchestrator-approved): audio eval surface.
+    audioEval: {
+      getOutputStats: () => conversation.outputStats(),
+      getLastOutputRing: () => conversation.lastOutputRing(),
+      getTimings: () => ({
+        last: conversation.lastTurnTimings(),
+        history: conversation.turnTimingsHistory(),
+      }),
     },
   });
 

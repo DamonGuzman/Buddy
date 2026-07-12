@@ -1,0 +1,458 @@
+{
+  "backend": "MOCK (tools/mock-realtime)",
+  "mode": "text",
+  "startedAt": "2026-07-12T07:38:14.158Z",
+  "scenes": [
+    {
+      "scene": "calibration",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "calibration-center",
+          "desc": "the big green square in the center of the screen",
+          "rect": {
+            "x": 768,
+            "y": 475,
+            "width": 1024,
+            "height": 490
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "hit",
+          "errorPx": 0
+        }
+      ]
+    },
+    {
+      "scene": "app-toolbar",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "menu-file",
+          "desc": "the File menu",
+          "rect": {
+            "x": 24,
+            "y": 10,
+            "width": 30,
+            "height": 27
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 1423,
+          "rectDistPx": 1403
+        },
+        {
+          "name": "save",
+          "desc": "the save button in the toolbar",
+          "rect": {
+            "x": 24,
+            "y": 66,
+            "width": 163,
+            "height": 73
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 1327,
+          "rectDistPx": 1238
+        },
+        {
+          "name": "open",
+          "desc": "the open button in the toolbar",
+          "rect": {
+            "x": 211,
+            "y": 66,
+            "width": 173,
+            "height": 73
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 1160,
+          "rectDistPx": 1068
+        },
+        {
+          "name": "export",
+          "desc": "the export button in the toolbar",
+          "rect": {
+            "x": 408,
+            "y": 65,
+            "width": 161,
+            "height": 75
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 1004,
+          "rectDistPx": 918
+        },
+        {
+          "name": "settings",
+          "desc": "the settings button in the toolbar",
+          "rect": {
+            "x": 593,
+            "y": 66,
+            "width": 185,
+            "height": 73
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 857,
+          "rectDistPx": 768
+        },
+        {
+          "name": "share",
+          "desc": "the share button in the toolbar",
+          "rect": {
+            "x": 802,
+            "y": 66,
+            "width": 174,
+            "height": 73
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 731,
+          "rectDistPx": 656
+        }
+      ]
+    },
+    {
+      "scene": "form",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "email",
+          "desc": "the email address field",
+          "rect": {
+            "x": 1025,
+            "y": 622,
+            "width": 511,
+            "height": 64
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "near",
+          "errorPx": 66,
+          "rectDistPx": 34
+        },
+        {
+          "name": "password",
+          "desc": "the password field",
+          "rect": {
+            "x": 1025,
+            "y": 741,
+            "width": 511,
+            "height": 64
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "near",
+          "errorPx": 53,
+          "rectDistPx": 21
+        },
+        {
+          "name": "subscribe",
+          "desc": "the subscribe to newsletter checkbox",
+          "rect": {
+            "x": 1025,
+            "y": 835,
+            "width": 26,
+            "height": 26
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 274,
+          "rectDistPx": 256
+        },
+        {
+          "name": "submit",
+          "desc": "the create account button",
+          "rect": {
+            "x": 1025,
+            "y": 899,
+            "width": 511,
+            "height": 67
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 213,
+          "rectDistPx": 179
+        }
+      ]
+    },
+    {
+      "scene": "shop",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "search",
+          "desc": "the search box",
+          "rect": {
+            "x": 188,
+            "y": 25,
+            "width": 760,
+            "height": 55
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 976,
+          "rectDistPx": 721
+        },
+        {
+          "name": "cart",
+          "desc": "the shopping cart icon",
+          "rect": {
+            "x": 2427,
+            "y": 20,
+            "width": 85,
+            "height": 64
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 1364,
+          "rectDistPx": 1312
+        },
+        {
+          "name": "reviews",
+          "desc": "the customer reviews link",
+          "rect": {
+            "x": 856,
+            "y": 235,
+            "width": 216,
+            "height": 28
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 567,
+          "rectDistPx": 502
+        },
+        {
+          "name": "price",
+          "desc": "the price of the headphones",
+          "rect": {
+            "x": 720,
+            "y": 289,
+            "width": 164,
+            "height": 59
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 624,
+          "rectDistPx": 543
+        },
+        {
+          "name": "add-to-cart",
+          "desc": "the add to cart button",
+          "rect": {
+            "x": 720,
+            "y": 532,
+            "width": 220,
+            "height": 73
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 475,
+          "rectDistPx": 359
+        }
+      ]
+    },
+    {
+      "scene": "tricky",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "small-icon",
+          "desc": "the small bell notification icon",
+          "rect": {
+            "x": 2504,
+            "y": 22,
+            "width": 24,
+            "height": 24
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 1414,
+          "rectDistPx": 1397
+        },
+        {
+          "name": "save",
+          "desc": "the save button (not save as)",
+          "rect": {
+            "x": 973,
+            "y": 291,
+            "width": 112,
+            "height": 59
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 472,
+          "rectDistPx": 418
+        },
+        {
+          "name": "save-as",
+          "desc": "the save as button",
+          "rect": {
+            "x": 1105,
+            "y": 291,
+            "width": 140,
+            "height": 59
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 413,
+          "rectDistPx": 372
+        },
+        {
+          "name": "edge-button",
+          "desc": "the help button in the bottom right corner of the screen",
+          "rect": {
+            "x": 2466,
+            "y": 1388,
+            "width": 86,
+            "height": 44
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "miss",
+          "errorPx": 1409,
+          "rectDistPx": 1361
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "hit": 1,
+    "near": 2,
+    "miss": 17,
+    "error": 0
+  },
+  "finishedAt": "2026-07-12T07:39:14.208Z"
+}

@@ -38,6 +38,10 @@ const api: PanelApi = {
   selectMic: (deviceId) => ipcRenderer.invoke('mic:select', deviceId),
 
   sendAudioChunk: (chunk) => ipcRenderer.send('audio:chunk', chunk),
+
+  // M8.5 addition (orchestrator-approved): playback tap reporting.
+  sendPlaybackStats: (stats) => ipcRenderer.send('audio:playback-stats', stats),
+  sendPlaybackRing: (ring) => ipcRenderer.send('audio:playback-ring', ring),
 };
 
 contextBridge.exposeInMainWorld('clicky', api);

@@ -16,6 +16,7 @@ import type {
   CaptureCommand,
   MicDevice,
   PlaybackCommand,
+  PlaybackStatsUpdate,
   PointerCommand,
   SessionStatus,
   Settings,
@@ -70,6 +71,12 @@ export interface MainToPanelEvents {
 export interface RendererSendEvents {
   /** Mic PCM16 (24kHz mono) chunk captured while the hotkey is held. */
   'audio:chunk': ArrayBuffer;
+  // M8.5 addition (orchestrator-approved): playback tap — the panel reports
+  // per-item played-audio stats (on first play, ~1s cadence, and on done).
+  'audio:playback-stats': PlaybackStatsUpdate;
+  // M8.5 addition (orchestrator-approved): ring buffer of the last ~15s of
+  // PLAYED audio as Int16 PCM (24kHz mono), sent when an item finishes.
+  'audio:playback-ring': ArrayBuffer;
 }
 
 // ===========================================================================
@@ -140,4 +147,10 @@ export interface PanelApi {
 
   /** Stream a mic PCM16 chunk to main (fire-and-forget). */
   sendAudioChunk(chunk: ArrayBuffer): void;
+
+  // M8.5 additions (orchestrator-approved): playback tap reporting.
+  /** Report played-audio stats for a response item (fire-and-forget). */
+  sendPlaybackStats(stats: PlaybackStatsUpdate): void;
+  /** Ship the last ~15s of played audio (Int16 PCM 24kHz mono). */
+  sendPlaybackRing(ring: ArrayBuffer): void;
 }

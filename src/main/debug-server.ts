@@ -14,6 +14,18 @@
  *
  * Later milestones extend ROUTES with: simulate hotkey press/release, inject
  * text turn, dump last capture metadata.
+ *
+ * M8.5 routes (audio-experience eval — see the marked section at the bottom):
+ *   GET  /timings                 last + recent TurnTimings
+ *   GET  /audio/output-stats      per-item played-audio stats (playback tap)
+ *   GET  /audio/last-output.wav   last ~15s of PLAYED audio (24k mono s16 WAV)
+ *   POST /eval/ground-truth       eval scene pages report [data-target] rects
+ *   GET  /eval/ground-truth       latest report per scene
+ *
+ * Light auth (M8.5, forward-compatible with later hardening): when the env
+ * CLICKY_DEBUG_TOKEN is set, EVERY route requires the token via the
+ * `X-Debug-Token` header or a `?token=` query param. No behavior change when
+ * the env is unset.
  */
 
 import { createServer } from 'node:http';
@@ -23,9 +35,11 @@ import type {
   AssistantState,
   DebugState,
   PlaybackCommand,
+  PlaybackStatsUpdate,
   PointerCommand,
   PointerPoint,
   TranscriptEntry,
+  TurnTimings,
 } from '../shared/types';
 import { getOverlayManager } from './windows/overlay';
 import type { OverlayManager } from './windows/overlay';
@@ -39,9 +53,20 @@ export interface PipelineDebugDeps {
   playback: (command: PlaybackCommand) => void;
 }
 
+/** M8.5 (orchestrator-approved): audio-experience eval hooks. */
+export interface AudioEvalDebugDeps {
+  /** Latest per-item playback stats from the panel's playback tap. */
+  getOutputStats: () => PlaybackStatsUpdate[];
+  /** Last ~15s of PLAYED audio as Int16 PCM 24kHz mono (null until reported). */
+  getLastOutputRing: () => ArrayBuffer | null;
+  /** Turn latency instrumentation. */
+  getTimings: () => { last: TurnTimings | null; history: TurnTimings[] };
+}
+
 export interface DebugServerDeps {
   getState: () => DebugState;
   pipeline?: PipelineDebugDeps;
+  audioEval?: AudioEvalDebugDeps;
 }
 
 type RouteHandler = (
@@ -61,11 +86,35 @@ export function isDebugEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env[ENV_DEBUG] === '1';
 }
 
+/**
+ * M8.5: constant-shape token check. When CLICKY_DEBUG_TOKEN is unset this is
+ * always true (no behavior change); when set, the request must carry the
+ * token in the X-Debug-Token header or a ?token= query param (the latter for
+ * eval scene pages, which POST from a file:// origin with a simple request).
+ */
+function checkDebugToken(req: IncomingMessage): boolean {
+  const expected = process.env['CLICKY_DEBUG_TOKEN'];
+  if (expected === undefined || expected.length === 0) return true;
+  const header = req.headers['x-debug-token'];
+  if (typeof header === 'string' && header === expected) return true;
+  try {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    return url.searchParams.get('token') === expected;
+  } catch {
+    return false;
+  }
+}
+
 /** Start the debug server. Returns null when CLICKY_DEBUG !== '1'. */
 export function startDebugServer(deps: DebugServerDeps): Server | null {
   if (!isDebugEnabled()) return null;
 
   const server = createServer((req, res) => {
+    // M8.5: light token auth — active only when CLICKY_DEBUG_TOKEN is set.
+    if (!checkDebugToken(req)) {
+      sendJson(res, 401, { error: 'X-Debug-Token header (or ?token=) required' });
+      return;
+    }
     const path = (req.url ?? '/').split('?')[0];
     const handler = ROUTES[`${req.method ?? 'GET'} ${path}`];
     if (!handler) {
@@ -77,8 +126,12 @@ export function startDebugServer(deps: DebugServerDeps): Server | null {
     });
   });
 
-  server.listen(DEBUG_PORT, DEBUG_HOST, () => {
-    console.log(`[debug] listening on http://${DEBUG_HOST}:${DEBUG_PORT}`);
+  // M8.5: CLICKY_DEBUG_PORT overrides the default port so parallel QA
+  // instances (other agents' dev apps hold 8199) can coexist.
+  const portEnv = Number(process.env['CLICKY_DEBUG_PORT']);
+  const port = Number.isInteger(portEnv) && portEnv > 0 ? portEnv : DEBUG_PORT;
+  server.listen(port, DEBUG_HOST, () => {
+    console.log(`[debug] listening on http://${DEBUG_HOST}:${port}`);
   });
   server.on('error', (err) => {
     console.error('[debug] server error:', err);
@@ -330,3 +383,141 @@ const PIPELINE_ROUTES: Record<string, RouteHandler> = {
 
 Object.assign(ROUTES, PIPELINE_ROUTES);
 // --- end M6 pipeline debug routes ---
+
+// ===========================================================================
+// --- M8.5 audio-experience eval routes (orchestrator-approved) ---
+//
+//   GET  /timings                {last: TurnTimings|null, history: TurnTimings[]}
+//   GET  /audio/output-stats     {items: PlaybackStatsUpdate[]} (newest last)
+//   GET  /audio/last-output.wav  last ~15s of PLAYED audio, 24kHz mono s16 WAV
+//   POST /eval/ground-truth      {scene, targets:[{name, rect:{x,y,width,height}}]}
+//                                (global DIP; posted by eval/scenes/*.html)
+//   GET  /eval/ground-truth      {scenes: {<scene>: {receivedAt, targets}}}
+// ===========================================================================
+
+/** Latest ground-truth report per scene (posted by the eval scene pages). */
+interface GroundTruthReport {
+  receivedAt: number;
+  scene: string;
+  dpr?: number;
+  window?: unknown;
+  targets: {
+    name: string;
+    /** Human phrasing for the ask ("the save button in the toolbar"). */
+    desc?: string;
+    rect: { x: number; y: number; width: number; height: number };
+  }[];
+}
+const groundTruthByScene = new Map<string, GroundTruthReport>();
+
+/** 503s when the audio-eval hooks aren't wired; otherwise hands them over. */
+function withAudioEval(
+  deps: DebugServerDeps,
+  res: ServerResponse,
+  use: (audioEval: AudioEvalDebugDeps) => void,
+): void {
+  if (!deps.audioEval) {
+    sendJson(res, 503, { error: 'audio eval hooks not wired' });
+    return;
+  }
+  use(deps.audioEval);
+}
+
+/** Wrap Int16 PCM (24kHz mono) bytes in a minimal RIFF/WAVE header. */
+function pcm16ToWav(pcm: ArrayBuffer, sampleRate = 24_000): Buffer {
+  const dataLen = pcm.byteLength;
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0, 'ascii');
+  header.writeUInt32LE(36 + dataLen, 4);
+  header.write('WAVE', 8, 'ascii');
+  header.write('fmt ', 12, 'ascii');
+  header.writeUInt32LE(16, 16); // fmt chunk size
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(1, 22); // mono
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28); // byte rate
+  header.writeUInt16LE(2, 32); // block align
+  header.writeUInt16LE(16, 34); // bits per sample
+  header.write('data', 36, 'ascii');
+  header.writeUInt32LE(dataLen, 40);
+  return Buffer.concat([header, Buffer.from(pcm)]);
+}
+
+function parseGroundTruthBody(body: unknown): GroundTruthReport | null {
+  const rec = asRecord(body);
+  if (!rec || typeof rec['scene'] !== 'string' || !Array.isArray(rec['targets'])) return null;
+  const targets: GroundTruthReport['targets'] = [];
+  for (const t of rec['targets']) {
+    const tr = asRecord(t);
+    const rect = asRecord(tr?.['rect']);
+    if (!tr || !rect || typeof tr['name'] !== 'string') return null;
+    const { x, y, width, height } = rect as Record<string, unknown>;
+    if (
+      typeof x !== 'number' ||
+      typeof y !== 'number' ||
+      typeof width !== 'number' ||
+      typeof height !== 'number'
+    ) {
+      return null;
+    }
+    targets.push({
+      name: tr['name'],
+      ...(typeof tr['desc'] === 'string' ? { desc: tr['desc'] } : {}),
+      rect: { x, y, width, height },
+    });
+  }
+  return {
+    receivedAt: Date.now(),
+    scene: rec['scene'],
+    ...(typeof rec['dpr'] === 'number' ? { dpr: rec['dpr'] } : {}),
+    ...(rec['window'] !== undefined ? { window: rec['window'] } : {}),
+    targets,
+  };
+}
+
+const AUDIO_EVAL_ROUTES: Record<string, RouteHandler> = {
+  'GET /timings': (deps, _req, res) =>
+    withAudioEval(deps, res, (audioEval) => {
+      sendJson(res, 200, audioEval.getTimings());
+    }),
+
+  'GET /audio/output-stats': (deps, _req, res) =>
+    withAudioEval(deps, res, (audioEval) => {
+      sendJson(res, 200, { items: audioEval.getOutputStats() });
+    }),
+
+  'GET /audio/last-output.wav': (deps, _req, res) =>
+    withAudioEval(deps, res, (audioEval) => {
+      const ring = audioEval.getLastOutputRing();
+      if (ring === null) {
+        sendJson(res, 404, { error: 'no played audio reported yet' });
+        return;
+      }
+      const wav = pcm16ToWav(ring);
+      res.writeHead(200, {
+        'content-type': 'audio/wav',
+        'content-length': wav.length,
+        'content-disposition': 'attachment; filename="last-output.wav"',
+      });
+      res.end(wav);
+    }),
+
+  'POST /eval/ground-truth': async (_deps, req, res) => {
+    const report = parseGroundTruthBody(await readJsonBody(req));
+    if (!report) {
+      sendJson(res, 400, {
+        error: 'expected {scene: string, targets: [{name, rect:{x,y,width,height}}, ...]}',
+      });
+      return;
+    }
+    groundTruthByScene.set(report.scene, report);
+    sendJson(res, 200, { ok: true, scene: report.scene, targets: report.targets.length });
+  },
+
+  'GET /eval/ground-truth': (_deps, _req, res) => {
+    sendJson(res, 200, { scenes: Object.fromEntries(groundTruthByScene) });
+  },
+};
+
+Object.assign(ROUTES, AUDIO_EVAL_ROUTES);
+// --- end M8.5 audio-experience eval routes ---

@@ -12,6 +12,9 @@
     "build": "npm run typecheck && electron-vite build",
     "test": "vitest run",
     "mock": "node tools/mock-realtime/index.js",
+    "eval": "node eval/run.mjs",
+    "eval:voice": "node eval/voice-roundtrip.mjs",
+    "eval:tts": "node eval/tts.mjs",
     "dist": "npm run build && electron-builder --win"
   },
   "dependencies": {

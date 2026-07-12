@@ -4,3 +4,7 @@ dist/
 *.local
 *.log
 .DS_Store
+
+# M8.5 eval harness: generated audio + run artifacts (evidence files force-added per run)
+eval/audio/
+eval/results/

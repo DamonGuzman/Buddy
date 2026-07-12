@@ -27,10 +27,12 @@ import type {
   AssistantState,
   CaptureMeta,
   PlaybackCommand,
+  PlaybackStatsUpdate,
   PointerCommand,
   SessionStatus,
   Settings,
   TranscriptEntry,
+  TurnTimings,
 } from '../shared/types';
 
 /** Holds shorter than this are treated as accidental taps (no turn). */
@@ -43,6 +45,11 @@ const ERROR_RECOVERY_MS = 4_000;
 const TRANSCRIPT_LIMIT = 50;
 /** Pointer commands kept for the debug harness. */
 const POINTER_HISTORY_LIMIT = 10;
+// M8.5 additions (orchestrator-approved): audio-experience eval instrumentation.
+/** Turn timings kept for GET /timings. */
+const TIMINGS_HISTORY_LIMIT = 20;
+/** Per-item playback stats kept for GET /audio/output-stats. */
+const OUTPUT_STATS_LIMIT = 20;
 
 export interface ConversationDeps {
   settings: SettingsStore;
@@ -100,6 +107,20 @@ export class Conversation {
   private idleTimer: NodeJS.Timeout | null = null;
   private closed = false;
 
+  // M8.5 additions (orchestrator-approved): audio-experience eval.
+  /** The turn currently accumulating timings (stays set until the next turn). */
+  private activeTurn: TurnTimings | null = null;
+  private turnSeq = 0;
+  private timingsHistory: TurnTimings[] = [];
+  /** Response item ids whose audio belongs to the active turn. */
+  private turnAudioItems = new Set<string>();
+  /** Barge-in in flight: cancel requested, waiting for playback to stop. */
+  private bargeWatch: { t0: number; itemIds: Set<string>; turn: TurnTimings } | null = null;
+  /** Latest per-item playback stats from the panel's playback tap. */
+  private outputStatsList: PlaybackStatsUpdate[] = [];
+  /** Last ~15s of PLAYED audio (Int16 PCM 24kHz mono) from the panel. */
+  private outputRing: ArrayBuffer | null = null;
+
   constructor(deps: ConversationDeps) {
     this.settings = deps.settings;
     this.overlays = deps.overlays;
@@ -141,6 +162,89 @@ export class Conversation {
     this.panel.send('audio:playback', { command });
   }
 
+  // ---------------------------------------------------------------------
+  // M8.5 (orchestrator-approved): audio-experience eval surface
+  // ---------------------------------------------------------------------
+
+  /** Timings of the most recent turn (may still be filling in). */
+  lastTurnTimings(): TurnTimings | null {
+    return this.activeTurn ? { ...this.activeTurn } : null;
+  }
+
+  /** Recent turn timings, oldest first (includes the active turn). */
+  turnTimingsHistory(): TurnTimings[] {
+    return this.timingsHistory.map((t) => ({ ...t }));
+  }
+
+  /** Latest per-item playback stats reported by the panel's playback tap. */
+  outputStats(): PlaybackStatsUpdate[] {
+    return this.outputStatsList.map((s) => ({ ...s }));
+  }
+
+  /** Last ~15s of played audio (Int16 PCM 24kHz mono), if reported yet. */
+  lastOutputRing(): ArrayBuffer | null {
+    return this.outputRing;
+  }
+
+  /** 'audio:playback-stats' from the panel renderer (ipcMain wiring). */
+  handlePlaybackStats(stats: PlaybackStatsUpdate): void {
+    const idx = this.outputStatsList.findIndex((s) => s.itemId === stats.itemId);
+    if (idx === -1) {
+      this.outputStatsList.push(stats);
+      if (this.outputStatsList.length > OUTPUT_STATS_LIMIT) {
+        this.outputStatsList = this.outputStatsList.slice(-OUTPUT_STATS_LIMIT);
+      }
+    } else {
+      this.outputStatsList[idx] = stats;
+    }
+    // First actually-played audio of the active turn.
+    if (
+      this.activeTurn &&
+      this.activeTurn.tFirstAudioPlayed === undefined &&
+      this.turnAudioItems.has(stats.itemId) &&
+      stats.samplesPlayed > 0
+    ) {
+      this.activeTurn.tFirstAudioPlayed = stats.firstPlayedAt || Date.now();
+    }
+    // Barge-in: playback of the cancelled turn's item actually stopped.
+    if (this.bargeWatch && stats.done && this.bargeWatch.itemIds.has(stats.itemId)) {
+      this.bargeWatch.turn.bargeInStopMs = Date.now() - this.bargeWatch.t0;
+      this.bargeWatch = null;
+    }
+  }
+
+  /** 'audio:playback-ring' from the panel renderer (ipcMain wiring). */
+  handlePlaybackRing(ring: ArrayBuffer): void {
+    this.outputRing = ring;
+  }
+
+  /** Start a new TurnTimings record and make it the active turn. */
+  private beginTurn(kind: TurnTimings['kind']): TurnTimings {
+    this.turnSeq += 1;
+    const turn: TurnTimings = {
+      turnId: `turn_${this.turnSeq}`,
+      kind,
+      chunksIn: 0,
+      chunksOut: 0,
+    };
+    this.activeTurn = turn;
+    this.turnAudioItems = new Set();
+    this.timingsHistory.push(turn);
+    if (this.timingsHistory.length > TIMINGS_HISTORY_LIMIT) {
+      this.timingsHistory = this.timingsHistory.slice(-TIMINGS_HISTORY_LIMIT);
+    }
+    return turn;
+  }
+
+  /** Short/silent hold produced no turn: drop the record entirely. */
+  private discardActiveTurn(): void {
+    if (!this.activeTurn) return;
+    const idx = this.timingsHistory.indexOf(this.activeTurn);
+    if (idx !== -1) this.timingsHistory.splice(idx, 1);
+    this.activeTurn = null;
+    this.turnAudioItems = new Set();
+  }
+
   /**
    * Hotkey went down: barge in on any playing response, flip to listening,
    * signpost capture, start the panel mic, warm the session, and kick the
@@ -155,6 +259,9 @@ export class Conversation {
     this.chunksThisHold = 0;
     this.acceptingAudio = this.canReachServer();
     this.epoch += 1;
+    // M8.5: new voice turn timings (after barge-in, so the watch keeps the old turn).
+    const turn = this.beginTurn('voice');
+    turn.tHoldStart = this.holdStartedAt;
     this.setState('listening');
     this.setCaptureIndicator(true);
     this.panel.send('audio:capture', { command: 'start' });
@@ -165,6 +272,9 @@ export class Conversation {
     this.pendingCaptures = captureAllDisplays()
       .then((results) => {
         this.lastCapture = results.map((r) => r.meta);
+        // M8.5: capture completed (kicked off at hold-start).
+        turn.tCaptureDone = Date.now();
+        turn.captureMs = turn.tCaptureDone - this.holdStartedAt;
         return results;
       })
       .catch((err: unknown) => {
@@ -189,16 +299,21 @@ export class Conversation {
       this.acceptingAudio = false;
       this.session.clearAudio();
       this.pendingCaptures = null;
+      this.discardActiveTurn(); // M8.5: no turn -> no timings record
       this.setState('idle');
       return;
     }
+    if (this.activeTurn) this.activeTurn.tHoldEnd = Date.now(); // M8.5
     void this.finishVoiceTurn();
   }
 
   /** Mic PCM chunk from the panel renderer (ipcMain 'audio:chunk'). */
   handleAudioChunk(chunk: ArrayBuffer): void {
     this.chunksIn += 1;
-    if (this.holding) this.chunksThisHold += 1;
+    if (this.holding) {
+      this.chunksThisHold += 1;
+      if (this.activeTurn?.kind === 'voice') this.activeTurn.chunksIn += 1; // M8.5
+    }
     if (this.acceptingAudio) this.session.appendAudio(chunk);
   }
 
@@ -209,6 +324,10 @@ export class Conversation {
     // Supersede: cancel the current response and drop its queued audio.
     if (this.pendingResponses > 0) this.cancelActiveResponse('flush');
     this.epoch += 1;
+    // M8.5: new text turn timings.
+    const turn = this.beginTurn('text');
+    const tAsk = Date.now();
+    turn.tAsk = tAsk;
     // The renderer does NOT optimistically echo — main owns the user entry.
     this.pushTranscript({
       id: `user_${Date.now()}_${(this.entrySeq += 1)}`,
@@ -228,11 +347,15 @@ export class Conversation {
     } finally {
       this.setCaptureIndicator(false);
     }
+    // M8.5: capture completed.
+    turn.tCaptureDone = Date.now();
+    turn.captureMs = turn.tCaptureDone - tAsk;
     this.lastCapture = captures.map((r) => r.meta);
     this.turnCaptures = captures;
 
     try {
       await this.session.askText(trimmed, captures, '');
+      turn.tCommitSent = Date.now(); // M8.5
       this.pendingResponses += 1;
     } catch (err) {
       this.failTurn(err);
@@ -274,6 +397,7 @@ export class Conversation {
     this.acceptingAudio = false;
     try {
       await this.session.commitAudioAndRespond(captures, '');
+      if (this.activeTurn) this.activeTurn.tCommitSent = Date.now(); // M8.5
       this.pendingResponses += 1;
     } catch (err) {
       this.failTurn(err);
@@ -305,6 +429,14 @@ export class Conversation {
    * response left mid-stream, so the panel never shows a stuck typing state.
    */
   private cancelActiveResponse(playback: PlaybackCommand): void {
+    // M8.5: measure cancel -> playback-actually-stopped on the cancelled turn.
+    if (this.activeTurn && this.turnAudioItems.size > 0) {
+      this.bargeWatch = {
+        t0: Date.now(),
+        itemIds: new Set(this.turnAudioItems),
+        turn: this.activeTurn,
+      };
+    }
     this.session.cancelResponse();
     this.playback(playback);
     this.pendingResponses = 0;
@@ -333,6 +465,9 @@ export class Conversation {
     session.on('status', (status) => this.panel.send('panel:session-status', status));
 
     session.on('user-transcript', ({ itemId, text }) => {
+      if (this.activeTurn && this.activeTurn.tFirstUserTranscript === undefined) {
+        this.activeTurn.tFirstUserTranscript = Date.now(); // M8.5
+      }
       this.pushTranscript({
         id: itemId,
         role: 'user',
@@ -344,6 +479,9 @@ export class Conversation {
 
     session.on('assistant-transcript', ({ itemId, text, done }) => {
       this.noteResponseActivity();
+      if (this.activeTurn && this.activeTurn.tFirstAssistantTranscript === undefined) {
+        this.activeTurn.tFirstAssistantTranscript = Date.now(); // M8.5
+      }
       if (this.settings.get().captionsEnabled) {
         this.overlays.broadcast('overlay:caption', { itemId, text, done });
       }
@@ -360,16 +498,31 @@ export class Conversation {
     session.on('audio-delta', ({ itemId, chunk }) => {
       this.noteResponseActivity();
       this.chunksOut += 1;
+      // M8.5: first audio delta + per-turn chunk count + item ownership.
+      if (this.activeTurn) {
+        if (this.activeTurn.tFirstAudioDelta === undefined) {
+          this.activeTurn.tFirstAudioDelta = Date.now();
+        }
+        this.activeTurn.chunksOut += 1;
+        this.turnAudioItems.add(itemId);
+      }
       this.panel.send('audio:output', { chunk, itemId });
     });
 
     session.on('tool-call', (call) => {
       this.noteResponseActivity();
+      if (this.activeTurn && this.activeTurn.tFirstToolCall === undefined) {
+        this.activeTurn.tFirstToolCall = Date.now(); // M8.5
+      }
       this.handleToolCall(call);
     });
 
     session.on('response-done', () => {
       this.pendingResponses = Math.max(0, this.pendingResponses - 1);
+      // M8.5: the LAST response.done of the turn (after tool continuations).
+      if (this.pendingResponses === 0 && this.activeTurn) {
+        this.activeTurn.tResponseDone = Date.now();
+      }
       this.scheduleIdle();
     });
 

@@ -177,9 +177,75 @@ export type PlaybackCommand = 'stop' | 'flush';
 /** M5 addition (orchestrator-approved): push-to-talk mic capture command. */
 export type CaptureCommand = 'start' | 'stop';
 
+/**
+ * M8.5 addition (orchestrator-approved): per-item playback stats reported by
+ * the panel renderer's player worklet — proof that model audio was actually
+ * scheduled into the output device, not just queued.
+ */
+export interface PlaybackStatsUpdate {
+  /** Response item this audio belongs to. */
+  itemId: string;
+  /** Samples actually rendered to the output so far (24kHz mono). */
+  samplesPlayed: number;
+  /** RMS (0..1) over all samples played so far for this item. */
+  rms: number;
+  /** Peak |sample| (0..1) seen so far for this item. */
+  peak: number;
+  /** Silence gaps mid-item that later resumed (queue starvation). */
+  underruns: number;
+  /** Epoch ms when the first sample of this item hit the output. */
+  firstPlayedAt: number;
+  /** Final update: item drained, was superseded, or was cleared (barge-in). */
+  done: boolean;
+}
+
 export interface MicDevice {
   deviceId: string;
   label: string;
+}
+
+// ---------------------------------------------------------------------------
+// Turn timings (M8.5 addition, orchestrator-approved — audio-experience eval)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-turn latency instrumentation collected by the conversation orchestrator.
+ * All `t*` fields are epoch ms; optional fields stay absent until (unless)
+ * the corresponding event happens for the turn.
+ */
+export interface TurnTimings {
+  turnId: string;
+  kind: 'voice' | 'text';
+  /** Voice: hotkey went down. */
+  tHoldStart?: number;
+  /** Voice: hotkey released (== the "ask" moment for voice turns). */
+  tHoldEnd?: number;
+  /** Text: /ask (or panel composer) submitted. */
+  tAsk?: number;
+  /** Screenshot capture for this turn finished. */
+  tCaptureDone?: number;
+  /** Capture duration: tCaptureDone minus the capture kick-off. */
+  captureMs?: number;
+  /** input_audio_buffer.commit / conversation.item.create sent to the server. */
+  tCommitSent?: number;
+  /** First ASR transcript of the user's audio arrived. */
+  tFirstUserTranscript?: number;
+  /** First assistant transcript delta arrived. */
+  tFirstAssistantTranscript?: number;
+  /** First model audio delta arrived from the server. */
+  tFirstAudioDelta?: number;
+  /** First sample of the response actually rendered to the output device. */
+  tFirstAudioPlayed?: number;
+  /** First tool call (point_at) of the response arrived. */
+  tFirstToolCall?: number;
+  /** Final response.done for the turn (after tool continuations). */
+  tResponseDone?: number;
+  /** Mic chunks appended during this turn's hold. */
+  chunksIn: number;
+  /** Model audio chunks received for this turn. */
+  chunksOut: number;
+  /** Barge-in: cancel requested -> playback actually stopped (ms). */
+  bargeInStopMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,4 +273,9 @@ export interface DebugState {
   audio: { chunksIn: number; chunksOut: number };
   /** Whether the "capture in progress" indicator is currently shown. */
   captureIndicatorActive: boolean;
+  // M8.5 additions (orchestrator-approved): audio-experience eval.
+  /** Timings of the most recent turn (may still be updating). */
+  lastTurnTimings: TurnTimings | null;
+  /** Recent turn timings, oldest first (capped at 20). */
+  turnTimingsHistory: TurnTimings[];
 }

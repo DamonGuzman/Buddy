@@ -1,0 +1,32 @@
+{
+  "comment": "Utterance catalog for the M8.5 audio eval. eval/tts.mjs synthesizes each entry to eval/audio/<id>.wav (24kHz 16-bit mono PCM). Keep utterances ~2-3s spoken: the Chromium fake-capture device LOOPS the file, and the hold window (~3.5s) defines what is actually sent. silence.wav is generated programmatically (not TTS).",
+  "utterances": [
+    { "id": "ask-point-save", "text": "point at the save button" },
+    { "id": "ask-what-screen", "text": "what am I looking at right now" },
+    { "id": "ask-point-two", "text": "show me two things I should try next" },
+
+    { "id": "app-toolbar--save", "text": "point at the save button in the toolbar" },
+    { "id": "app-toolbar--open", "text": "point at the open button in the toolbar" },
+    { "id": "app-toolbar--export", "text": "point at the export button in the toolbar" },
+    { "id": "app-toolbar--settings", "text": "point at the settings button in the toolbar" },
+    { "id": "app-toolbar--share", "text": "point at the share button in the toolbar" },
+
+    { "id": "form--email", "text": "point at the email address field" },
+    { "id": "form--password", "text": "point at the password field" },
+    { "id": "form--subscribe", "text": "point at the subscribe to newsletter checkbox" },
+    { "id": "form--submit", "text": "point at the create account button" },
+
+    { "id": "shop--search", "text": "point at the search box" },
+    { "id": "shop--add-to-cart", "text": "point at the add to cart button" },
+    { "id": "shop--cart", "text": "point at the shopping cart icon" },
+    { "id": "shop--price", "text": "point at the price of the headphones" },
+    { "id": "shop--reviews", "text": "point at the customer reviews link" },
+
+    { "id": "tricky--save", "text": "point at the save button, not save as" },
+    { "id": "tricky--save-as", "text": "point at the save as button" },
+    { "id": "tricky--small-icon", "text": "point at the small bell notification icon" },
+    { "id": "tricky--edge-button", "text": "point at the help button in the bottom right corner of the screen" },
+
+    { "id": "calibration--calibration-center", "text": "point at the big square in the center of the screen" }
+  ]
+}
