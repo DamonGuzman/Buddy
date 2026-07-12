@@ -25,15 +25,25 @@ const args = parseArgs(process.argv);
 const model = args.model ?? 'gpt-5.2';
 const layouts = (args.layouts ?? 'A,B').split(',');
 const limit = args.limit ? Number(args.limit) : Infinity;
+/** reasoning effort (gpt-5.x): --effort low|medium|high; omitted = API default */
+const effort = args.effort ?? null;
+/** --norm 1: ask for 0-1000 normalized coords instead of pixels (converted for scoring) */
+const norm = args.norm !== undefined;
+const conditionName = (norm ? 'rest-norm' : 'rest-plain') + (effort ? `-${effort}` : '');
 const apiKey = getApiKey();
 const spec = JSON.parse(readFileSync(join(ROOT, 'layouts.json'), 'utf8'));
 const W = spec.width, H = spec.height;
 
-const SYSTEM =
-  'You are a precise UI grounding model. The user names an on-screen target in the attached ' +
-  `screenshot (${W}x${H} pixels, origin top-left). Respond with ONLY a JSON object ` +
-  '{"x": <int>, "y": <int>, "label": "<short label>"} giving the pixel coordinates of the ' +
-  "CENTER of the target. No prose, no code fences.";
+const SYSTEM = norm
+  ? 'You are a precise UI grounding model. The user names an on-screen target in the attached ' +
+    'screenshot. Respond with ONLY a JSON object {"x": <int>, "y": <int>, "label": "<short label>"} ' +
+    'giving NORMALIZED coordinates of the CENTER of the target: x and y are integers 0-1000, ' +
+    'where (0,0) is the top-left corner and (1000,1000) is the bottom-right corner of the ' +
+    'screenshot. No prose, no code fences.'
+  : 'You are a precise UI grounding model. The user names an on-screen target in the attached ' +
+    `screenshot (${W}x${H} pixels, origin top-left). Respond with ONLY a JSON object ` +
+    '{"x": <int>, "y": <int>, "label": "<short label>"} giving the pixel coordinates of the ' +
+    "CENTER of the target. No prose, no code fences.";
 
 async function pointOnce(imageB64, ask) {
   const t0 = Date.now();
@@ -53,7 +63,8 @@ async function pointOnce(imageB64, ask) {
         },
       ],
       response_format: { type: 'json_object' },
-      max_completion_tokens: 2000,
+      max_completion_tokens: 4000,
+      ...(effort ? { reasoning_effort: effort } : {}),
     }),
   });
   const j = await res.json();
@@ -64,21 +75,38 @@ async function pointOnce(imageB64, ask) {
   return { parsed, text, latencyMs: Date.now() - t0, usage: j.usage };
 }
 
-for (const layoutName of layouts) {
-  const image = readFileSync(join(ROOT, 'images', `${layoutName}-plain.jpg`)).toString('base64');
-  const targets = spec.layouts[layoutName].targets.slice(0, limit);
+// --real: run the 5 hand-measured real-screenshot targets instead of layouts
+const jobs = [];
+if (args.real !== undefined) {
+  const rt = JSON.parse(readFileSync(join(ROOT, 'real-targets.json'), 'utf8'));
+  jobs.push({ layoutName: 'real', imageFile: 'real-plain.jpg', targets: rt.targets });
+} else {
+  for (const layoutName of layouts) {
+    jobs.push({
+      layoutName,
+      imageFile: `${layoutName}-plain.jpg`,
+      targets: spec.layouts[layoutName].targets,
+    });
+  }
+}
+
+for (const { layoutName, imageFile, targets: allTargets } of jobs) {
+  const image = readFileSync(join(ROOT, 'images', imageFile)).toString('base64');
+  const targets = allTargets.slice(0, limit);
   const records = [];
   const usage = [];
-  console.log(`[${model} | rest-plain | ${layoutName}] ${targets.length} targets`);
+  console.log(`[${model} | ${conditionName} | ${layoutName}] ${targets.length} targets`);
   for (const t of targets) {
     const rec = { id: t.id, ask: t.ask, zone: t.zone, gt: { x: t.cx, y: t.cy }, w: t.w, h: t.h };
     try {
       const res = await pointOnce(image, t.ask);
       if (res.parsed && typeof res.parsed.x === 'number' && typeof res.parsed.y === 'number') {
-        rec.pred = { x: res.parsed.x, y: res.parsed.y };
+        const px = norm ? (res.parsed.x / 1000) * W : res.parsed.x;
+        const py = norm ? (res.parsed.y / 1000) * H : res.parsed.y;
+        rec.pred = { x: px, y: py };
         rec.rawArgs = res.parsed;
-        rec.errX = res.parsed.x - t.cx;
-        rec.errY = res.parsed.y - t.cy;
+        rec.errX = px - t.cx;
+        rec.errY = py - t.cy;
         rec.err = Math.hypot(rec.errX, rec.errY);
         rec.hit = Math.abs(rec.errX) <= t.w / 2 && Math.abs(rec.errY) <= t.h / 2;
       } else {
@@ -95,10 +123,10 @@ for (const layoutName of layouts) {
     }
     records.push(rec);
   }
-  const outPath = join(ROOT, 'results', `${model}--rest-plain--${layoutName}.json`);
+  const outPath = join(ROOT, 'results', `${model}--${conditionName}--${layoutName}.json`);
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, JSON.stringify({
-    model, condition: 'rest-plain', layout: layoutName, imageDims: { W, H },
+    model, condition: conditionName, layout: layoutName, imageDims: { W, H },
     timestamp: new Date().toISOString(), records, usage,
   }, null, 2));
   console.log(`  -> ${outPath}`);

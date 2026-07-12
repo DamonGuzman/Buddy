@@ -1,0 +1,219 @@
+{
+  "model": "gpt-5.4-mini",
+  "condition": "rest-plain-low",
+  "layout": "real",
+  "imageDims": {
+    "W": 2048,
+    "H": 1152
+  },
+  "timestamp": "2026-07-12T20:45:12.244Z",
+  "records": [
+    {
+      "id": "startbtn",
+      "ask": "the Windows Start button in the taskbar",
+      "zone": "edge",
+      "gt": {
+        "x": 706,
+        "y": 1130
+      },
+      "w": 44,
+      "h": 44,
+      "pred": {
+        "x": 714,
+        "y": 1137
+      },
+      "rawArgs": {
+        "x": 714,
+        "y": 1137,
+        "label": "Start button"
+      },
+      "errX": 8,
+      "errY": 7,
+      "err": 10.63014581273465,
+      "hit": true,
+      "latencyMs": 1852,
+      "status": "completed"
+    },
+    {
+      "id": "clock",
+      "ask": "the clock in the system tray (bottom-right corner)",
+      "zone": "corner",
+      "gt": {
+        "x": 2011,
+        "y": 1130
+      },
+      "w": 90,
+      "h": 44,
+      "pred": {
+        "x": 1986,
+        "y": 1110
+      },
+      "rawArgs": {
+        "x": 1986,
+        "y": 1110,
+        "label": "clock"
+      },
+      "errX": -25,
+      "errY": -20,
+      "err": 32.01562118716424,
+      "hit": true,
+      "latencyMs": 2994,
+      "status": "completed"
+    },
+    {
+      "id": "review",
+      "ask": "the Review button in the 'Edited 5 files' card",
+      "zone": "center",
+      "gt": {
+        "x": 1466,
+        "y": 640
+      },
+      "w": 58,
+      "h": 26,
+      "pred": {
+        "x": 1483,
+        "y": 636
+      },
+      "rawArgs": {
+        "x": 1483,
+        "y": 636,
+        "label": "Review button"
+      },
+      "errX": 17,
+      "errY": -4,
+      "err": 17.46424919657298,
+      "hit": true,
+      "latencyMs": 1341,
+      "status": "completed"
+    },
+    {
+      "id": "newtask",
+      "ask": "the 'New task' item at the top of the left sidebar",
+      "zone": "corner",
+      "gt": {
+        "x": 46,
+        "y": 82
+      },
+      "w": 120,
+      "h": 24,
+      "pred": {
+        "x": 57,
+        "y": 77
+      },
+      "rawArgs": {
+        "x": 57,
+        "y": 77,
+        "label": "New task"
+      },
+      "errX": 11,
+      "errY": -5,
+      "err": 12.08304597359457,
+      "hit": true,
+      "latencyMs": 1266,
+      "status": "completed"
+    },
+    {
+      "id": "openin",
+      "ask": "the 'Open in' button in the top-right toolbar",
+      "zone": "corner",
+      "gt": {
+        "x": 1920,
+        "y": 50
+      },
+      "w": 80,
+      "h": 26,
+      "pred": {
+        "x": 1908,
+        "y": 48
+      },
+      "rawArgs": {
+        "x": 1908,
+        "y": 48,
+        "label": "Open in button"
+      },
+      "errX": -12,
+      "errY": -2,
+      "err": 12.165525060596437,
+      "hit": true,
+      "latencyMs": 1397,
+      "status": "completed"
+    }
+  ],
+  "usage": [
+    {
+      "prompt_tokens": 2702,
+      "completion_tokens": 87,
+      "total_tokens": 2789,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "audio_tokens": 0
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 60,
+        "audio_tokens": 0,
+        "accepted_prediction_tokens": 0,
+        "rejected_prediction_tokens": 0
+      }
+    },
+    {
+      "prompt_tokens": 2704,
+      "completion_tokens": 185,
+      "total_tokens": 2889,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "audio_tokens": 0
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 158,
+        "audio_tokens": 0,
+        "accepted_prediction_tokens": 0,
+        "rejected_prediction_tokens": 0
+      }
+    },
+    {
+      "prompt_tokens": 2706,
+      "completion_tokens": 97,
+      "total_tokens": 2803,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "audio_tokens": 0
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 70,
+        "audio_tokens": 0,
+        "accepted_prediction_tokens": 0,
+        "rejected_prediction_tokens": 0
+      }
+    },
+    {
+      "prompt_tokens": 2707,
+      "completion_tokens": 84,
+      "total_tokens": 2791,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "audio_tokens": 0
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 58,
+        "audio_tokens": 0,
+        "accepted_prediction_tokens": 0,
+        "rejected_prediction_tokens": 0
+      }
+    },
+    {
+      "prompt_tokens": 2705,
+      "completion_tokens": 47,
+      "total_tokens": 2752,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "audio_tokens": 0
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 19,
+        "audio_tokens": 0,
+        "accepted_prediction_tokens": 0,
+        "rejected_prediction_tokens": 0
+      }
+    }
+  ]
+}

@@ -126,9 +126,21 @@ for (const [key, runList] of [...groups.entries()].sort()) {
     if (fit) affine[run.layout] = fit;
   }
   const latencies = all.filter((r) => r.latencyMs).map((r) => r.latencyMs).sort((a, b) => a - b);
+  // per-group token usage (REST runs: prompt/completion_tokens; realtime: input/output_tokens)
+  let tIn = 0, tOut = 0, tReason = 0, nCalls = 0;
+  for (const run of runList) {
+    for (const u of run.usage ?? []) {
+      tIn += u.prompt_tokens ?? u.input_tokens ?? 0;
+      tOut += u.completion_tokens ?? u.output_tokens ?? 0;
+      tReason += u.completion_tokens_details?.reasoning_tokens ?? 0;
+      nCalls++;
+    }
+  }
   summary.push({
     model, condition, ...s,
     latencyP50: Math.round(q(latencies, 0.5)),
+    latencyP90: Math.round(q(latencies, 0.9)),
+    tokensPerCall: nCalls ? { in: Math.round(tIn / nCalls), out: Math.round(tOut / nCalls), reasoning: Math.round(tReason / nCalls) } : null,
     zones, affine,
   });
 }

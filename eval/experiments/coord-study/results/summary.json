@@ -1,6 +1,331 @@
 {
   "summary": [
     {
+      "model": "computer-use-preview",
+      "condition": "cu-click",
+      "n": 12,
+      "valid": 8,
+      "refused": 4,
+      "apiFailed": 0,
+      "medianErr": 2.6,
+      "p90Err": 8.3,
+      "maxErr": 11.2,
+      "within40": 100,
+      "within100": 100,
+      "hitRate": 100,
+      "latencyP50": 9633,
+      "latencyP90": 11014,
+      "tokensPerCall": {
+        "in": 1678,
+        "out": 66,
+        "reasoning": 0
+      },
+      "zones": {
+        "corner": {
+          "n": 1,
+          "median": 2,
+          "max": 2
+        },
+        "center": {
+          "n": 1,
+          "median": 11.2,
+          "max": 11.2
+        },
+        "edge": {
+          "n": 2,
+          "median": 2.8,
+          "max": 3.6
+        },
+        "cluster": {
+          "n": 2,
+          "median": 4.2,
+          "max": 7
+        },
+        "icon": {
+          "n": 2,
+          "median": 2.3,
+          "max": 3.2
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            1,
+            0,
+            0.3
+          ],
+          "yCoef": [
+            0,
+            1,
+            -0.2
+          ],
+          "r2": 1,
+          "rawRmsPx": 5.1,
+          "residualRmsPx": 4.3
+        }
+      }
+    },
+    {
+      "model": "gpt-4.1-mini",
+      "condition": "rest-plain",
+      "n": 12,
+      "valid": 12,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 129.8,
+      "p90Err": 256.4,
+      "maxErr": 293.6,
+      "within40": 0,
+      "within100": 50,
+      "hitRate": 8.3,
+      "latencyP50": 1006,
+      "latencyP90": 1186,
+      "tokensPerCall": {
+        "in": 3331,
+        "out": 17,
+        "reasoning": 0
+      },
+      "zones": {
+        "corner": {
+          "n": 4,
+          "median": 61.1,
+          "max": 77.1
+        },
+        "center": {
+          "n": 1,
+          "median": 216.5,
+          "max": 216.5
+        },
+        "edge": {
+          "n": 2,
+          "median": 191.9,
+          "max": 293.6
+        },
+        "cluster": {
+          "n": 3,
+          "median": 254.5,
+          "max": 256.6
+        },
+        "icon": {
+          "n": 2,
+          "median": 104.8,
+          "max": 169.4
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            1,
+            0.1,
+            -11.2
+          ],
+          "yCoef": [
+            0,
+            1.1,
+            24.7
+          ],
+          "r2": 1,
+          "rawRmsPx": 175.9,
+          "residualRmsPx": 111.9
+        }
+      }
+    },
+    {
+      "model": "gpt-4o-mini",
+      "condition": "rest-plain",
+      "n": 12,
+      "valid": 12,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 371,
+      "p90Err": 533.6,
+      "maxErr": 916.7,
+      "within40": 0,
+      "within100": 0,
+      "hitRate": 0,
+      "latencyP50": 1520,
+      "latencyP90": 1885,
+      "tokensPerCall": {
+        "in": 36927,
+        "out": 19,
+        "reasoning": 0
+      },
+      "zones": {
+        "corner": {
+          "n": 4,
+          "median": 237.8,
+          "max": 443.7
+        },
+        "center": {
+          "n": 1,
+          "median": 404.5,
+          "max": 404.5
+        },
+        "edge": {
+          "n": 2,
+          "median": 587.8,
+          "max": 916.7
+        },
+        "cluster": {
+          "n": 3,
+          "median": 383.6,
+          "max": 388.3
+        },
+        "icon": {
+          "n": 2,
+          "median": 342.9,
+          "max": 543.6
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            0.7,
+            0.1,
+            14.1
+          ],
+          "yCoef": [
+            0.1,
+            0.7,
+            88.7
+          ],
+          "r2": 0.8,
+          "rawRmsPx": 421.9,
+          "residualRmsPx": 238.1
+        }
+      }
+    },
+    {
+      "model": "gpt-4o",
+      "condition": "rest-plain",
+      "n": 12,
+      "valid": 12,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 147.4,
+      "p90Err": 238.9,
+      "maxErr": 453.1,
+      "within40": 16.7,
+      "within100": 41.7,
+      "hitRate": 25,
+      "latencyP50": 1096,
+      "latencyP90": 1223,
+      "tokensPerCall": {
+        "in": 1197,
+        "out": 16,
+        "reasoning": 0
+      },
+      "zones": {
+        "corner": {
+          "n": 4,
+          "median": 164.9,
+          "max": 229.9
+        },
+        "center": {
+          "n": 1,
+          "median": 39.2,
+          "max": 39.2
+        },
+        "edge": {
+          "n": 2,
+          "median": 154,
+          "max": 239.9
+        },
+        "cluster": {
+          "n": 3,
+          "median": 140.2,
+          "max": 226.3
+        },
+        "icon": {
+          "n": 2,
+          "median": 248.1,
+          "max": 453.1
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            0.9,
+            0,
+            -18.8
+          ],
+          "yCoef": [
+            0,
+            0.8,
+            55.9
+          ],
+          "r2": 1,
+          "rawRmsPx": 194.5,
+          "residualRmsPx": 133.8
+        }
+      }
+    },
+    {
+      "model": "gpt-5-mini",
+      "condition": "rest-plain-low",
+      "n": 12,
+      "valid": 12,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 74.1,
+      "p90Err": 146.3,
+      "maxErr": 273.9,
+      "within40": 16.7,
+      "within100": 58.3,
+      "hitRate": 16.7,
+      "latencyP50": 2464,
+      "latencyP90": 2941,
+      "tokensPerCall": {
+        "in": 2697,
+        "out": 125,
+        "reasoning": 101
+      },
+      "zones": {
+        "corner": {
+          "n": 4,
+          "median": 46.2,
+          "max": 70
+        },
+        "center": {
+          "n": 1,
+          "median": 102.2,
+          "max": 102.2
+        },
+        "edge": {
+          "n": 2,
+          "median": 137.9,
+          "max": 273.9
+        },
+        "cluster": {
+          "n": 3,
+          "median": 78.1,
+          "max": 134
+        },
+        "icon": {
+          "n": 2,
+          "median": 137.1,
+          "max": 147.6
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            1,
+            0.1,
+            -40.4
+          ],
+          "yCoef": [
+            0,
+            1,
+            -21.7
+          ],
+          "r2": 1,
+          "rawRmsPx": 115.9,
+          "residualRmsPx": 90.9
+        }
+      }
+    },
+    {
       "model": "gpt-5.2",
       "condition": "rest-plain",
       "n": 24,
@@ -14,6 +339,12 @@
       "within100": 91.7,
       "hitRate": 41.7,
       "latencyP50": 1302,
+      "latencyP90": 1611,
+      "tokensPerCall": {
+        "in": 2697,
+        "out": 20,
+        "reasoning": 0
+      },
       "zones": {
         "corner": {
           "n": 8,
@@ -75,6 +406,1011 @@
       }
     },
     {
+      "model": "gpt-5.4-mini",
+      "condition": "rest-plain-low",
+      "n": 24,
+      "valid": 24,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 8.6,
+      "p90Err": 29,
+      "maxErr": 44,
+      "within40": 95.8,
+      "within100": 100,
+      "hitRate": 91.7,
+      "latencyP50": 1308,
+      "latencyP90": 1716,
+      "tokensPerCall": {
+        "in": 2697,
+        "out": 77,
+        "reasoning": 50
+      },
+      "zones": {
+        "corner": {
+          "n": 8,
+          "median": 6.2,
+          "max": 44
+        },
+        "center": {
+          "n": 2,
+          "median": 24,
+          "max": 32
+        },
+        "edge": {
+          "n": 4,
+          "median": 6.7,
+          "max": 32
+        },
+        "cluster": {
+          "n": 6,
+          "median": 10.5,
+          "max": 15
+        },
+        "icon": {
+          "n": 4,
+          "median": 7.5,
+          "max": 14
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            1,
+            0,
+            1.9
+          ],
+          "yCoef": [
+            0,
+            1,
+            -0.3
+          ],
+          "r2": 1,
+          "rawRmsPx": 17.8,
+          "residualRmsPx": 14
+        },
+        "B": {
+          "xCoef": [
+            1,
+            0,
+            7.6
+          ],
+          "yCoef": [
+            0,
+            1,
+            -0.1
+          ],
+          "r2": 1,
+          "rawRmsPx": 13.8,
+          "residualRmsPx": 8.9
+        }
+      }
+    },
+    {
+      "model": "gpt-5.4-mini",
+      "condition": "rest-plain-low-REAL",
+      "n": 5,
+      "valid": 5,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 12.2,
+      "p90Err": 26.2,
+      "maxErr": 32,
+      "within40": 100,
+      "within100": 100,
+      "hitRate": 100,
+      "latencyP50": 1397,
+      "latencyP90": 2537,
+      "tokensPerCall": {
+        "in": 2705,
+        "out": 100,
+        "reasoning": 73
+      },
+      "zones": {
+        "corner": {
+          "n": 3,
+          "median": 12.2,
+          "max": 32
+        },
+        "center": {
+          "n": 1,
+          "median": 17.5,
+          "max": 17.5
+        },
+        "edge": {
+          "n": 1,
+          "median": 10.6,
+          "max": 10.6
+        }
+      },
+      "affine": {
+        "real": {
+          "xCoef": [
+            1,
+            0,
+            18.5
+          ],
+          "yCoef": [
+            0,
+            1,
+            2.5
+          ],
+          "r2": 1,
+          "rawRmsPx": 18.6,
+          "residualRmsPx": 13.7
+        }
+      }
+    },
+    {
+      "model": "gpt-5.4",
+      "condition": "rest-plain-low",
+      "n": 24,
+      "valid": 24,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 1.7,
+      "p90Err": 32.4,
+      "maxErr": 34,
+      "within40": 100,
+      "within100": 100,
+      "hitRate": 83.3,
+      "latencyP50": 1519,
+      "latencyP90": 1840,
+      "tokensPerCall": {
+        "in": 2697,
+        "out": 72,
+        "reasoning": 46
+      },
+      "zones": {
+        "corner": {
+          "n": 8,
+          "median": 8.5,
+          "max": 34
+        },
+        "center": {
+          "n": 2,
+          "median": 1,
+          "max": 1
+        },
+        "edge": {
+          "n": 4,
+          "median": 1.5,
+          "max": 2
+        },
+        "cluster": {
+          "n": 6,
+          "median": 1.7,
+          "max": 2.2
+        },
+        "icon": {
+          "n": 4,
+          "median": 1.5,
+          "max": 33
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            1,
+            0,
+            0.8
+          ],
+          "yCoef": [
+            0,
+            1,
+            -8.8
+          ],
+          "r2": 1,
+          "rawRmsPx": 13.7,
+          "residualRmsPx": 9.4
+        },
+        "B": {
+          "xCoef": [
+            1,
+            0,
+            0
+          ],
+          "yCoef": [
+            0,
+            1,
+            -8.5
+          ],
+          "r2": 1,
+          "rawRmsPx": 13.8,
+          "residualRmsPx": 10.8
+        }
+      }
+    },
+    {
+      "model": "gpt-5.4",
+      "condition": "rest-plain-low-REAL",
+      "n": 5,
+      "valid": 5,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 4.5,
+      "p90Err": 11.7,
+      "maxErr": 15.3,
+      "within40": 100,
+      "within100": 100,
+      "hitRate": 100,
+      "latencyP50": 1767,
+      "latencyP90": 2237,
+      "tokensPerCall": {
+        "in": 2705,
+        "out": 88,
+        "reasoning": 61
+      },
+      "zones": {
+        "corner": {
+          "n": 3,
+          "median": 6.4,
+          "max": 15.3
+        },
+        "center": {
+          "n": 1,
+          "median": 1.4,
+          "max": 1.4
+        },
+        "edge": {
+          "n": 1,
+          "median": 1,
+          "max": 1
+        }
+      },
+      "affine": {
+        "real": {
+          "xCoef": [
+            1,
+            0,
+            14.2
+          ],
+          "yCoef": [
+            0,
+            1,
+            -4.9
+          ],
+          "r2": 1,
+          "rawRmsPx": 7.7,
+          "residualRmsPx": 2.4
+        }
+      }
+    },
+    {
+      "model": "gpt-5.4",
+      "condition": "rest-plain-medium",
+      "n": 12,
+      "valid": 12,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 1.4,
+      "p90Err": 30,
+      "maxErr": 33.1,
+      "within40": 100,
+      "within100": 100,
+      "hitRate": 83.3,
+      "latencyP50": 1908,
+      "latencyP90": 2809,
+      "tokensPerCall": {
+        "in": 2697,
+        "out": 150,
+        "reasoning": 124
+      },
+      "zones": {
+        "corner": {
+          "n": 4,
+          "median": 16.5,
+          "max": 33.1
+        },
+        "center": {
+          "n": 1,
+          "median": 1.4,
+          "max": 1.4
+        },
+        "edge": {
+          "n": 2,
+          "median": 1.2,
+          "max": 1.4
+        },
+        "cluster": {
+          "n": 3,
+          "median": 1.4,
+          "max": 2.2
+        },
+        "icon": {
+          "n": 2,
+          "median": 1.6,
+          "max": 3.2
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            1,
+            0,
+            -0.1
+          ],
+          "yCoef": [
+            0,
+            1,
+            -8.3
+          ],
+          "r2": 1,
+          "rawRmsPx": 13.6,
+          "residualRmsPx": 9.2
+        }
+      }
+    },
+    {
+      "model": "gpt-5.5",
+      "condition": "rest-plain-low",
+      "n": 24,
+      "valid": 24,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 1.4,
+      "p90Err": 1.4,
+      "maxErr": 1.4,
+      "within40": 100,
+      "within100": 100,
+      "hitRate": 100,
+      "latencyP50": 2881,
+      "latencyP90": 3543,
+      "tokensPerCall": {
+        "in": 2697,
+        "out": 97,
+        "reasoning": 70
+      },
+      "zones": {
+        "corner": {
+          "n": 8,
+          "median": 1.4,
+          "max": 1.4
+        },
+        "center": {
+          "n": 2,
+          "median": 1.4,
+          "max": 1.4
+        },
+        "edge": {
+          "n": 4,
+          "median": 1,
+          "max": 1.4
+        },
+        "cluster": {
+          "n": 6,
+          "median": 1.4,
+          "max": 1.4
+        },
+        "icon": {
+          "n": 4,
+          "median": 1,
+          "max": 1
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            1,
+            0,
+            -0.1
+          ],
+          "yCoef": [
+            0,
+            1,
+            0.1
+          ],
+          "r2": 1,
+          "rawRmsPx": 1.2,
+          "residualRmsPx": 0.4
+        },
+        "B": {
+          "xCoef": [
+            1,
+            0,
+            0.3
+          ],
+          "yCoef": [
+            0,
+            1,
+            1
+          ],
+          "r2": 1,
+          "rawRmsPx": 1.3,
+          "residualRmsPx": 0.4
+        }
+      }
+    },
+    {
+      "model": "gpt-5.5",
+      "condition": "rest-plain-low-REAL",
+      "n": 5,
+      "valid": 5,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 3.2,
+      "p90Err": 8.7,
+      "maxErr": 11.7,
+      "within40": 100,
+      "within100": 100,
+      "hitRate": 100,
+      "latencyP50": 4389,
+      "latencyP90": 5945,
+      "tokensPerCall": {
+        "in": 2705,
+        "out": 146,
+        "reasoning": 118
+      },
+      "zones": {
+        "corner": {
+          "n": 3,
+          "median": 3.2,
+          "max": 11.7
+        },
+        "center": {
+          "n": 1,
+          "median": 1.4,
+          "max": 1.4
+        },
+        "edge": {
+          "n": 1,
+          "median": 4.1,
+          "max": 4.1
+        }
+      },
+      "affine": {
+        "real": {
+          "xCoef": [
+            1,
+            0,
+            8.8
+          ],
+          "yCoef": [
+            0,
+            1,
+            -4.2
+          ],
+          "r2": 1,
+          "rawRmsPx": 5.9,
+          "residualRmsPx": 2.9
+        }
+      }
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "condition": "rest-plain-low",
+      "n": 24,
+      "valid": 24,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 1,
+      "p90Err": 1,
+      "maxErr": 1.4,
+      "within40": 100,
+      "within100": 100,
+      "hitRate": 100,
+      "latencyP50": 1189,
+      "latencyP90": 1449,
+      "tokensPerCall": {
+        "in": 2697,
+        "out": 28,
+        "reasoning": 6
+      },
+      "zones": {
+        "corner": {
+          "n": 8,
+          "median": 0.5,
+          "max": 1
+        },
+        "center": {
+          "n": 2,
+          "median": 1,
+          "max": 1
+        },
+        "edge": {
+          "n": 4,
+          "median": 0.5,
+          "max": 1
+        },
+        "cluster": {
+          "n": 6,
+          "median": 1,
+          "max": 1.4
+        },
+        "icon": {
+          "n": 4,
+          "median": 0.5,
+          "max": 1
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            1,
+            0,
+            0
+          ],
+          "yCoef": [
+            0,
+            1,
+            0.3
+          ],
+          "r2": 1,
+          "rawRmsPx": 0.9,
+          "residualRmsPx": 0.4
+        },
+        "B": {
+          "xCoef": [
+            1,
+            0,
+            0
+          ],
+          "yCoef": [
+            0,
+            1,
+            0.8
+          ],
+          "r2": 1,
+          "rawRmsPx": 0.7,
+          "residualRmsPx": 0.5
+        }
+      }
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "condition": "rest-plain-low-REAL",
+      "n": 5,
+      "valid": 5,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 4.1,
+      "p90Err": 18.9,
+      "maxErr": 26.1,
+      "within40": 100,
+      "within100": 100,
+      "hitRate": 100,
+      "latencyP50": 1719,
+      "latencyP90": 2014,
+      "tokensPerCall": {
+        "in": 2705,
+        "out": 72,
+        "reasoning": 44
+      },
+      "zones": {
+        "corner": {
+          "n": 3,
+          "median": 8.1,
+          "max": 26.1
+        },
+        "center": {
+          "n": 1,
+          "median": 1.4,
+          "max": 1.4
+        },
+        "edge": {
+          "n": 1,
+          "median": 4.1,
+          "max": 4.1
+        }
+      },
+      "affine": {
+        "real": {
+          "xCoef": [
+            1,
+            0,
+            13.5
+          ],
+          "yCoef": [
+            0,
+            1,
+            -2.7
+          ],
+          "r2": 1,
+          "rawRmsPx": 12.5,
+          "residualRmsPx": 6
+        }
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "condition": "rest-norm-low",
+      "n": 12,
+      "valid": 12,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 1.8,
+      "p90Err": 32.3,
+      "maxErr": 55.5,
+      "within40": 91.7,
+      "within100": 100,
+      "hitRate": 75,
+      "latencyP50": 1804,
+      "latencyP90": 2549,
+      "tokensPerCall": {
+        "in": 2725,
+        "out": 20,
+        "reasoning": 0
+      },
+      "zones": {
+        "corner": {
+          "n": 4,
+          "median": 1.2,
+          "max": 1.9
+        },
+        "center": {
+          "n": 1,
+          "median": 16,
+          "max": 16
+        },
+        "edge": {
+          "n": 2,
+          "median": 0.3,
+          "max": 0.3
+        },
+        "cluster": {
+          "n": 3,
+          "median": 33.2,
+          "max": 55.5
+        },
+        "icon": {
+          "n": 2,
+          "median": 14.3,
+          "max": 24.4
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            1,
+            0,
+            -1.4
+          ],
+          "yCoef": [
+            0,
+            1,
+            6.1
+          ],
+          "r2": 1,
+          "rawRmsPx": 20.5,
+          "residualRmsPx": 19.8
+        }
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "condition": "rest-plain-low",
+      "n": 24,
+      "valid": 24,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 1,
+      "p90Err": 1.4,
+      "maxErr": 1.4,
+      "within40": 100,
+      "within100": 100,
+      "hitRate": 100,
+      "latencyP50": 1388,
+      "latencyP90": 1666,
+      "tokensPerCall": {
+        "in": 2697,
+        "out": 20,
+        "reasoning": 0
+      },
+      "zones": {
+        "corner": {
+          "n": 8,
+          "median": 1,
+          "max": 1.4
+        },
+        "center": {
+          "n": 2,
+          "median": 1.2,
+          "max": 1.4
+        },
+        "edge": {
+          "n": 4,
+          "median": 1,
+          "max": 1.4
+        },
+        "cluster": {
+          "n": 6,
+          "median": 1,
+          "max": 1.4
+        },
+        "icon": {
+          "n": 4,
+          "median": 0,
+          "max": 1
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            1,
+            0,
+            -0.4
+          ],
+          "yCoef": [
+            0,
+            1,
+            -0.2
+          ],
+          "r2": 1,
+          "rawRmsPx": 1,
+          "residualRmsPx": 0.5
+        },
+        "B": {
+          "xCoef": [
+            1,
+            0,
+            0.1
+          ],
+          "yCoef": [
+            0,
+            1,
+            0.6
+          ],
+          "r2": 1,
+          "rawRmsPx": 0.8,
+          "residualRmsPx": 0.6
+        }
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "condition": "rest-plain-low-REAL",
+      "n": 5,
+      "valid": 5,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 3.6,
+      "p90Err": 6.1,
+      "maxErr": 7.2,
+      "within40": 100,
+      "within100": 100,
+      "hitRate": 100,
+      "latencyP50": 1913,
+      "latencyP90": 2390,
+      "tokensPerCall": {
+        "in": 2705,
+        "out": 35,
+        "reasoning": 12
+      },
+      "zones": {
+        "corner": {
+          "n": 3,
+          "median": 4.5,
+          "max": 7.2
+        },
+        "center": {
+          "n": 1,
+          "median": 1,
+          "max": 1
+        },
+        "edge": {
+          "n": 1,
+          "median": 3.2,
+          "max": 3.2
+        }
+      },
+      "affine": {
+        "real": {
+          "xCoef": [
+            1,
+            0,
+            3.4
+          ],
+          "yCoef": [
+            0,
+            1,
+            -2.9
+          ],
+          "r2": 1,
+          "rawRmsPx": 4.4,
+          "residualRmsPx": 3.2
+        }
+      }
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "condition": "rest-plain-medium",
+      "n": 12,
+      "valid": 12,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 1,
+      "p90Err": 1.4,
+      "maxErr": 1.4,
+      "within40": 100,
+      "within100": 100,
+      "hitRate": 100,
+      "latencyP50": 1408,
+      "latencyP90": 1943,
+      "tokensPerCall": {
+        "in": 2697,
+        "out": 20,
+        "reasoning": 0
+      },
+      "zones": {
+        "corner": {
+          "n": 4,
+          "median": 0.5,
+          "max": 1
+        },
+        "center": {
+          "n": 1,
+          "median": 1.4,
+          "max": 1.4
+        },
+        "edge": {
+          "n": 2,
+          "median": 0,
+          "max": 0
+        },
+        "cluster": {
+          "n": 3,
+          "median": 1,
+          "max": 1.4
+        },
+        "icon": {
+          "n": 2,
+          "median": 0.5,
+          "max": 1
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            1,
+            0,
+            -0.2
+          ],
+          "yCoef": [
+            0,
+            1,
+            0.3
+          ],
+          "r2": 1,
+          "rawRmsPx": 0.9,
+          "residualRmsPx": 0.6
+        }
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "condition": "rest-plain-low",
+      "n": 24,
+      "valid": 24,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 1,
+      "p90Err": 1.4,
+      "maxErr": 1.4,
+      "within40": 100,
+      "within100": 100,
+      "hitRate": 100,
+      "latencyP50": 1494,
+      "latencyP90": 1861,
+      "tokensPerCall": {
+        "in": 2697,
+        "out": 37,
+        "reasoning": 14
+      },
+      "zones": {
+        "corner": {
+          "n": 8,
+          "median": 1,
+          "max": 1.4
+        },
+        "center": {
+          "n": 2,
+          "median": 1,
+          "max": 1
+        },
+        "edge": {
+          "n": 4,
+          "median": 0.7,
+          "max": 1.4
+        },
+        "cluster": {
+          "n": 6,
+          "median": 1,
+          "max": 1.4
+        },
+        "icon": {
+          "n": 4,
+          "median": 0,
+          "max": 1.4
+        }
+      },
+      "affine": {
+        "A": {
+          "xCoef": [
+            1,
+            0,
+            0.2
+          ],
+          "yCoef": [
+            0,
+            1,
+            -0.2
+          ],
+          "r2": 1,
+          "rawRmsPx": 1.1,
+          "residualRmsPx": 0.6
+        },
+        "B": {
+          "xCoef": [
+            1,
+            0,
+            0.5
+          ],
+          "yCoef": [
+            0,
+            1,
+            0.7
+          ],
+          "r2": 1,
+          "rawRmsPx": 0.7,
+          "residualRmsPx": 0.6
+        }
+      }
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "condition": "rest-plain-low-REAL",
+      "n": 5,
+      "valid": 5,
+      "refused": 0,
+      "apiFailed": 0,
+      "medianErr": 3.6,
+      "p90Err": 5.1,
+      "maxErr": 5.8,
+      "within40": 100,
+      "within100": 100,
+      "hitRate": 100,
+      "latencyP50": 1892,
+      "latencyP90": 2455,
+      "tokensPerCall": {
+        "in": 2705,
+        "out": 61,
+        "reasoning": 34
+      },
+      "zones": {
+        "corner": {
+          "n": 3,
+          "median": 4.1,
+          "max": 5.8
+        },
+        "center": {
+          "n": 1,
+          "median": 1.4,
+          "max": 1.4
+        },
+        "edge": {
+          "n": 1,
+          "median": 3,
+          "max": 3
+        }
+      },
+      "affine": {
+        "real": {
+          "xCoef": [
+            1,
+            0,
+            -0.4
+          ],
+          "yCoef": [
+            0,
+            1,
+            -5
+          ],
+          "r2": 1,
+          "rawRmsPx": 3.9,
+          "residualRmsPx": 1
+        }
+      }
+    },
+    {
       "model": "gpt-realtime-2.1-mini",
       "condition": "grid-100",
       "n": 24,
@@ -88,6 +1424,12 @@
       "within100": 41.7,
       "hitRate": 4.2,
       "latencyP50": 1543,
+      "latencyP90": 1899,
+      "tokensPerCall": {
+        "in": 3725,
+        "out": 123,
+        "reasoning": 0
+      },
       "zones": {
         "corner": {
           "n": 8,
@@ -162,6 +1504,12 @@
       "within100": 37.5,
       "hitRate": 20.8,
       "latencyP50": 1385,
+      "latencyP90": 1808,
+      "tokensPerCall": {
+        "in": 3549,
+        "out": 96,
+        "reasoning": 0
+      },
       "zones": {
         "corner": {
           "n": 8,
@@ -236,6 +1584,12 @@
       "within100": 58.3,
       "hitRate": 25,
       "latencyP50": 1093,
+      "latencyP90": 1723,
+      "tokensPerCall": {
+        "in": 4005,
+        "out": 50,
+        "reasoning": 0
+      },
       "zones": {
         "corner": {
           "n": 8,
@@ -310,6 +1664,12 @@
       "within100": 40,
       "hitRate": 0,
       "latencyP50": 967,
+      "latencyP90": 2036,
+      "tokensPerCall": {
+        "in": 2142,
+        "out": 78,
+        "reasoning": 0
+      },
       "zones": {
         "corner": {
           "n": 3,
@@ -359,6 +1719,12 @@
       "within100": 54.2,
       "hitRate": 33.3,
       "latencyP50": 1235,
+      "latencyP90": 2138,
+      "tokensPerCall": {
+        "in": 3348,
+        "out": 70,
+        "reasoning": 0
+      },
       "zones": {
         "corner": {
           "n": 8,
@@ -433,6 +1799,12 @@
       "within100": 54.2,
       "hitRate": 20.8,
       "latencyP50": 1830,
+      "latencyP90": 2517,
+      "tokensPerCall": {
+        "in": 3721,
+        "out": 132,
+        "reasoning": 0
+      },
       "zones": {
         "corner": {
           "n": 8,
@@ -507,6 +1879,12 @@
       "within100": 58.3,
       "hitRate": 16.7,
       "latencyP50": 1169,
+      "latencyP90": 2042,
+      "tokensPerCall": {
+        "in": 3708,
+        "out": 77,
+        "reasoning": 0
+      },
       "zones": {
         "corner": {
           "n": 8,
@@ -581,6 +1959,12 @@
       "within100": 40,
       "hitRate": 0,
       "latencyP50": 2040,
+      "latencyP90": 2605,
+      "tokensPerCall": {
+        "in": 2051,
+        "out": 172,
+        "reasoning": 0
+      },
       "zones": {
         "corner": {
           "n": 3,
@@ -630,6 +2014,12 @@
       "within100": 62.5,
       "hitRate": 33.3,
       "latencyP50": 986,
+      "latencyP90": 1507,
+      "tokensPerCall": {
+        "in": 3536,
+        "out": 40,
+        "reasoning": 0
+      },
       "zones": {
         "corner": {
           "n": 8,
@@ -704,6 +2094,12 @@
       "within100": 40,
       "hitRate": 20,
       "latencyP50": 992,
+      "latencyP90": 1165,
+      "tokensPerCall": {
+        "in": 1930,
+        "out": 44,
+        "reasoning": 0
+      },
       "zones": {
         "corner": {
           "n": 3,
@@ -753,6 +2149,12 @@
       "within100": 54.2,
       "hitRate": 37.5,
       "latencyP50": 1104,
+      "latencyP90": 2036,
+      "tokensPerCall": {
+        "in": 3702,
+        "out": 65,
+        "reasoning": 0
+      },
       "zones": {
         "corner": {
           "n": 8,
@@ -827,6 +2229,12 @@
       "within100": 45.8,
       "hitRate": 29.2,
       "latencyP50": 1333,
+      "latencyP90": 1556,
+      "tokensPerCall": {
+        "in": 3608,
+        "out": 68,
+        "reasoning": 0
+      },
       "zones": {
         "corner": {
           "n": 8,
@@ -889,8 +2297,8 @@
     }
   ],
   "usage": {
-    "inputTok": 820250,
+    "inputTok": 840384,
     "cachedTok": 701441,
-    "outputTok": 18784
+    "outputTok": 19579
   }
 }

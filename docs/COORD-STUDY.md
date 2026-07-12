@@ -244,8 +244,111 @@ already handles this via its watchdog + cancel path.)
    - If snapping slips, a **grounding assist call to gpt-5.2-class** per
      pointing turn is the only measured path near gate territory
      (50% within 40px, 92% within 100px) without UIA work.
+   - **superseded by §8-§9 (model sweep)**: newer non-realtime models turn
+     the grounding-call fallback from "near gate territory" into
+     "essentially exact" — see the updated recommendation in §9.
 
-## 8. Reproduce / resume
+## 8. Model sweep — which OpenAI model grounds coordinates best?
+
+Follow-up (same harness, same images, same scoring; REST chat completions
+with bare image + strict-JSON pixel coords unless noted; reasoning models at
+`reasoning_effort: 'low'`). Screening = layout A (12 targets); median ≤80px
+advanced to the full set (layouts A+B + 5 real-screenshot targets, n=29).
+`computer-use-preview` ran via its native Responses-API computer_use tool
+(prediction = first click action's x,y).
+
+### 8.1 Leaderboard (pooled over all targets run; sorted by median)
+
+| model (config) | n | median | p90 | max | ≤40px | ≤100px | in-element | p50 latency | tok/call in+out |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| **gpt-5.6-terra (low)** | 29 | 1 | 4 | 6 | 100% | 100% | 100% | 1.5s | 2699+41 |
+| **gpt-5.6-sol (low)** | 29 | 1 | 4 | 7 | 100% | 100% | 100% | 1.4s | 2699+25 |
+| gpt-5.6-luna (low) | 29 | 1 | 4 | 26 | 100% | 100% | 100% | 1.2s | 2699+37 |
+| gpt-5.5 (low) | 29 | 1 | 3 | 12 | 100% | 100% | 100% | **3.0s** ⚠ | 2699+109 |
+| gpt-5.4 (low) | 29 | 2 | 33 | 34 | 100% | 100% | 86% | 1.5s | 2699+74 |
+| **gpt-5.4-mini (low)** | 29 | 10 | 32 | 44 | 97% | 100% | 93% | 1.3s | 2699+79 |
+| computer-use-preview (native) | 12 | 3* | 11* | 11* | 100%* | 100%* | 100%* | **9.7s** ⚠ | 1678+66 |
+| gpt-5.2 (default) | 24 | 44 | 65 | 106 | 50% | 92% | 42% | 1.3s | 2697+20 |
+| gpt-5-mini (low) | 12 | 78 | 148 | 274 | 17% | 58% | 17% | **2.5s** ⚠ | 2697+125 |
+| gpt-4.1-mini | 12 | 169 | 257 | 294 | 0% | 50% | 8% | 1.0s | 3331+17 |
+| gpt-4o | 12 | 155 | 240 | 453 | 17% | 42% | 25% | 1.1s | 1197+16 |
+| gpt-4o-mini | 12 | 384 | 544 | 917 | 0% | 0% | 0% | 1.5s | 36927+19 |
+| (ref) gpt-realtime-2.1, best framing | 24 | 56-84 | 133-311 | 200-650 | ≤38% | ≤63% | ≤33% | 1.0-1.2s | — |
+
+\* computer-use-preview scored on the 8/12 turns where it actually clicked;
+on 4/12 it stalled asking for confirmation ("I found the SAVE button…
+Should I proceed?") despite a direct instruction — an agentic-loop
+personality unsuited to a one-shot grounding call, and 9.7s/call besides.
+Accurate when it acts (max 11px), but disqualified on latency + reliability.
+
+### 8.2 The 5.4 / 5.5 / 5.6 comparison (the decision that matters)
+
+Full set (24 synthetic + 5 real targets), low effort, bare image, pixel JSON:
+
+| | gpt-5.4 | gpt-5.4-mini | gpt-5.5 | gpt-5.6-sol | gpt-5.6-terra | gpt-5.6-luna |
+|---|---:|---:|---:|---:|---:|---:|
+| median err (all) | 1.7px | 8.6px | 1.4px | 1.0px | 1.0px | 1.0px |
+| max err synthetic | 34px | 44px | 1.4px | 1.4px | 1.4px | 1.4px |
+| median / max err REAL | 4.5 / 15px | 12 / 32px | 3.2 / 12px | 3.6 / 7px | 3.6 / 6px | 4.1 / 26px |
+| ≤40px | 100% | 97% | 100% | 100% | 100% | 100% |
+| in-element | 86% | 93% | 100% | 100% | 100% | 100% |
+| p50 latency (synthetic / real) | 1.5 / 1.8s | 1.3 / 1.4s | 2.9 / 4.4s ⚠ | 1.4 / 1.9s | 1.5 / 1.9s | 1.2 / 1.7s |
+| reasoning tok/call | 43-61 | ~50 | 66-118 | 0-12 | 10-34 | 3-44 |
+
+- The jump happens **between gpt-5.2 and gpt-5.4**: 5.2 = 44px median (usable
+  but coarse); 5.4+ = pixel-exact. On synthetic UI every 5.4+ model except
+  the minis is within 2px median. This task is SOLVED for the API models.
+- **gpt-5.5's extra reasoning buys nothing here but costs 2-3x the latency**
+  (2.9-4.4s — the only new-gen model over the 2.5s fallback flag).
+- Effort contrast on the winner tier (layout A): low vs medium is a wash for
+  accuracy on both gpt-5.6-sol (1.0 vs 1.0px median) and gpt-5.4 (1.7 vs
+  1.4px, same 33px max); medium adds ~0.4s on 5.4. **Low is correct.**
+- Prompt sensitivity (gpt-5.6-sol, layout A): normalized 0-1000 OUTPUT is
+  *worse* than pixel output (max 56px vs 1.4px, in-element 75% vs 100%) —
+  the opposite of the realtime finding. These models natively think in
+  pixels of the actual image; don't renormalize them.
+- gpt-5.4's residual 33px synthetic misses are all the 16px blue square
+  (points ~2 elements-widths off occasionally); 5.4-mini spreads 20-44px
+  misses over small icons + the real clock. Both still ≥97% within 40px.
+- The gpt-5.6-* ids on this key are subscription-pool routed (org-specific);
+  treat their pricing/limits as TBD before productionizing. gpt-5.4-mini is
+  standard API.
+
+### 8.3 Cost
+
+~2.7k input tokens per grounding call (2048x1152 JPEG) + ≤150 output. Even
+at flagship list rates that is well under $0.01/call; at mini rates ~$0.001.
+Whole sweep (12 models, 263 calls, incl. probes/contrasts): ~1.1M input +
+15k output tokens ≈ **$0.9-1.3** (exact 5.4/5.5/5.6 list prices weren't
+verifiable from the API; band assumes $0.25-2.50/M input by tier). Running
+study total ≈ **$2.0-2.4** of the ~$6 cumulative budget.
+
+## 9. Final recommendation (supersedes §7.5)
+
+**For the grounding fallback: gpt-5.4-mini at reasoning_effort low, bare
+screenshot, strict-JSON pixel coords.** It saturates the product need
+("in-element or ≤40px on most targets": 97% ≤40px, 93% in-element, 100%
+≤100px), is the fastest qualifying model (p50 1.3s — same as the realtime
+model's own ask→pointer time), the cheapest tier tested, and standard API.
+Escalation option: gpt-5.6-terra/sol (pixel-exact, max 7px even on the real
+desktop, ~1.5-1.9s) if the subscription-pool economics allow; skip gpt-5.5
+(same accuracy as 5.6, double the latency) and computer-use-preview
+(confirmation-stalls, 9.7s).
+
+This CHANGES the earlier architecture ranking: a per-turn grounding call is
+no longer a compromise — it is measured-exact and strictly simpler than UIA
+element snapping. Revised plan:
+
+1. Keep `gpt-realtime-2.1` for voice/persona; on each `point_at`, fire a
+   parallel gpt-5.4-mini grounding request for the model's own label (the
+   label is 100% reliable) and glide the buddy to the grounded point
+   (~1.3s later — comparable to today's pointer latency).
+2. UIA/OCR element snapping drops from "the accuracy fix" to post-MVP,
+   where it still matters for click-through/agent actions (needs element
+   handles, not just coordinates) and offline robustness.
+3. The realtime-side levers (§7) stay shelved; keep anchors framing as-is.
+
+## 10. Reproduce / resume
 
 ```sh
 cd eval/experiments/coord-study
@@ -259,6 +362,11 @@ node harness.mjs --condition normalized --model gpt-realtime-2.1-mini --layouts 
 node analyze.mjs                                # summary table + affine fits
 sh resume-when-quota.sh                         # poll quota, run remainder (outage recovery)
 sh run-phase2.sh <cond1> <cond2> <best>         # mini transfer + real runs
+# model sweep (§9):
+node rest-sanity.mjs --model gpt-5.4-mini --effort low --layouts A,B
+node rest-sanity.mjs --model gpt-5.4-mini --effort low --real 1
+node rest-sanity.mjs --model gpt-5.6-sol --effort low --norm 1 --layouts A   # prompt-sensitivity variant
+node cu-probe.mjs --model computer-use-preview --layouts A                   # computer-use native shape
 ```
 
 API key: user-scope `OPENAI_API_KEY` (registry); never logged or committed.
