@@ -1,0 +1,121 @@
+{
+  "module": "src/main/grounding/rest-grounder.ts (production code path)",
+  "model": "gpt-5.4-mini",
+  "timestamp": "2026-07-12T21:04:27.507Z",
+  "rows": [
+    {
+      "id": "save",
+      "kind": "synthetic",
+      "err": 1,
+      "hit": true,
+      "ms": 2023
+    },
+    {
+      "id": "open",
+      "kind": "synthetic",
+      "err": 16,
+      "hit": true,
+      "ms": 1407
+    },
+    {
+      "id": "help",
+      "kind": "synthetic",
+      "err": 3.1622776601683795,
+      "hit": true,
+      "ms": 1470
+    },
+    {
+      "id": "exit",
+      "kind": "synthetic",
+      "err": 1,
+      "hit": true,
+      "ms": 1647
+    },
+    {
+      "id": "start",
+      "kind": "synthetic",
+      "err": 20,
+      "hit": true,
+      "ms": 1548
+    },
+    {
+      "id": "cart",
+      "kind": "synthetic",
+      "err": 10.04987562112089,
+      "hit": true,
+      "ms": 1444
+    },
+    {
+      "id": "send",
+      "kind": "synthetic",
+      "err": 7.0710678118654755,
+      "hit": true,
+      "ms": 1635
+    },
+    {
+      "id": "copy",
+      "kind": "synthetic",
+      "err": 2,
+      "hit": true,
+      "ms": 1713
+    },
+    {
+      "id": "paste",
+      "kind": "synthetic",
+      "err": 1,
+      "hit": true,
+      "ms": 2081
+    },
+    {
+      "id": "cut",
+      "kind": "synthetic",
+      "err": 5,
+      "hit": true,
+      "ms": 1330
+    },
+    {
+      "id": "dot",
+      "kind": "synthetic",
+      "err": 17,
+      "hit": false,
+      "ms": 1429
+    },
+    {
+      "id": "square",
+      "kind": "synthetic",
+      "err": 8,
+      "hit": true,
+      "ms": 1418
+    },
+    {
+      "id": "clock",
+      "kind": "real",
+      "err": 24.041630560342615,
+      "hit": true,
+      "ms": 1996
+    },
+    {
+      "id": "review",
+      "kind": "real",
+      "err": 13.038404810405298,
+      "hit": true,
+      "ms": 1768
+    },
+    {
+      "id": "openin",
+      "kind": "real",
+      "err": 12.165525060596437,
+      "hit": true,
+      "ms": 1556
+    }
+  ],
+  "summary": {
+    "n": 15,
+    "ok": 15,
+    "medianErrPx": 8,
+    "maxErrPx": 24,
+    "inElement": 14,
+    "p50LatencyMs": 1556,
+    "maxLatencyMs": 2081
+  }
+}

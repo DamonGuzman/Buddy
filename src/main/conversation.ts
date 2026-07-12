@@ -35,6 +35,7 @@ import type { CaptureResult } from './capture';
 import { clampToDisplay, mapModelPoint } from './coords';
 import type { MappedPoint } from './coords';
 import { GroundingService } from './grounding/snapper';
+import { RestGrounder } from './grounding/rest-grounder';
 import { dipToPhysicalViaMeta, physicalToDipViaMeta } from './grounding/convert';
 import type { Pt } from './grounding/convert';
 import { getSessionInstructions, getToolDefinitions } from './persona';
@@ -124,6 +125,10 @@ export class Conversation {
   private grounding: GroundingService | null = null;
   /** CLICKY_NO_SNAP=1 disables snapping (eval A/B attribution). */
   private readonly snapDisabled = process.env['CLICKY_NO_SNAP'] === '1';
+  // M10: REST grounding fallback behind the UIA snap (docs/COORD-STUDY.md §9).
+  private restGrounder: RestGrounder | null = null;
+  /** CLICKY_NO_REST_GROUND=1 disables the REST fallback (eval A/B attribution). */
+  private readonly restGroundDisabled = process.env['CLICKY_NO_REST_GROUND'] === '1';
   /** Serializes pointer dispatches so multi-point turns stay ordered. */
   private pointerChain: Promise<void> = Promise.resolve();
 
@@ -204,6 +209,17 @@ export class Conversation {
       });
     }
     return this.grounding;
+  }
+
+  /**
+   * M10: lazy REST grounder. Same key source as the realtime session
+   * (settings, decrypted in main); the grounder never logs or exposes it.
+   */
+  private getRestGrounder(): RestGrounder {
+    if (this.restGrounder === null) {
+      this.restGrounder = new RestGrounder({ getApiKey: () => this.settings.getApiKey() });
+    }
+    return this.restGrounder;
   }
 
   // ---------------------------------------------------------------------
@@ -906,11 +922,21 @@ export class Conversation {
   }
 
   /**
-   * M9 element-snap grounding: ground the model's (already §6-mapped) point
-   * to the real on-screen element matching its spoken label, then fly the
-   * buddy. On no-match / timeout / error the raw model point is used
-   * unchanged — snapping is never worse than today. The label chip always
-   * shows the MODEL's label, not the element name.
+   * M9/M10 layered grounding: ground the model's (already §6-mapped) point,
+   * then fly the buddy. Layers, in order (docs/ARCHITECTURE.md §6b):
+   *
+   *   1. UIA element snap (M9, 600ms timebox) — exact when the label matches
+   *      a named element;
+   *   2. REST grounding fallback (M10, gpt-5.4-mini, 2.5s timeout) — the
+   *      model's own label re-grounded against the SAME screenshot JPEG the
+   *      realtime model saw, ~10px median (COORD-STUDY §8-§9); the result is
+   *      a point in that screenshot's pixel space, mapped like a model point;
+   *   3. the raw model point — never worse than today.
+   *
+   * The tool output already went back (the model's answer is not gated on
+   * grounding); a barge-in / superseding turn while grounding runs drops the
+   * pointer via the turnToken check. The label chip always shows the MODEL's
+   * label, not the element name.
    */
   private async dispatchPointer(
     args: PointAtArgs,
@@ -922,6 +948,7 @@ export class Conversation {
     const meta = capture.meta;
     let local = mapped.local;
     let snap: PointerSnapInfo | undefined;
+    let groundingSource: 'uia' | 'rest' | 'raw' = 'raw';
     if (!this.snapDisabled && args.label !== undefined && args.label.length > 0) {
       const t0 = Date.now();
       const rawPoint = { x: Math.round(mapped.global.x), y: Math.round(mapped.global.y) };
@@ -945,6 +972,7 @@ export class Conversation {
             snapMs: Date.now() - t0,
             candidates: outcome.candidates,
           };
+          groundingSource = 'uia';
         } else {
           if (outcome.timedOut) {
             console.warn('[grounding] snap timed out — using the raw model point');
@@ -969,6 +997,39 @@ export class Conversation {
         };
       }
     }
+    // M10: UIA snap found nothing (or was disabled) — REST grounding
+    // fallback. The grounder re-locates the model's own label in the SAME
+    // screenshot the model saw (capture is closure-retained here even after
+    // the turn settles and releases turnCaptures), and its answer is a point
+    // in that screenshot's pixel space — mapped to DIP exactly like a model
+    // point. On null (no key / mock mode / timeout / error / out-of-bounds)
+    // the raw model point stands, unchanged from today.
+    let restMs: number | undefined;
+    let restUsed = false;
+    if (
+      groundingSource !== 'uia' &&
+      !this.restGroundDisabled &&
+      args.label !== undefined &&
+      args.label.length > 0
+    ) {
+      restUsed = true;
+      const t0 = Date.now();
+      const grounded = await this.getRestGrounder().groundWithModel({
+        jpegBase64: capture.jpegBase64,
+        imageW: meta.imageW,
+        imageH: meta.imageH,
+        label: args.label,
+      });
+      restMs = Date.now() - t0;
+      if (grounded !== null && !this.closed && token === this.turnToken) {
+        const regrounded = mapModelPoint(
+          { x: grounded.x, y: grounded.y, ...(args.label !== undefined ? { label: args.label } : {}) },
+          meta,
+        );
+        local = regrounded.local;
+        groundingSource = 'rest';
+      }
+    }
     // A newer turn superseded this one while grounding ran: don't fly the buddy.
     if (this.closed || token !== this.turnToken) return;
     const cmd: PointerCommand = {
@@ -982,6 +1043,9 @@ export class Conversation {
       ],
       screenIndex: meta.screenIndex,
       ...(snap !== undefined ? { snap } : {}),
+      groundingSource,
+      restUsed,
+      ...(restMs !== undefined ? { restMs } : {}),
     };
     this.overlays.routePointer(cmd);
     this.lastPointer = cmd;

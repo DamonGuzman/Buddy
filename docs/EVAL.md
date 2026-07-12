@@ -554,3 +554,51 @@ published gpt-realtime rates (M8.6 methodology).
   hides the PowerShell/assembly load itself.
 - `run.mjs --voice` still relaunches the app per target; the mock voice-roundtrip passes
   all gates with the new commit guard (2026-07-12, `2026-07-12T18-20-32-voice`).
+
+## 10. Layered grounding — headless validation (M10, 2026-07-12)
+
+M10 adds the REST grounding fallback behind the M9 UIA snap (uia → rest → raw;
+docs/ARCHITECTURE.md §6b, rationale in docs/COORD-STUDY.md §8-§9): when the snap finds no
+match, `rest-grounder.ts` re-grounds the model's spoken label with **gpt-5.4-mini (reasoning
+effort low, bare screenshot, strict-JSON pixel coords)** against the same JPEG the realtime
+model saw.
+
+**Headless validation (no app, no windows, nothing on screen):** the PRODUCTION module
+(`src/main/grounding/rest-grounder.ts`, imported directly by the env-gated
+`tests/rest-grounder.live.test.ts`, `CLICKY_LIVE_GROUND=1`) was run live against the
+coord-study ground truth — 12 synthetic layout-A targets (exact by construction) + 3
+hand-measured real-screenshot targets, all 2048x1152:
+
+| target | kind | err px | in-element | latency |
+|---|---|---:|---|---:|
+| save | synthetic | 1 | yes | 2023ms |
+| open | synthetic | 16 | yes | 1407ms |
+| help | synthetic | 3 | yes | 1470ms |
+| exit | synthetic | 1 | yes | 1647ms |
+| start | synthetic | 20 | yes | 1548ms |
+| cart | synthetic | 10 | yes | 1444ms |
+| send | synthetic | 7 | yes | 1635ms |
+| copy | synthetic | 2 | yes | 1713ms |
+| paste | synthetic | 1 | yes | 2081ms |
+| cut | synthetic | 5 | yes | 1330ms |
+| dot (24px) | synthetic | 17 | no | 1429ms |
+| square (16px) | synthetic | 8 | yes | 1418ms |
+| clock | real | 24 | yes | 1996ms |
+| review | real | 13 | yes | 1768ms |
+| openin | real | 12 | yes | 1556ms |
+
+**Summary: 15/15 valid responses, median 8px, max 24px, 14/15 in-element (93%), latency p50
+1556ms / max 2081ms** (raw records: `eval/experiments/coord-study/results/
+m10-live-validation.json`) — matches the study's 10px / 93% / 1.3s within noise (the +0.25s
+p50 vs the study is the Responses-API strict-schema path vs chat completions; still well
+under the 2.5s fallback timeout). Dispatch-precedence + failure-path behavior (uia hit → no
+rest call; uia miss → rest; rest null → raw; superseded turn → no pointer; timeout/garbage/
+out-of-bounds/no-key/mock-mode → null) is covered offline by `tests/rest-grounder.test.ts`
+and `tests/grounding-layered.test.ts` (170/170 green). Validation spend: 30 REST calls
+(two 15-target passes) ≈ **$0.03** at mini rates.
+
+**Layered grounding validated headlessly as above; the full ON-SCREEN pointing re-gate
+(§9.3 methodology, kiosk scenes, `groundingSource` attribution across uia/rest/raw) is
+PENDING** — rerun `node eval/run.mjs --live` when the machine is free, plus an A/B with
+`CLICKY_NO_REST_GROUND=1` to isolate the rest layer's contribution on unsnappable targets
+(emoji glyphs, canvas UI — exactly §9.7's known gaps).

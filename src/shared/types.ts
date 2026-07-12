@@ -159,6 +159,15 @@ export type PointerCommand =
       screenIndex: number;
       /** M9: grounding attribution (absent when snapping was skipped). */
       snap?: PointerSnapInfo;
+      /**
+       * M10: which grounding layer produced the final point (layered
+       * pipeline: UIA snap -> REST grounding -> raw model point).
+       */
+      groundingSource?: 'uia' | 'rest' | 'raw';
+      /** M10: true when a REST grounding call was attempted for this pointer. */
+      restUsed?: boolean;
+      /** M10: wall time of the REST grounding call, ms (present when attempted). */
+      restMs?: number;
     }
   | { type: 'idle' }
   | { type: 'hide' };

@@ -107,7 +107,7 @@ tests/               vitest unit tests (coords, protocol framing, settings, hotk
 - All pure functions in `coords.ts` with unit tests covering: 100%/150%/200% DPI, mixed-DPI dual
   monitor, negative-origin (left-of-primary) monitors.
 
-## 6b. Element-snap grounding (M9)
+## 6b. Layered grounding (M9 + M10)
 
 The live evals (docs/EVAL.md §7-§8) proved the model names the right element essentially every
 time but its raw coordinates drift scene-dependently. `point_at` is therefore GROUNDED before the
@@ -125,6 +125,28 @@ snapping is never worse than no snapping. The label chip keeps the MODEL's words
 disables it (eval A/B); `POST /grounding/query` drives the snapper directly (debug server).
 Attribution (raw vs snapped point, score, name, ms) rides on `PointerCommand.snap` and
 `TurnTimings.tPointerDispatched`/`snapMs` for the eval harness.
+
+**M10 — REST grounding fallback: UIA snap → REST ground → raw point.** The coordinate study
+(docs/COORD-STUDY.md §8-§9) measured that coordinate weakness is realtime-family-specific:
+`gpt-5.4-mini` at reasoning effort `low` over plain REST grounds the same screenshots at ~10px
+median / 93% in-element / ~1.3s p50 — where the realtime model does ~80-100px. So when the UIA
+snap finds no confident match (element with no UIA Name, label/name token mismatch, timeout),
+`src/main/grounding/rest-grounder.ts` re-grounds the model's own spoken label against the SAME
+screenshot JPEG the realtime model saw (the turn's `CaptureResult` is closure-retained by the
+pointer dispatch, so this holds even after turn settle releases `turnCaptures`), replicating the
+study's winning protocol: `POST /v1/responses`, bare image as a data URI (no overlays,
+no gridlines), strict-JSON **pixel** coordinates of the provided image (the study showed
+normalized 0-1000 output actively hurts new-gen models), 2.5s abort timeout. The result is a
+point in screenshot pixel space, mapped like a model point (§6 `mapModelPoint`) and flown; on
+null (no key / mock mode / timeout / HTTP or parse error / out-of-bounds) the raw model point is
+used — the REST layer is never worse than today. The API key comes from the same settings source
+as the realtime session (decrypted in main, never logged); one call max in flight; a superseding
+turn / barge-in drops the pending pointer via the `turnToken` check, and the tool output has
+already gone back so the model's spoken answer is never gated on grounding.
+`CLICKY_NO_REST_GROUND=1` disables the REST layer (as `CLICKY_NO_SNAP=1` disables the UIA
+layer); attribution rides on `PointerCommand.groundingSource` (`'uia' | 'rest' | 'raw'`) plus
+`restUsed`/`restMs`, surfaced through `DebugState.lastPointer`. Headless validation of the
+production code path: docs/EVAL.md §10.
 
 ## 7. Realtime protocol subset (v1 GA WS API)
 
