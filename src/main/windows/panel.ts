@@ -61,6 +61,16 @@ export function showPanelOnce(reason = 'first-run'): void {
   activePanel.showInactive();
 }
 
+/**
+ * M16: toggle the control panel from a sibling main module (the overlay's
+ * buddy-click). Routes to the live PanelManager singleton — same show/hide +
+ * tray positioning + topmost re-assert the tray click uses. Replaces the M15
+ * findPanelWindow-by-URL workaround now that panel.ts is integration-owned.
+ */
+export function togglePanel(): void {
+  activePanel?.toggle();
+}
+
 export class PanelManager {
   private win: BrowserWindow | null = null;
   private crashGuard = new CrashLoopGuard(3, 5 * 60_000, 'panel');

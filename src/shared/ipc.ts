@@ -16,6 +16,8 @@ import type {
   CaptionUpdate,
   CaptureCommand,
   MicDevice,
+  OverlayHoverConfig,
+  OverlayHoverEvent,
   PlaybackCommand,
   PlaybackStatsUpdate,
   PointerCommand,
@@ -39,6 +41,11 @@ export interface MainToOverlayEvents {
   'overlay:caption': CaptionUpdate;
   /** Show/hide the "capture in progress" indicator (always signposted). */
   'overlay:capture-indicator': { active: boolean };
+  // M15 additions (orchestrator-approved): buddy hover.
+  /** Hover config (hotkey label + rest position) on load and settings change. */
+  'overlay:hover-config': OverlayHoverConfig;
+  /** This overlay window's click-through state flipped (dwell-to-interact). */
+  'overlay:interactive': { interactive: boolean };
 }
 
 // ===========================================================================
@@ -91,6 +98,13 @@ export interface RendererSendEvents {
   // device failures (mic capture start / playback init) so main can surface
   // mic_unavailable / audio_output_failed from the error catalog.
   'audio:capture-error': AudioDeviceError;
+  // M15 additions (orchestrator-approved): buddy hover.
+  /** Hover state machine events: dwell (make interactive) / exit / status. */
+  'overlay:hover': OverlayHoverEvent;
+  /** The buddy was clicked while interactive -> main toggles the panel. */
+  'overlay:buddy-click': null;
+  /** Drag-reposition finished: persist this rest fraction for this overlay. */
+  'overlay:buddy-move': { xFrac: number; yFrac: number };
 }
 
 // ===========================================================================
@@ -113,6 +127,9 @@ export interface InvokeChannels {
   // M11 addition (orchestrator-approved): panel bootstrap for runtime flags
   // (push updates ride on 'panel:runtime').
   'panel:get-runtime': { args: []; result: RuntimeFlags };
+  // M15 addition (orchestrator-approved): overlay bootstrap for hover config
+  // (belt-and-braces vs the did-finish-load push; handled in windows/overlay.ts).
+  'overlay:get-hover-config': { args: []; result: OverlayHoverConfig };
 }
 
 // ===========================================================================
@@ -143,6 +160,17 @@ export interface OverlayApi {
   onCaption(cb: (update: CaptionUpdate) => void): Unsubscribe;
   onCaptureIndicator(cb: (payload: { active: boolean }) => void): Unsubscribe;
   getAssistantState(): Promise<AssistantState>;
+
+  // M15 additions (orchestrator-approved): buddy hover.
+  onHoverConfig(cb: (cfg: OverlayHoverConfig) => void): Unsubscribe;
+  onInteractive(cb: (payload: { interactive: boolean }) => void): Unsubscribe;
+  getHoverConfig(): Promise<OverlayHoverConfig>;
+  /** Fire-and-forget hover events (dwell/exit/status). */
+  sendHover(evt: OverlayHoverEvent): void;
+  /** The buddy was clicked while interactive (main toggles the panel). */
+  sendBuddyClick(): void;
+  /** Drag finished: persist the new rest fraction for this overlay. */
+  sendBuddyMove(rest: { xFrac: number; yFrac: number }): void;
 }
 
 /** Exposed to the panel renderer as `window.clicky`. */

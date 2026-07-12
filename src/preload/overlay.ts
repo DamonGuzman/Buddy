@@ -35,6 +35,13 @@ const api: OverlayApi = {
   onCaption: (cb) => subscribe('overlay:caption', cb),
   onCaptureIndicator: (cb) => subscribe('overlay:capture-indicator', cb),
   getAssistantState: () => ipcRenderer.invoke('overlay:get-state'),
+  // M15 additions (orchestrator-approved): buddy hover.
+  onHoverConfig: (cb) => subscribe('overlay:hover-config', cb),
+  onInteractive: (cb) => subscribe('overlay:interactive', cb),
+  getHoverConfig: () => ipcRenderer.invoke('overlay:get-hover-config'),
+  sendHover: (evt) => ipcRenderer.send('overlay:hover', evt),
+  sendBuddyClick: () => ipcRenderer.send('overlay:buddy-click', null),
+  sendBuddyMove: (rest) => ipcRenderer.send('overlay:buddy-move', rest),
 };
 
 contextBridge.exposeInMainWorld('clicky', api);

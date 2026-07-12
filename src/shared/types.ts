@@ -51,6 +51,9 @@ export interface Settings {
   micDeviceId: string;
   /** Display string for the hotkey (fixed for MVP). */
   hotkeyLabel: string;
+  // M15 addition (orchestrator-approved): user-defined buddy rest position
+  // (set by drag-repositioning the buddy). null = default corner on primary.
+  buddyRest: BuddyRest | null;
 }
 
 /**
@@ -63,6 +66,8 @@ export interface SettingsPatch {
   voice?: string;
   captionsEnabled?: boolean;
   micDeviceId?: string;
+  // M15 addition (orchestrator-approved): null resets to the default corner.
+  buddyRest?: BuddyRest | null;
 }
 
 /** The renderer-safe defaults. */
@@ -80,6 +85,8 @@ export const DEFAULT_SETTINGS: Settings = {
   // F1 fix (orchestrator-approved), AltGr: only LEFT Alt participates in the
   // hotkey (Right Alt = AltGr on international layouts), so say so.
   hotkeyLabel: 'Ctrl+Alt (left alt)',
+  // M15 addition (orchestrator-approved).
+  buddyRest: null,
 };
 
 /**
@@ -97,7 +104,63 @@ export function applySettingsPatch(current: Settings, patch: SettingsPatch): Set
     ...(patch.apiKey !== undefined
       ? { apiKeyPresent: patch.apiKey !== null, apiKeyUnreadable: false }
       : {}),
+    // M15 addition (orchestrator-approved).
+    ...(patch.buddyRest !== undefined ? { buddyRest: patch.buddyRest } : {}),
   };
+}
+
+// ---------------------------------------------------------------------------
+// M15 additions (orchestrator-approved): buddy hover / dwell / rest position
+// ---------------------------------------------------------------------------
+
+/**
+ * User-defined buddy rest position, persisted in settings after a
+ * drag-reposition. Fractions of the hosting display's overlay-window size
+ * (window-local DIP / innerWidth|innerHeight) so the spot survives display
+ * resolution changes; re-snapped to edge margins on restore.
+ */
+export interface BuddyRest {
+  /** screenIndex (capture-labeling order) of the hosting display. */
+  screenIndex: number;
+  xFrac: number;
+  yFrac: number;
+}
+
+/** Main -> overlay hover configuration (pushed on load and settings change). */
+export interface OverlayHoverConfig {
+  /** Display string for the push-to-talk hotkey (Settings.hotkeyLabel). */
+  hotkeyLabel: string;
+  /**
+   * Rest fraction for THIS overlay when it hosts the buddy at rest;
+   * null = default bottom-right corner.
+   */
+  rest: { xFrac: number; yFrac: number } | null;
+}
+
+/** Renderer hover-machine snapshot, reported on transitions (debug/QA). */
+export interface OverlayHoverStatus {
+  zone: 'far' | 'aware' | 'hover';
+  hint: boolean;
+  dragging: boolean;
+  /** Buddy center, window-local DIP. */
+  buddy: { x: number; y: number };
+}
+
+/**
+ * Renderer -> main hover event.
+ * - 'dwell': cursor dwelled in the buddy footprint; make this overlay
+ *   interactive while the cursor stays inside `region` (also sent as a
+ *   region refresh while dragging).
+ * - 'exit': cursor left the padded region; RESTORE CLICK-THROUGH NOW
+ *   (safety-critical: the user's clicks elsewhere must never be eaten).
+ * - 'status': debug/QA snapshot on hover-state transitions.
+ */
+export interface OverlayHoverEvent {
+  kind: 'dwell' | 'exit' | 'status';
+  /** Padded buddy region, window-local DIP (present on 'dwell'). */
+  region?: Rect;
+  /** Present on 'status'. */
+  status?: OverlayHoverStatus;
 }
 
 // ---------------------------------------------------------------------------

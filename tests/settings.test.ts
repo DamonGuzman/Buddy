@@ -40,6 +40,8 @@ describe('settings schema', () => {
       captionsEnabled: false,
       micDeviceId: 'mic-42',
       hotkeyLabel: 'Ctrl+Alt (left alt)',
+      // M15 addition (orchestrator-approved): buddyRest rides along untouched.
+      buddyRest: null,
     });
     // the renderer-safe view must never contain the key itself
     expect(JSON.stringify(next)).not.toContain('sk-secret');
