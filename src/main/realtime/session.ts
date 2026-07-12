@@ -397,9 +397,19 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       const ws = new WebSocket(endpoint.url, { headers });
       this.ws = ws;
       let settled = false;
+      // Server `error` event received before session.created (e.g. the
+      // account is out of credit: the server accepts the handshake, sends
+      // {type:'error',code:'insufficient_quota'}, then closes 1013). Captured
+      // so the connect rejection carries the REAL reason instead of a generic
+      // "connection closed during handshake".
+      let preSettleError: { message: string; code: string } | null = null;
 
       const timeout = setTimeout(() => {
-        fail(new Error(`realtime handshake timed out after ${this.connectTimeoutMs}ms`));
+        fail(
+          preSettleError !== null
+            ? new Error(describeHandshakeRejection(preSettleError, null))
+            : new Error(`realtime handshake timed out after ${this.connectTimeoutMs}ms`),
+        );
         ws.terminate();
       }, this.connectTimeoutMs);
 
@@ -433,6 +443,14 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
             resolvePromise();
             return;
           }
+          if (!settled && evt.type === 'error') {
+            // Pre-session rejection (quota, auth, ...): hold the reason for
+            // the close/timeout that follows — do NOT route it through
+            // handleServerEvent, whose status churn the connect failure
+            // would immediately overwrite anyway.
+            preSettleError = { message: evt.error.message, code: evt.error.code ?? '' };
+            return;
+          }
           this.resetIdleTimer();
           // F1 (sleep/resume): any server activity feeds the response watchdog.
           if (this.responseActive) this.armResponseWatchdog();
@@ -450,10 +468,17 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
         });
       });
 
-      ws.on('close', () => {
+      ws.on('close', (code: number, reason: Buffer) => {
         this.guard(() => {
           if (!settled) {
-            fail(new Error('connection closed during handshake'));
+            fail(
+              new Error(
+                describeHandshakeRejection(preSettleError, {
+                  code,
+                  reason: reason.toString('utf8'),
+                }),
+              ),
+            );
             return;
           }
           if (this.ws !== ws) return; // superseded socket
@@ -862,6 +887,33 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     this.statusValue = next;
     this.emit('status', this.status());
   }
+}
+
+/**
+ * User-readable, single-line reason for a handshake the server rejected.
+ * Prefers the server's pre-session `error` event; falls back to the WS close
+ * code + reason. Shown verbatim in the panel (header "session: …" pill and
+ * the "something went wrong: …" transcript entry) — keep the tone lowercase.
+ */
+function describeHandshakeRejection(
+  err: { message: string; code: string } | null,
+  close: { code: number; reason: string } | null,
+): string {
+  if (err?.code === 'insufficient_quota' || close?.reason.includes('insufficient_quota') === true) {
+    return 'openai says your account is out of credit — add credits at platform.openai.com/billing';
+  }
+  if (err !== null) {
+    const msg = singleLine(err.message);
+    return err.code.length > 0 ? `openai error: ${msg} (${err.code})` : `openai error: ${msg}`;
+  }
+  const reason = close !== null ? singleLine(close.reason) : '';
+  const detail =
+    close !== null ? ` (code ${close.code}${reason.length > 0 ? `: ${reason}` : ''})` : '';
+  return `connection closed during handshake${detail}`;
+}
+
+function singleLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
 }
 
 function rawDataToString(data: WebSocket.RawData): string {

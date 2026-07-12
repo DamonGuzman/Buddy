@@ -6,6 +6,8 @@
  */
 
 import { createRequire } from 'node:module';
+import { once } from 'node:events';
+import { WebSocketServer } from 'ws';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RealtimeSession } from '../src/main/realtime/session';
 import type { RealtimeSessionOptions, ToolCall } from '../src/main/realtime/session';
@@ -430,6 +432,116 @@ describe('RealtimeSession resilience (F1)', () => {
     } finally {
       session.close();
       await second?.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Handshake rejection: the server accepts the WS, sends a pre-session `error`
+// event, then closes — the connect failure must carry the REAL reason (live
+// repro: insufficient_quota closes 1013 after the error event; the old code
+// swallowed it into a bare 'connection closed during handshake').
+// ---------------------------------------------------------------------------
+
+describe('RealtimeSession handshake rejection', () => {
+  /**
+   * Bare in-process WS server that accepts the handshake, optionally emits a
+   * server `error` event, then closes with the given code/reason — exactly
+   * the shape of a post-upgrade rejection from the real endpoint.
+   */
+  async function makeRejectingServer(
+    errorEvent: object | null,
+    closeCode: number,
+    closeReason: string,
+  ): Promise<{ url: string; close: () => Promise<void> }> {
+    const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+    await once(wss, 'listening');
+    wss.on('connection', (socket) => {
+      if (errorEvent !== null) socket.send(JSON.stringify(errorEvent));
+      socket.close(closeCode, closeReason);
+    });
+    const { port } = wss.address() as { port: number };
+    return {
+      url: `ws://127.0.0.1:${port}`,
+      close: () => new Promise<void>((resolve) => wss.close(() => resolve())),
+    };
+  }
+
+  function makeSession(url: string): RealtimeSession {
+    const session = new RealtimeSession({
+      model: 'gpt-realtime-2.1-mini',
+      voice: 'marin',
+      instructions: getSessionInstructions(),
+      tools: getToolDefinitions(),
+      urlOverride: url,
+    });
+    session.on('error', () => {
+      /* rejection asserted via connect(); never unhandled */
+    });
+    return session;
+  }
+
+  it('insufficient_quota (live repro): connect rejects with the friendly out-of-credit line', async () => {
+    const server = await makeRejectingServer(
+      {
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          code: 'insufficient_quota',
+          message:
+            'You exceeded your current quota, please check your plan and billing details.',
+        },
+      },
+      1013,
+      'insufficient_quota.insufficient_quota',
+    );
+    const session = makeSession(server.url);
+    try {
+      const expected =
+        'openai says your account is out of credit — add credits at platform.openai.com/billing';
+      await expect(session.connect()).rejects.toThrow(expected);
+      // The panel reads this status: header pill + failTurn system entry.
+      expect(session.status()).toMatchObject({ state: 'error', error: expected });
+    } finally {
+      session.close();
+      await server.close();
+    }
+  });
+
+  it('other pre-session error events surface message + code', async () => {
+    const server = await makeRejectingServer(
+      {
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          code: 'invalid_api_key',
+          message: 'Incorrect API key provided.',
+        },
+      },
+      1008,
+      'invalid_api_key',
+    );
+    const session = makeSession(server.url);
+    try {
+      const expected = 'openai error: Incorrect API key provided. (invalid_api_key)';
+      await expect(session.connect()).rejects.toThrow(expected);
+      expect(session.status()).toMatchObject({ state: 'error', error: expected });
+    } finally {
+      session.close();
+      await server.close();
+    }
+  });
+
+  it('close without a preceding error event falls back to code + reason', async () => {
+    const server = await makeRejectingServer(null, 1013, 'try again later');
+    const session = makeSession(server.url);
+    try {
+      const expected = 'connection closed during handshake (code 1013: try again later)';
+      await expect(session.connect()).rejects.toThrow(expected);
+      expect(session.status()).toMatchObject({ state: 'error', error: expected });
+    } finally {
+      session.close();
+      await server.close();
     }
   });
 });
