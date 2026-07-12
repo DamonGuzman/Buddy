@@ -1,0 +1,228 @@
+{
+  "backend": "LIVE OPENAI API",
+  "mode": "voice",
+  "startedAt": "2026-07-12T17:15:53.992Z",
+  "scenes": [
+    {
+      "scene": "app-toolbar",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "menu-file",
+          "desc": "the File menu",
+          "rect": {
+            "x": 24,
+            "y": 10,
+            "width": 30,
+            "height": 27
+          },
+          "verdict": "error",
+          "error": "Error: missing utterance wav C:\\Users\\Damon\\Projects\\heyclicky\\eval\\audio\\app-toolbar--menu-file.wav — run node eval/tts.mjs",
+          "assistantText": null
+        },
+        {
+          "name": "save",
+          "desc": "the save button in the toolbar",
+          "rect": {
+            "x": 24,
+            "y": 66,
+            "width": 163,
+            "height": 73
+          },
+          "pointed": {
+            "x": 65,
+            "y": 80,
+            "screenIndex": 0,
+            "label": "the save button"
+          },
+          "verdict": "hit",
+          "errorPx": 46,
+          "userText": "Point at the Save button in the toolbar. Point at the",
+          "assistantText": "that’s the save button in the toolbar right there. if you want, you could try clicking export next and see what formats it offers for your notes.",
+          "latency": {
+            "askToFirstToolCallMs": 1223,
+            "askToFirstAudioDeltaMs": 2040,
+            "askToDoneMs": 3334
+          },
+          "usage": {
+            "inputTokens": 2824,
+            "outputTokens": 234,
+            "totalTokens": 3058,
+            "inputTextTokens": 2112,
+            "inputAudioTokens": 66,
+            "inputImageTokens": 646,
+            "cachedTokens": 1347,
+            "outputTextTokens": 81,
+            "outputAudioTokens": 153,
+            "responses": 2
+          }
+        },
+        {
+          "name": "open",
+          "desc": "the open button in the toolbar",
+          "rect": {
+            "x": 211,
+            "y": 66,
+            "width": 173,
+            "height": 73
+          },
+          "pointed": {
+            "x": 250,
+            "y": 87.5,
+            "screenIndex": 0,
+            "label": "the open button"
+          },
+          "verdict": "hit",
+          "errorPx": 50,
+          "userText": "Point at the Open button in the toolbar. Point at the Open...",
+          "assistantText": "there it is, the open button in the toolbar. next, you could try clicking it and picking a file, or if you’re just exploring, you could also peek at settings to see what you can customize.",
+          "latency": {
+            "askToFirstToolCallMs": 774,
+            "askToFirstAudioDeltaMs": 1378,
+            "askToDoneMs": 3288
+          },
+          "usage": {
+            "inputTokens": 2824,
+            "outputTokens": 297,
+            "totalTokens": 3121,
+            "inputTextTokens": 2112,
+            "inputAudioTokens": 66,
+            "inputImageTokens": 646,
+            "cachedTokens": 1347,
+            "outputTextTokens": 95,
+            "outputAudioTokens": 202,
+            "responses": 2
+          }
+        },
+        {
+          "name": "export",
+          "desc": "the export button in the toolbar",
+          "rect": {
+            "x": 408,
+            "y": 65,
+            "width": 161,
+            "height": 75
+          },
+          "pointed": {
+            "x": 615,
+            "y": 112.5,
+            "screenIndex": 0,
+            "label": "the export button in the toolbar"
+          },
+          "verdict": "miss",
+          "errorPx": 127,
+          "rectDistPx": 46,
+          "userText": "Point at the Export button in the toolbar. Point at",
+          "assistantText": "okay, let me line up the pointer on that toolbar button. there it is, the export button in the top toolbar. after you click it, you could also try a quick test export to make sure the format and filename look right before you do the final one.",
+          "latency": {
+            "askToFirstToolCallMs": 2884,
+            "askToFirstAudioDeltaMs": 814,
+            "askToDoneMs": 5467
+          },
+          "usage": {
+            "inputTokens": 2850,
+            "outputTokens": 538,
+            "totalTokens": 3388,
+            "inputTextTokens": 2138,
+            "inputAudioTokens": 66,
+            "inputImageTokens": 646,
+            "cachedTokens": 1345,
+            "outputTextTokens": 269,
+            "outputAudioTokens": 269,
+            "responses": 2
+          }
+        },
+        {
+          "name": "settings",
+          "desc": "the settings button in the toolbar",
+          "rect": {
+            "x": 593,
+            "y": 66,
+            "width": 185,
+            "height": 73
+          },
+          "pointed": {
+            "x": 1295,
+            "y": 107.5,
+            "screenIndex": 0,
+            "label": "settings button in the toolbar"
+          },
+          "verdict": "miss",
+          "errorPx": 610,
+          "rectDistPx": 517,
+          "userText": "Point at the Settings button in the toolbar. Point at",
+          "assistantText": "that’s the settings button in the toolbar, right where the purple one sits. if you open it, you could also poke around for keyboard shortcuts next and save yourself a bunch of clicks later.",
+          "latency": {
+            "askToFirstToolCallMs": 828,
+            "askToFirstAudioDeltaMs": 1355,
+            "askToDoneMs": 3282
+          },
+          "usage": {
+            "inputTokens": 2827,
+            "outputTokens": 299,
+            "totalTokens": 3126,
+            "inputTextTokens": 2117,
+            "inputAudioTokens": 64,
+            "inputImageTokens": 646,
+            "cachedTokens": 1347,
+            "outputTextTokens": 94,
+            "outputAudioTokens": 205,
+            "responses": 2
+          }
+        },
+        {
+          "name": "share",
+          "desc": "the share button in the toolbar",
+          "rect": {
+            "x": 802,
+            "y": 66,
+            "width": 174,
+            "height": 73
+          },
+          "pointed": {
+            "x": 1481.25,
+            "y": 92.5,
+            "screenIndex": 0,
+            "label": "share button"
+          },
+          "verdict": "miss",
+          "errorPx": 592,
+          "rectDistPx": 505,
+          "userText": "Point at the shear button in the toolbar. Point at the shear",
+          "assistantText": "that’s the share button right there in the top toolbar. you can click it to send your document out, and next you could try export first if you want a clean file to share.",
+          "latency": {
+            "askToFirstToolCallMs": 904,
+            "askToFirstAudioDeltaMs": 1551,
+            "askToDoneMs": 3380
+          },
+          "usage": {
+            "inputTokens": 2823,
+            "outputTokens": 285,
+            "totalTokens": 3108,
+            "inputTextTokens": 2111,
+            "inputAudioTokens": 66,
+            "inputImageTokens": 646,
+            "cachedTokens": 1347,
+            "outputTextTokens": 90,
+            "outputAudioTokens": 195,
+            "responses": 2
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "hit": 2,
+    "near": 0,
+    "miss": 3,
+    "error": 1
+  },
+  "finishedAt": "2026-07-12T17:17:02.032Z"
+}

@@ -16,8 +16,8 @@ const VOICES = [
 ] as const;
 
 const MODELS: { id: ModelId; label: string }[] = [
-  { id: 'gpt-realtime-2.1-mini', label: 'gpt-realtime-2.1-mini (default)' },
-  { id: 'gpt-realtime-2.1', label: 'gpt-realtime-2.1' },
+  { id: 'gpt-realtime-2.1-mini', label: 'gpt-realtime-2.1-mini (faster, cheaper)' },
+  { id: 'gpt-realtime-2.1', label: 'gpt-realtime-2.1 (default — best pointing)' },
 ];
 
 interface SettingsViewProps {

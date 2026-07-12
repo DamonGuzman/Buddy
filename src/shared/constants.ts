@@ -38,7 +38,8 @@ export const AUDIO_BYTES_PER_SAMPLE = 2;
 // ---------------------------------------------------------------------------
 
 export const MODEL_IDS = ['gpt-realtime-2.1-mini', 'gpt-realtime-2.1'] as const;
-export const DEFAULT_MODEL = 'gpt-realtime-2.1-mini';
+/** M8.6: full model is the default — far better pointing accuracy (EVAL §8). */
+export const DEFAULT_MODEL = 'gpt-realtime-2.1';
 export const DEFAULT_VOICE = 'marin';
 
 /** Default OpenAI Realtime WS endpoint (model appended as query param). */
@@ -48,8 +49,15 @@ export const REALTIME_BASE_URL = 'wss://api.openai.com/v1/realtime';
 // Capture
 // ---------------------------------------------------------------------------
 
-/** Screenshots are resized so the longest edge is at most this many px. */
-export const CAPTURE_MAX_EDGE = 1280;
+/**
+ * Screenshots are resized so the longest edge is at most this many px.
+ *
+ * Tuning knob for pointing accuracy vs. latency/token cost. M8.6: raised
+ * 1280 → 2048 after the live pointing eval (docs/EVAL.md §7-§8): at 1280 a
+ * 4K display loses 2 DIP per image px, doubling every model localization
+ * error and shrinking small UI elements below recognizability.
+ */
+export const CAPTURE_MAX_EDGE = 2048;
 export const CAPTURE_JPEG_QUALITY = 80;
 
 // ---------------------------------------------------------------------------

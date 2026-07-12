@@ -50,22 +50,22 @@ const rect = (x: number, y: number, width: number, height: number): Rect => ({
 });
 
 describe('fixture sanity (capture math simulation)', () => {
-  it('1080p@100% resizes to 1280x720', () => {
+  it('1080p@100% fits under the 2048 cap (no resize)', () => {
     const meta = makeMeta(rect(0, 0, 1920, 1080), 1);
-    expect(meta.imageW).toBe(1280);
-    expect(meta.imageH).toBe(720);
+    expect(meta.imageW).toBe(1920);
+    expect(meta.imageH).toBe(1080);
   });
 
-  it('4K@200% (1920x1080 DIP) resizes to 1280x720', () => {
+  it('4K@200% (1920x1080 DIP) resizes to 2048x1152', () => {
     const meta = makeMeta(rect(0, 0, 1920, 1080), 2);
-    expect(meta.imageW).toBe(1280);
-    expect(meta.imageH).toBe(720);
+    expect(meta.imageW).toBe(2048);
+    expect(meta.imageH).toBe(1152);
   });
 
-  it('portrait 1080x1920 physical resizes to 720x1280 (height is longest edge)', () => {
-    const meta = makeMeta(rect(0, 0, 1080, 1920), 1);
-    expect(meta.imageW).toBe(720);
-    expect(meta.imageH).toBe(1280);
+  it('portrait 2160x3840 physical resizes to 1152x2048 (height is longest edge)', () => {
+    const meta = makeMeta(rect(0, 0, 1080, 1920), 2);
+    expect(meta.imageW).toBe(1152);
+    expect(meta.imageH).toBe(2048);
   });
 
   it('small displays are not upscaled', () => {
@@ -77,8 +77,8 @@ describe('fixture sanity (capture math simulation)', () => {
 
 describe('mapPointToScreen — DPI scale factors', () => {
   it('100% DPI: image center -> display center', () => {
-    const meta = makeMeta(rect(0, 0, 1920, 1080), 1); // image 1280x720
-    const { globalDip, overlayLocal } = mapPointToScreen({ x: 640, y: 360 }, meta);
+    const meta = makeMeta(rect(0, 0, 1920, 1080), 1); // image 1920x1080 (no resize)
+    const { globalDip, overlayLocal } = mapPointToScreen({ x: 960, y: 540 }, meta);
     expect(overlayLocal).toEqual({ x: 960, y: 540 });
     expect(globalDip).toEqual({ x: 960, y: 540 });
   });
@@ -91,24 +91,26 @@ describe('mapPointToScreen — DPI scale factors', () => {
   });
 
   it('125% DPI: 1920x1080 physical / 1536x864 DIP', () => {
-    const meta = makeMeta(rect(0, 0, 1536, 864), 1.25); // phys 1920x1080, image 1280x720
-    expect(meta.imageW).toBe(1280);
-    const { overlayLocal } = mapPointToScreen({ x: 1280, y: 720 }, meta);
+    const meta = makeMeta(rect(0, 0, 1536, 864), 1.25); // phys 1920x1080, image 1920x1080
+    expect(meta.imageW).toBe(1920);
+    const { overlayLocal } = mapPointToScreen({ x: 1920, y: 1080 }, meta);
     expect(overlayLocal.x).toBeCloseTo(1536, 6);
     expect(overlayLocal.y).toBeCloseTo(864, 6);
   });
 
-  it('150% DPI: 1920x1080 physical / 1280x720 DIP', () => {
-    const meta = makeMeta(rect(0, 0, 1280, 720), 1.5); // phys 1920x1080, image 1280x720
-    const { overlayLocal } = mapPointToScreen({ x: 320, y: 180 }, meta);
-    expect(overlayLocal.x).toBeCloseTo(320, 6);
-    expect(overlayLocal.y).toBeCloseTo(180, 6);
+  it('150% DPI: 2560x1440 physical / 1707x960 DIP resizes to 2048x1152', () => {
+    const meta = makeMeta(rect(0, 0, 1707, 960), 1.5); // phys 2561x1440, image 2048x1152
+    expect(meta.imageW).toBe(2048);
+    expect(meta.imageH).toBe(1152);
+    const { overlayLocal } = mapPointToScreen({ x: 1024, y: 576 }, meta);
+    expect(overlayLocal.x).toBeCloseTo(1707 / 2, 6);
+    expect(overlayLocal.y).toBeCloseTo(480, 6);
   });
 
   it('200% DPI: 4K physical / 1920x1080 DIP', () => {
-    const meta = makeMeta(rect(0, 0, 1920, 1080), 2); // phys 3840x2160, image 1280x720
-    const { overlayLocal, globalDip } = mapPointToScreen({ x: 640, y: 360 }, meta);
-    // 640 image px -> 1920 phys px -> 960 DIP
+    const meta = makeMeta(rect(0, 0, 1920, 1080), 2); // phys 3840x2160, image 2048x1152
+    const { overlayLocal, globalDip } = mapPointToScreen({ x: 1024, y: 576 }, meta);
+    // 1024 image px -> 1920 phys px -> 960 DIP
     expect(overlayLocal.x).toBeCloseTo(960, 6);
     expect(overlayLocal.y).toBeCloseTo(540, 6);
     expect(globalDip).toEqual(overlayLocal);
@@ -133,9 +135,10 @@ describe('mapPointToScreen — multi-monitor arrangements', () => {
     isActive: false,
   });
 
-  it('mixed-DPI: same image point lands differently per display', () => {
-    const onPrimary = mapPointToScreen({ x: 1280, y: 720 }, primary);
-    const onLeft = mapPointToScreen({ x: 1280, y: 720 }, left);
+  it('mixed-DPI: each image corner lands on its own display corner', () => {
+    // primary image is 2048x1152 (resized), left image is 1920x1080 (1:1)
+    const onPrimary = mapPointToScreen({ x: primary.imageW, y: primary.imageH }, primary);
+    const onLeft = mapPointToScreen({ x: left.imageW, y: left.imageH }, left);
     expect(onPrimary.globalDip.x).toBeCloseTo(1920, 6);
     expect(onLeft.globalDip.x).toBeCloseTo(0, 6); // -1920 + 1920
     expect(onLeft.overlayLocal.x).toBeCloseTo(1920, 6);
@@ -148,15 +151,15 @@ describe('mapPointToScreen — multi-monitor arrangements', () => {
   });
 
   it('negative-origin above-primary monitor', () => {
-    const above = makeMeta(rect(0, -1080, 1920, 1080), 1);
-    const { globalDip, overlayLocal } = mapPointToScreen({ x: 640, y: 360 }, above);
+    const above = makeMeta(rect(0, -1080, 1920, 1080), 1); // image 1920x1080 (1:1)
+    const { globalDip, overlayLocal } = mapPointToScreen({ x: 960, y: 540 }, above);
     expect(overlayLocal).toEqual({ x: 960, y: 540 });
     expect(globalDip).toEqual({ x: 960, y: -540 });
   });
 
   it('portrait secondary display maps both axes with their own ratios', () => {
-    const portrait = makeMeta(rect(1920, -400, 1080, 1920), 1); // image 720x1280
-    const center = mapPointToScreen({ x: 360, y: 640 }, portrait);
+    const portrait = makeMeta(rect(1920, -400, 1080, 1920), 2); // phys 2160x3840, image 1152x2048
+    const center = mapPointToScreen({ x: 576, y: 1024 }, portrait);
     expect(center.overlayLocal.x).toBeCloseTo(540, 6);
     expect(center.overlayLocal.y).toBeCloseTo(960, 6);
     expect(center.globalDip.x).toBeCloseTo(2460, 6);
@@ -164,17 +167,17 @@ describe('mapPointToScreen — multi-monitor arrangements', () => {
   });
 
   it('portrait 200% DPI display', () => {
-    const meta = makeMeta(rect(0, 0, 1080, 1920), 2); // phys 2160x3840, image 720x1280
-    expect(meta.imageW).toBe(720);
-    expect(meta.imageH).toBe(1280);
-    const corner = mapPointToScreen({ x: 720, y: 1280 }, meta);
+    const meta = makeMeta(rect(0, 0, 1080, 1920), 2); // phys 2160x3840, image 1152x2048
+    expect(meta.imageW).toBe(1152);
+    expect(meta.imageH).toBe(2048);
+    const corner = mapPointToScreen({ x: 1152, y: 2048 }, meta);
     expect(corner.overlayLocal.x).toBeCloseTo(1080, 6);
     expect(corner.overlayLocal.y).toBeCloseTo(1920, 6);
   });
 });
 
 describe('edges, rounding, clamping', () => {
-  const meta = makeMeta(rect(0, 0, 1920, 1080), 1); // image 1280x720
+  const meta = makeMeta(rect(0, 0, 1920, 1080), 2); // phys 3840x2160, image 2048x1152
 
   it('image origin maps exactly to display origin', () => {
     const { overlayLocal } = mapPointToScreen({ x: 0, y: 0 }, meta);
@@ -182,19 +185,19 @@ describe('edges, rounding, clamping', () => {
   });
 
   it('image far corner maps exactly to display far corner (no drift)', () => {
-    const { overlayLocal } = mapPointToScreen({ x: 1280, y: 720 }, meta);
+    const { overlayLocal } = mapPointToScreen({ x: 2048, y: 1152 }, meta);
     expect(overlayLocal.x).toBeCloseTo(1920, 10);
     expect(overlayLocal.y).toBeCloseTo(1080, 10);
   });
 
   it('odd physical sizes: corner still maps onto the DIP corner per axis', () => {
-    // 1366x768@100% -> ratio 1280/1366, imageH rounds (719.72 -> 720)
-    const odd = makeMeta(rect(0, 0, 1366, 768), 1);
-    expect(odd.imageW).toBe(1280);
-    expect(odd.imageH).toBe(720);
+    // 2732x1536@100% -> ratio 2048/2732, imageH rounds (1151.44 -> 1151)
+    const odd = makeMeta(rect(0, 0, 2732, 1536), 1);
+    expect(odd.imageW).toBe(2048);
+    expect(odd.imageH).toBe(1151);
     const corner = mapPointToScreen({ x: odd.imageW, y: odd.imageH }, odd);
-    expect(corner.overlayLocal.x).toBeCloseTo(1366, 6);
-    expect(corner.overlayLocal.y).toBeCloseTo(768, 6);
+    expect(corner.overlayLocal.x).toBeCloseTo(2732, 6);
+    expect(corner.overlayLocal.y).toBeCloseTo(1536, 6);
   });
 
   it('clampToDisplay clamps into [0, width]x[0, height]', () => {
@@ -204,8 +207,8 @@ describe('edges, rounding, clamping', () => {
   });
 
   it('resizeRatio and physicalSize agree with the fixture math', () => {
-    expect(physicalSize(meta)).toEqual({ width: 1920, height: 1080 });
-    expect(resizeRatio(meta)).toBeCloseTo(1280 / 1920, 10);
+    expect(physicalSize(meta)).toEqual({ width: 3840, height: 2160 });
+    expect(resizeRatio(meta)).toBeCloseTo(2048 / 3840, 10);
   });
 
   it('throws on corrupt meta', () => {
@@ -217,7 +220,7 @@ describe('edges, rounding, clamping', () => {
 });
 
 describe('model-input validation (normalizeModelPoint / mapModelPoint)', () => {
-  const meta = makeMeta(rect(0, 0, 1920, 1080), 1); // image 1280x720
+  const meta = makeMeta(rect(0, 0, 1920, 1080), 1); // image 1920x1080 (1:1)
 
   it('in-range points pass through unadjusted', () => {
     const { point, adjusted } = normalizeModelPoint({ x: 640, y: 360 }, meta);
@@ -227,19 +230,19 @@ describe('model-input validation (normalizeModelPoint / mapModelPoint)', () => {
 
   it('out-of-range coords clamp to the image edge and are flagged', () => {
     const { point, adjusted } = normalizeModelPoint({ x: -40, y: 99999 }, meta);
-    expect(point).toEqual({ x: 0, y: 720 });
+    expect(point).toEqual({ x: 0, y: 1080 });
     expect(adjusted).toBe(true);
   });
 
   it('non-finite coords fall back to the image center', () => {
     const { point, adjusted } = normalizeModelPoint({ x: Number.NaN, y: Infinity }, meta);
-    expect(point).toEqual({ x: 640, y: 360 });
+    expect(point).toEqual({ x: 960, y: 540 });
     expect(adjusted).toBe(true);
   });
 
   it('exact edge coords are NOT flagged as adjusted', () => {
-    const { point, adjusted } = normalizeModelPoint({ x: 1280, y: 720 }, meta);
-    expect(point).toEqual({ x: 1280, y: 720 });
+    const { point, adjusted } = normalizeModelPoint({ x: 1920, y: 1080 }, meta);
+    expect(point).toEqual({ x: 1920, y: 1080 });
     expect(adjusted).toBe(false);
   });
 
@@ -266,14 +269,16 @@ describe('compat surface (M1 pointer plumbing)', () => {
   ];
 
   it('mapScreenshotPoint returns the M1 {local, global, label} shape', () => {
-    const mapped = mapScreenshotPoint({ x: 640, y: 360, label: 'x' }, captures[0]!);
+    // captures[0] is 4K@200%: image 2048x1152, so 1024,576 is the center
+    const mapped = mapScreenshotPoint({ x: 1024, y: 576, label: 'x' }, captures[0]!);
     expect(mapped.local).toEqual({ x: 960, y: 540 });
     expect(mapped.global).toEqual({ x: 960, y: 540 });
     expect(mapped.label).toBe('x');
   });
 
   it('mapPoints resolves the meta by screenIndex', () => {
-    const [p] = mapPoints([{ x: 1280, y: 720 }], 1, captures);
+    // captures[1] is 1080p@100%: image 1920x1080 (1:1)
+    const [p] = mapPoints([{ x: 1920, y: 1080 }], 1, captures);
     expect(p!.local.x).toBeCloseTo(1920, 6);
     expect(p!.global.x).toBeCloseTo(0, 6);
   });

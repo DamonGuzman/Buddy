@@ -9,6 +9,7 @@
 import { app, safeStorage } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { MODEL_IDS } from '../shared/constants';
 import { DEFAULT_SETTINGS, applySettingsPatch } from '../shared/types';
 import type { Settings, SettingsPatch } from '../shared/types';
 
@@ -104,7 +105,11 @@ export class SettingsStore {
       return {
         version: 1,
         apiKeyEncrypted: typeof parsed.apiKeyEncrypted === 'string' ? parsed.apiKeyEncrypted : null,
-        model: parsed.model === 'gpt-realtime-2.1' ? 'gpt-realtime-2.1' : fallback.model,
+        // M8.6: validate against the full model list — a stored 'mini' choice
+        // must survive the default flipping to the full model.
+        model: MODEL_IDS.includes(parsed.model as Settings['model'])
+          ? (parsed.model as Settings['model'])
+          : fallback.model,
         voice: typeof parsed.voice === 'string' ? parsed.voice : fallback.voice,
         captionsEnabled:
           typeof parsed.captionsEnabled === 'boolean'

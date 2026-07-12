@@ -37,6 +37,11 @@ warn; choose "More info → Run anyway"):
 The hotkey is fixed at `Ctrl` + **left** `Alt` for the MVP. The right `Alt` key (AltGr on
 international layouts) never triggers it, so typing accented characters is safe.
 
+**Model choice:** Clicky defaults to `gpt-realtime-2.1` — measurably the most accurate at
+pointing (docs/EVAL.md §8). You can switch to `gpt-realtime-2.1-mini` in settings for
+faster/cheaper replies, but expect noticeably less accurate pointing; screen reading and
+conversation quality stay comparable.
+
 ## Privacy model
 
 - **Capture only while you hold the hotkey** (or when you explicitly send a typed question).

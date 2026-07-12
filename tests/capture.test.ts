@@ -115,27 +115,30 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('planResize', () => {
-  it('scales a 4K landscape frame to 1280x720', () => {
-    expect(planResize(3840, 2160)).toEqual({ width: 1280, height: 720, resized: true });
+  it('scales a 4K landscape frame to 2048x1152', () => {
+    expect(planResize(3840, 2160)).toEqual({ width: 2048, height: 1152, resized: true });
   });
 
   it('scales a portrait frame by its height (longest edge)', () => {
-    expect(planResize(2160, 3840)).toEqual({ width: 720, height: 1280, resized: true });
+    expect(planResize(2160, 3840)).toEqual({ width: 1152, height: 2048, resized: true });
   });
 
-  it('leaves already-small frames untouched', () => {
+  it('leaves already-small frames untouched (incl. 1080p and 1440p-DIP)', () => {
     expect(planResize(800, 600)).toEqual({ width: 800, height: 600, resized: false });
+    expect(planResize(1920, 1080)).toEqual({ width: 1920, height: 1080, resized: false });
   });
 
-  it('leaves an exactly-1280 longest edge untouched', () => {
-    expect(planResize(1280, 720)).toEqual({ width: 1280, height: 720, resized: false });
+  it('leaves an exactly-2048 longest edge untouched', () => {
+    expect(planResize(2048, 1152)).toEqual({ width: 2048, height: 1152, resized: false });
   });
 
   it('rounds the short edge; the longest edge lands exactly on the cap', () => {
-    // 1366x768 -> 1280 x round(719.65) = 720
-    expect(planResize(1366, 768)).toEqual({ width: 1280, height: 720, resized: true });
+    // 2560x1440 (1440p physical) -> exactly 2048x1152
+    expect(planResize(2560, 1440)).toEqual({ width: 2048, height: 1152, resized: true });
+    // 3000x2000 -> 2048 x round(1365.33) = 1365
+    expect(planResize(3000, 2000)).toEqual({ width: 2048, height: 1365, resized: true });
     // one px over the cap
-    expect(planResize(1281, 1000)).toEqual({ width: 1280, height: 999, resized: true });
+    expect(planResize(2049, 1500)).toEqual({ width: 2048, height: 1499, resized: true });
   });
 
   it('honors a custom maxEdge', () => {
@@ -243,7 +246,7 @@ describe('captureAllDisplays', () => {
     mockState.sources = [{ display_id: '1', name: 'Screen 1', thumbnail: fakeThumbnail(3840, 2160) }];
   }
 
-  it('captures, resizes to <=1280 longest edge, and reports final size in meta', async () => {
+  it('captures, resizes to <=2048 longest edge, and reports final size in meta', async () => {
     setupSingle4kDisplay();
     const results = await captureAllDisplays();
     expect(results).toHaveLength(1);
@@ -251,13 +254,13 @@ describe('captureAllDisplays', () => {
     expect(meta).toEqual({
       screenIndex: 0,
       displayId: 1,
-      imageW: 1280,
-      imageH: 720,
+      imageW: 2048,
+      imageH: 1152,
       displayBounds: { x: 0, y: 0, width: 1920, height: 1080 },
       scaleFactor: 2,
       isActive: true,
     });
-    expect(Buffer.from(jpegBase64, 'base64').toString()).toBe('img:1280x720@q80');
+    expect(Buffer.from(jpegBase64, 'base64').toString()).toBe('img:2048x1152@q80');
   });
 
   it('requests thumbnails at the max physical resolution across displays', async () => {
@@ -294,13 +297,13 @@ describe('captureAllDisplays', () => {
   });
 
   it('falls back to order matching when display_id is empty, with a warning', async () => {
-    const d1 = display(1, 0, 0, 1920, 1080, 1);
+    const d1 = display(1, 0, 0, 1920, 1080, 2);
     mockState.displays = [d1];
     mockState.activeDisplay = d1;
-    mockState.sources = [{ display_id: '', name: 'S1', thumbnail: fakeThumbnail(1920, 1080) }];
+    mockState.sources = [{ display_id: '', name: 'S1', thumbnail: fakeThumbnail(3840, 2160) }];
     const results = await captureAllDisplays();
     expect(results).toHaveLength(1);
-    expect(results[0]!.meta.imageW).toBe(1280);
+    expect(results[0]!.meta.imageW).toBe(2048);
     expect(console.warn).toHaveBeenCalledWith(
       expect.stringContaining('display_id matching failed'),
       expect.anything(),

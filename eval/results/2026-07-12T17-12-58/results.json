@@ -1,0 +1,215 @@
+{
+  "backend": "LIVE OPENAI API",
+  "mode": "text",
+  "startedAt": "2026-07-12T17:12:58.021Z",
+  "scenes": [
+    {
+      "scene": "shop",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "search",
+          "desc": "the search box",
+          "rect": {
+            "x": 188,
+            "y": 25,
+            "width": 760,
+            "height": 55
+          },
+          "pointed": {
+            "x": 800,
+            "y": 65,
+            "screenIndex": 0,
+            "label": "search box"
+          },
+          "verdict": "hit",
+          "errorPx": 232,
+          "userText": "point at the search box",
+          "assistantText": "okay, let’s find that search box and get your cursor right where it needs to be. there it is, the search box at the top, kind of left-of-center. after you click it, you could try a broader term like “wireless” to see more options before you narrow it down.",
+          "latency": {
+            "askToFirstToolCallMs": 2741,
+            "askToFirstAudioDeltaMs": 1631,
+            "askToDoneMs": 5231
+          },
+          "usage": {
+            "inputTokens": 2776,
+            "outputTokens": 436,
+            "totalTokens": 3212,
+            "inputTextTokens": 2130,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 646,
+            "cachedTokens": 2307,
+            "outputTextTokens": 132,
+            "outputAudioTokens": 304,
+            "responses": 2
+          }
+        },
+        {
+          "name": "cart",
+          "desc": "the shopping cart icon",
+          "rect": {
+            "x": 2427,
+            "y": 20,
+            "width": 85,
+            "height": 64
+          },
+          "pointed": {
+            "x": 2450,
+            "y": 62.5,
+            "screenIndex": 0,
+            "label": "shopping cart icon"
+          },
+          "verdict": "hit",
+          "errorPx": 22,
+          "userText": "point at the shopping cart icon",
+          "assistantText": "i’ll point you to the cart icon up top so you can hop there quickly. it’s in the top right, that little rounded icon. after you click it, you could peek at the product page again and compare features before you check out.",
+          "latency": {
+            "askToFirstToolCallMs": 2857,
+            "askToFirstAudioDeltaMs": 1542,
+            "askToDoneMs": 4934
+          },
+          "usage": {
+            "inputTokens": 4017,
+            "outputTokens": 422,
+            "totalTokens": 4439,
+            "inputTextTokens": 2725,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1292,
+            "cachedTokens": 3401,
+            "outputTextTokens": 173,
+            "outputAudioTokens": 249,
+            "responses": 2
+          }
+        },
+        {
+          "name": "reviews",
+          "desc": "the customer reviews link",
+          "rect": {
+            "x": 856,
+            "y": 235,
+            "width": 216,
+            "height": 28
+          },
+          "pointed": {
+            "x": 1293.75,
+            "y": 243.75,
+            "screenIndex": 0,
+            "label": "customer reviews link"
+          },
+          "verdict": "miss",
+          "errorPx": 330,
+          "rectDistPx": 222,
+          "userText": "point at the customer reviews link",
+          "assistantText": "i’ll guide you to the reviews link so you can jump into what people are saying. that’s the customer reviews link next to the star rating. once you open it, you could sort by most recent or look for reviews that mention noise cancelling to get a clearer picture.",
+          "latency": {
+            "askToFirstToolCallMs": 2343,
+            "askToFirstAudioDeltaMs": 1383,
+            "askToDoneMs": 4956
+          },
+          "usage": {
+            "inputTokens": 5240,
+            "outputTokens": 398,
+            "totalTokens": 5638,
+            "inputTextTokens": 3302,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1938,
+            "cachedTokens": 4623,
+            "outputTextTokens": 125,
+            "outputAudioTokens": 273,
+            "responses": 2
+          }
+        },
+        {
+          "name": "price",
+          "desc": "the price of the headphones",
+          "rect": {
+            "x": 720,
+            "y": 289,
+            "width": 164,
+            "height": 59
+          },
+          "pointed": {
+            "x": 981.25,
+            "y": 318.75,
+            "screenIndex": 0,
+            "label": "current price"
+          },
+          "verdict": "miss",
+          "errorPx": 179,
+          "rectDistPx": 97,
+          "userText": "point at the price of the headphones",
+          "assistantText": "i’ll point to the price so you can spot it fast. that’s the price right under the product name. if you’re watching budget, you could also check if the crossed-out price means there’s a sale or promo you can compare.",
+          "latency": {
+            "askToFirstToolCallMs": 2227,
+            "askToFirstAudioDeltaMs": 1498,
+            "askToDoneMs": 4596
+          },
+          "usage": {
+            "inputTokens": 6466,
+            "outputTokens": 340,
+            "totalTokens": 6806,
+            "inputTextTokens": 3882,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 2584,
+            "cachedTokens": 5845,
+            "outputTextTokens": 115,
+            "outputAudioTokens": 225,
+            "responses": 2
+          }
+        },
+        {
+          "name": "add-to-cart",
+          "desc": "the add to cart button",
+          "rect": {
+            "x": 720,
+            "y": 532,
+            "width": 220,
+            "height": 73
+          },
+          "pointed": {
+            "x": 975,
+            "y": 431.25,
+            "screenIndex": 0,
+            "label": "add to cart button"
+          },
+          "verdict": "miss",
+          "errorPx": 200,
+          "rectDistPx": 107,
+          "userText": "point at the add to cart button",
+          "assistantText": "i’ll point to the add to cart button so you can click it easily. that’s the add to cart button right there. after you click it, you could also check the shipping and return notes underneath to make sure the delivery timing works for you.",
+          "latency": {
+            "askToFirstToolCallMs": 2187,
+            "askToFirstAudioDeltaMs": 1279,
+            "askToDoneMs": 4716
+          },
+          "usage": {
+            "inputTokens": 7689,
+            "outputTokens": 387,
+            "totalTokens": 8076,
+            "inputTextTokens": 4459,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 3230,
+            "cachedTokens": 7067,
+            "outputTextTokens": 121,
+            "outputAudioTokens": 266,
+            "responses": 2
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "hit": 2,
+    "near": 0,
+    "miss": 3,
+    "error": 0
+  },
+  "finishedAt": "2026-07-12T17:13:29.774Z"
+}

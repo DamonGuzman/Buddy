@@ -62,7 +62,11 @@ export interface SettingsPatch {
 /** The renderer-safe defaults. */
 export const DEFAULT_SETTINGS: Settings = {
   apiKeyPresent: false,
-  model: 'gpt-realtime-2.1-mini',
+  // M8.6 (orchestrator-approved): default to the full model — the live
+  // pointing eval (docs/EVAL.md §8) showed mini's coordinate estimation is
+  // far less accurate (0-13% strict vs full's 33-47%). mini remains
+  // selectable in settings as the faster/cheaper option.
+  model: 'gpt-realtime-2.1',
   voice: 'marin',
   captionsEnabled: true,
   micDeviceId: '',

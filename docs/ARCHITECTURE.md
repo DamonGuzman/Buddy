@@ -17,7 +17,8 @@ and is always signposted by a visible indicator.
 **In:**
 - Hold-to-talk global hotkey (default **Ctrl+Alt**, both held; release = send). Only the LEFT
   Alt participates — Right Alt is AltGr on international layouts and never triggers.
-- Multi-monitor screenshot capture on hotkey press (resized ≤1280px longest edge, JPEG ~80%).
+- Multi-monitor screenshot capture on hotkey press (resized ≤2048px longest edge, JPEG ~80%;
+  raised from 1280 in M8.6 for pointing accuracy — see docs/EVAL.md §8).
 - OpenAI Realtime API session over **WebSocket** (PCM16 audio append / manual commit — push-to-talk,
   no server VAD). Audio out streamed and played as it arrives.
 - `point_at` **tool call** drives the pointer (no regex tag parsing).

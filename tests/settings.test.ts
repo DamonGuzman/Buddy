@@ -7,9 +7,11 @@ import { DEFAULT_SETTINGS, applySettingsPatch } from '../src/shared/types';
 import type { Settings, SettingsPatch } from '../src/shared/types';
 
 describe('settings schema', () => {
-  it('has safe defaults (no api key, mini model, captions on)', () => {
+  it('has safe defaults (no api key, full model for pointing accuracy, captions on)', () => {
     expect(DEFAULT_SETTINGS.apiKeyPresent).toBe(false);
-    expect(DEFAULT_SETTINGS.model).toBe('gpt-realtime-2.1-mini');
+    // M8.6: full model is the default — mini's pointing accuracy failed the
+    // live eval gates by a wide margin (docs/EVAL.md §8).
+    expect(DEFAULT_SETTINGS.model).toBe('gpt-realtime-2.1');
     expect(DEFAULT_SETTINGS.captionsEnabled).toBe(true);
     expect(DEFAULT_SETTINGS.micDeviceId).toBe('');
     // F1 (AltGr): only LEFT Alt participates, and the label says so.

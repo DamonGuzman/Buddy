@@ -617,9 +617,27 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
             (img.meta.isActive ? ' (active screen, the cursor is here)' : ''),
         )
         .join('; ');
+      // M8.6 (pointing accuracy): explicit coordinate anchors + a worked
+      // fraction→pixel example. Live evals showed the model reads the scene
+      // correctly but localizes in a mis-scaled coordinate frame; anchoring
+      // the convention with landmarks tightens point_at coordinates.
+      const anchors = images
+        .map(
+          (img) =>
+            `screen${img.meta.screenIndex}: top-left corner (0,0), ` +
+            `bottom-right corner (${img.meta.imageW},${img.meta.imageH})`,
+        )
+        .join('; ');
+      const first = images[0]!.meta;
       const framing =
         `${CONTEXT_PREFIX} ${images.length} screenshot(s) attached. ${screens}. ` +
-        `point_at coordinates must be pixel coordinates within the named screenshot.` +
+        `point_at coordinates must be pixel coordinates within the named screenshot. ` +
+        `coordinate anchors — ${anchors}. ` +
+        `to point accurately: judge how far across and down the target sits as a fraction ` +
+        `of the full screenshot, then multiply by that screenshot's pixel size ` +
+        `(e.g. a target 1/3 across and 1/4 down screen${first.screenIndex} is at ` +
+        `(${Math.round(first.imageW / 3)},${Math.round(first.imageH / 4)})); ` +
+        `commit to the target's actual offset — never default to the middle of the screen.` +
         (contextText.length > 0 ? ` ${contextText}` : '');
       content.push({ type: 'input_text', text: framing });
       for (const img of images) {

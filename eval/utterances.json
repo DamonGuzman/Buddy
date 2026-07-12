@@ -5,6 +5,7 @@
     { "id": "ask-what-screen", "text": "what am I looking at right now" },
     { "id": "ask-point-two", "text": "show me two things I should try next" },
 
+    { "id": "app-toolbar--menu-file", "text": "point at the file menu in the menu bar" },
     { "id": "app-toolbar--save", "text": "point at the save button in the toolbar" },
     { "id": "app-toolbar--open", "text": "point at the open button in the toolbar" },
     { "id": "app-toolbar--export", "text": "point at the export button in the toolbar" },

@@ -1,0 +1,832 @@
+{
+  "backend": "LIVE OPENAI API",
+  "mode": "text",
+  "startedAt": "2026-07-12T17:07:31.103Z",
+  "scenes": [
+    {
+      "scene": "calibration",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "calibration-center",
+          "desc": "the big green square in the center of the screen",
+          "rect": {
+            "x": 768,
+            "y": 475,
+            "width": 1024,
+            "height": 490
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "big green square in the center"
+          },
+          "verdict": "hit",
+          "errorPx": 0,
+          "userText": "point at the big green square in the center of the screen",
+          "assistantText": "yep, that’s the big green square right in the middle. if you’re testing alignment, try moving it slightly off-center next and see if your pointer still tracks cleanly.",
+          "latency": {
+            "askToFirstToolCallMs": 1788,
+            "askToFirstAudioDeltaMs": 2302,
+            "askToDoneMs": 3905
+          },
+          "usage": {
+            "inputTokens": 2753,
+            "outputTokens": 260,
+            "totalTokens": 3013,
+            "inputTextTokens": 2107,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 646,
+            "cachedTokens": 1347,
+            "outputTextTokens": 91,
+            "outputAudioTokens": 169,
+            "responses": 2
+          }
+        }
+      ]
+    },
+    {
+      "scene": "app-toolbar",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "menu-file",
+          "desc": "the File menu",
+          "rect": {
+            "x": 24,
+            "y": 10,
+            "width": 30,
+            "height": 27
+          },
+          "pointed": {
+            "x": 47.5,
+            "y": 33.75,
+            "screenIndex": 0,
+            "label": "File menu"
+          },
+          "verdict": "hit",
+          "errorPx": 13,
+          "userText": "point at the File menu",
+          "assistantText": "that’s the file menu up top. if you want to go a bit further, try the insert menu next and see what you can add to the page.",
+          "latency": {
+            "askToFirstToolCallMs": 1302,
+            "askToFirstAudioDeltaMs": 1858,
+            "askToDoneMs": 3221
+          },
+          "usage": {
+            "inputTokens": 3916,
+            "outputTokens": 232,
+            "totalTokens": 4148,
+            "inputTextTokens": 2624,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1292,
+            "cachedTokens": 3337,
+            "outputTextTokens": 81,
+            "outputAudioTokens": 151,
+            "responses": 2
+          }
+        },
+        {
+          "name": "save",
+          "desc": "the save button in the toolbar",
+          "rect": {
+            "x": 24,
+            "y": 66,
+            "width": 163,
+            "height": 73
+          },
+          "pointed": {
+            "x": 75,
+            "y": 105,
+            "screenIndex": 0,
+            "label": "save button in the toolbar"
+          },
+          "verdict": "hit",
+          "errorPx": 31,
+          "userText": "point at the save button in the toolbar",
+          "assistantText": "that’s the save button right there in the toolbar. if you want to level up, try tapping export after saving to keep a clean copy ready to share.",
+          "latency": {
+            "askToFirstToolCallMs": 1187,
+            "askToFirstAudioDeltaMs": 1814,
+            "askToDoneMs": 3271
+          },
+          "usage": {
+            "inputTokens": 5072,
+            "outputTokens": 243,
+            "totalTokens": 5315,
+            "inputTextTokens": 3134,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 1938,
+            "cachedTokens": 4495,
+            "outputTextTokens": 84,
+            "outputAudioTokens": 159,
+            "responses": 2
+          }
+        },
+        {
+          "name": "open",
+          "desc": "the open button in the toolbar",
+          "rect": {
+            "x": 211,
+            "y": 66,
+            "width": 173,
+            "height": 73
+          },
+          "pointed": {
+            "x": 210,
+            "y": 105,
+            "screenIndex": 0,
+            "label": "open button in the toolbar"
+          },
+          "verdict": "near",
+          "errorPx": 88,
+          "rectDistPx": 1,
+          "userText": "point at the open button in the toolbar",
+          "assistantText": "that’s the open button in the toolbar. if you want to try something next, open a different file and compare it side by side with your current notes.",
+          "latency": {
+            "askToFirstToolCallMs": 1432,
+            "askToFirstAudioDeltaMs": 2120,
+            "askToDoneMs": 3578
+          },
+          "usage": {
+            "inputTokens": 6234,
+            "outputTokens": 241,
+            "totalTokens": 6475,
+            "inputTextTokens": 3650,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 2584,
+            "cachedTokens": 5653,
+            "outputTextTokens": 84,
+            "outputAudioTokens": 157,
+            "responses": 2
+          }
+        },
+        {
+          "name": "export",
+          "desc": "the export button in the toolbar",
+          "rect": {
+            "x": 408,
+            "y": 65,
+            "width": 161,
+            "height": 75
+          },
+          "pointed": {
+            "x": 385,
+            "y": 105,
+            "screenIndex": 0,
+            "label": "export button in the toolbar"
+          },
+          "verdict": "near",
+          "errorPx": 104,
+          "rectDistPx": 23,
+          "userText": "point at the export button in the toolbar",
+          "assistantText": "that’s the export button in the toolbar. after you use it, you could pop into settings and make sure the format and options are exactly how you want.",
+          "latency": {
+            "askToFirstToolCallMs": 1320,
+            "askToFirstAudioDeltaMs": 2035,
+            "askToDoneMs": 3653
+          },
+          "usage": {
+            "inputTokens": 7396,
+            "outputTokens": 247,
+            "totalTokens": 7643,
+            "inputTextTokens": 4166,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 3230,
+            "cachedTokens": 6811,
+            "outputTextTokens": 84,
+            "outputAudioTokens": 163,
+            "responses": 2
+          }
+        },
+        {
+          "name": "settings",
+          "desc": "the settings button in the toolbar",
+          "rect": {
+            "x": 593,
+            "y": 66,
+            "width": 185,
+            "height": 73
+          },
+          "pointed": {
+            "x": 545,
+            "y": 105,
+            "screenIndex": 0,
+            "label": "settings button in the toolbar"
+          },
+          "verdict": "miss",
+          "errorPx": 141,
+          "rectDistPx": 48,
+          "userText": "point at the settings button in the toolbar",
+          "assistantText": "that’s the settings button in the toolbar. if you want to keep going, open it and tweak one option, like export format or defaults, to match how you usually work.",
+          "latency": {
+            "askToFirstToolCallMs": 1400,
+            "askToFirstAudioDeltaMs": 2298,
+            "askToDoneMs": 3917
+          },
+          "usage": {
+            "inputTokens": 8558,
+            "outputTokens": 265,
+            "totalTokens": 8823,
+            "inputTextTokens": 4682,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 3876,
+            "cachedTokens": 8033,
+            "outputTextTokens": 88,
+            "outputAudioTokens": 177,
+            "responses": 2
+          }
+        },
+        {
+          "name": "share",
+          "desc": "the share button in the toolbar",
+          "rect": {
+            "x": 802,
+            "y": 66,
+            "width": 174,
+            "height": 73
+          },
+          "pointed": {
+            "x": 710,
+            "y": 105,
+            "screenIndex": 0,
+            "label": "share button in the toolbar"
+          },
+          "verdict": "miss",
+          "errorPx": 179,
+          "rectDistPx": 92,
+          "userText": "point at the share button in the toolbar",
+          "assistantText": "that’s the share button in the toolbar. after you hit it, you could also add a quick note in the document saying what feedback you want, so people know exactly how to help.",
+          "latency": {
+            "askToFirstToolCallMs": 1444,
+            "askToFirstAudioDeltaMs": 2345,
+            "askToDoneMs": 3929
+          },
+          "usage": {
+            "inputTokens": 9728,
+            "outputTokens": 259,
+            "totalTokens": 9987,
+            "inputTextTokens": 5206,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 4522,
+            "cachedTokens": 9191,
+            "outputTextTokens": 90,
+            "outputAudioTokens": 169,
+            "responses": 2
+          }
+        }
+      ]
+    },
+    {
+      "scene": "form",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "email",
+          "desc": "the email address field",
+          "rect": {
+            "x": 1025,
+            "y": 622,
+            "width": 511,
+            "height": 64
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 647.5,
+            "screenIndex": 0,
+            "label": "email address field"
+          },
+          "verdict": "hit",
+          "errorPx": 7,
+          "userText": "point at the email address field",
+          "assistantText": "that’s the email address field. once you type your email, you could tab down to the password field and paste a strong one from your password manager.",
+          "latency": {
+            "askToFirstToolCallMs": 2082,
+            "askToFirstAudioDeltaMs": 2990,
+            "askToDoneMs": 4435
+          },
+          "usage": {
+            "inputTokens": 10895,
+            "outputTokens": 239,
+            "totalTokens": 11134,
+            "inputTextTokens": 5727,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 5168,
+            "cachedTokens": 10349,
+            "outputTextTokens": 82,
+            "outputAudioTokens": 157,
+            "responses": 2
+          }
+        },
+        {
+          "name": "password",
+          "desc": "the password field",
+          "rect": {
+            "x": 1025,
+            "y": 741,
+            "width": 511,
+            "height": 64
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 722.5,
+            "screenIndex": 0,
+            "label": "password field"
+          },
+          "verdict": "near",
+          "errorPx": 51,
+          "rectDistPx": 19,
+          "userText": "point at the password field",
+          "assistantText": "that’s the password field. after you fill it in, you could tick the newsletter box if you want updates, then hit the create account button.",
+          "latency": {
+            "askToFirstToolCallMs": 1420,
+            "askToFirstAudioDeltaMs": 2404,
+            "askToDoneMs": 3615
+          },
+          "usage": {
+            "inputTokens": 12041,
+            "outputTokens": 214,
+            "totalTokens": 12255,
+            "inputTextTokens": 6227,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 5814,
+            "cachedTokens": 11507,
+            "outputTextTokens": 80,
+            "outputAudioTokens": 134,
+            "responses": 2
+          }
+        },
+        {
+          "name": "subscribe",
+          "desc": "the subscribe to newsletter checkbox",
+          "rect": {
+            "x": 1025,
+            "y": 835,
+            "width": 26,
+            "height": 26
+          },
+          "pointed": {
+            "x": 1015,
+            "y": 785,
+            "screenIndex": 0,
+            "label": "subscribe to newsletter checkbox"
+          },
+          "verdict": "miss",
+          "errorPx": 67,
+          "rectDistPx": 51,
+          "userText": "point at the subscribe to newsletter checkbox",
+          "assistantText": "that’s the newsletter checkbox. if you’re unsure, you can leave it unchecked for now, then click create account and decide later from your profile settings.",
+          "latency": {
+            "askToFirstToolCallMs": 1549,
+            "askToFirstAudioDeltaMs": 2544,
+            "askToDoneMs": 4059
+          },
+          "usage": {
+            "inputTokens": 13190,
+            "outputTokens": 251,
+            "totalTokens": 13441,
+            "inputTextTokens": 6730,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 6460,
+            "cachedTokens": 12665,
+            "outputTextTokens": 82,
+            "outputAudioTokens": 169,
+            "responses": 2
+          }
+        },
+        {
+          "name": "submit",
+          "desc": "the create account button",
+          "rect": {
+            "x": 1025,
+            "y": 899,
+            "width": 511,
+            "height": 67
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 855,
+            "screenIndex": 0,
+            "label": "create account button"
+          },
+          "verdict": "miss",
+          "errorPx": 78,
+          "rectDistPx": 44,
+          "userText": "point at the create account button",
+          "assistantText": "that’s the create account button. after you click it, you could also save your login in your password manager so you’re set for next time.",
+          "latency": {
+            "askToFirstToolCallMs": 1627,
+            "askToFirstAudioDeltaMs": 2648,
+            "askToDoneMs": 3845
+          },
+          "usage": {
+            "inputTokens": 14341,
+            "outputTokens": 209,
+            "totalTokens": 14550,
+            "inputTextTokens": 7235,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 7106,
+            "cachedTokens": 13759,
+            "outputTextTokens": 79,
+            "outputAudioTokens": 130,
+            "responses": 2
+          }
+        }
+      ]
+    },
+    {
+      "scene": "shop",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "search",
+          "desc": "the search box",
+          "rect": {
+            "x": 188,
+            "y": 25,
+            "width": 760,
+            "height": 55
+          },
+          "pointed": {
+            "x": 1015,
+            "y": 72.5,
+            "screenIndex": 0,
+            "label": "search box"
+          },
+          "verdict": "miss",
+          "errorPx": 447,
+          "rectDistPx": 67,
+          "userText": "point at the search box",
+          "assistantText": "that’s the search box. after you try a search, you could also filter by category or price to narrow things down faster.",
+          "latency": {
+            "askToFirstToolCallMs": 1670,
+            "askToFirstAudioDeltaMs": 3281,
+            "askToDoneMs": 4538
+          },
+          "usage": {
+            "inputTokens": 15484,
+            "outputTokens": 211,
+            "totalTokens": 15695,
+            "inputTextTokens": 7732,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 7752,
+            "cachedTokens": 14917,
+            "outputTextTokens": 75,
+            "outputAudioTokens": 136,
+            "responses": 2
+          }
+        },
+        {
+          "name": "cart",
+          "desc": "the shopping cart icon",
+          "rect": {
+            "x": 2427,
+            "y": 20,
+            "width": 85,
+            "height": 64
+          },
+          "pointed": {
+            "x": 2435,
+            "y": 62.5,
+            "screenIndex": 0,
+            "label": "shopping cart icon"
+          },
+          "verdict": "hit",
+          "errorPx": 36,
+          "userText": "point at the shopping cart icon",
+          "assistantText": "that’s the shopping cart icon. you could click it to review what’s in your cart, and if it’s empty, maybe add these headphones first to see the checkout flow.",
+          "latency": {
+            "askToFirstToolCallMs": 1810,
+            "askToFirstAudioDeltaMs": 3006,
+            "askToDoneMs": 4525
+          },
+          "usage": {
+            "inputTokens": 16621,
+            "outputTokens": 253,
+            "totalTokens": 16874,
+            "inputTextTokens": 8223,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 8398,
+            "cachedTokens": 16075,
+            "outputTextTokens": 87,
+            "outputAudioTokens": 166,
+            "responses": 2
+          }
+        },
+        {
+          "name": "reviews",
+          "desc": "the customer reviews link",
+          "rect": {
+            "x": 856,
+            "y": 235,
+            "width": 216,
+            "height": 28
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 315,
+            "screenIndex": 0,
+            "label": "customer reviews link"
+          },
+          "verdict": "miss",
+          "errorPx": 323,
+          "rectDistPx": 214,
+          "userText": "point at the customer reviews link",
+          "assistantText": "that’s the customer reviews link. after you open it, you could skim the lowest-rated reviews too, just to check for any deal-breakers before buying.",
+          "latency": {
+            "askToFirstToolCallMs": 1737,
+            "askToFirstAudioDeltaMs": 2961,
+            "askToDoneMs": 4320
+          },
+          "usage": {
+            "inputTokens": 17781,
+            "outputTokens": 230,
+            "totalTokens": 18011,
+            "inputTextTokens": 8737,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 9044,
+            "cachedTokens": 17233,
+            "outputTextTokens": 83,
+            "outputAudioTokens": 147,
+            "responses": 2
+          }
+        },
+        {
+          "name": "price",
+          "desc": "the price of the headphones",
+          "rect": {
+            "x": 720,
+            "y": 289,
+            "width": 164,
+            "height": 59
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 377.5,
+            "screenIndex": 0,
+            "label": "headphones price"
+          },
+          "verdict": "miss",
+          "errorPx": 482,
+          "rectDistPx": 397,
+          "userText": "point at the price of the headphones",
+          "assistantText": "that’s the price for the headphones. if you’re watching your budget, you could keep an eye out for a sale or check a couple similar models and compare features before adding to cart.",
+          "latency": {
+            "askToFirstToolCallMs": 2375,
+            "askToFirstAudioDeltaMs": 3735,
+            "askToDoneMs": 5431
+          },
+          "usage": {
+            "inputTokens": 18935,
+            "outputTokens": 265,
+            "totalTokens": 19200,
+            "inputTextTokens": 9245,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 9690,
+            "cachedTokens": 18391,
+            "outputTextTokens": 89,
+            "outputAudioTokens": 176,
+            "responses": 2
+          }
+        },
+        {
+          "name": "add-to-cart",
+          "desc": "the add to cart button",
+          "rect": {
+            "x": 720,
+            "y": 532,
+            "width": 220,
+            "height": 73
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 505,
+            "screenIndex": 0,
+            "label": "add to cart button"
+          },
+          "verdict": "miss",
+          "errorPx": 454,
+          "rectDistPx": 341,
+          "userText": "point at the add to cart button",
+          "assistantText": "that’s the add to cart button. after you click it, you could pop up to the cart and check the shipping and total before you commit.",
+          "latency": {
+            "askToFirstToolCallMs": 2003,
+            "askToFirstAudioDeltaMs": 3382,
+            "askToDoneMs": 4734
+          },
+          "usage": {
+            "inputTokens": 20103,
+            "outputTokens": 232,
+            "totalTokens": 20335,
+            "inputTextTokens": 9767,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 10336,
+            "cachedTokens": 19549,
+            "outputTextTokens": 82,
+            "outputAudioTokens": 150,
+            "responses": 2
+          }
+        }
+      ]
+    },
+    {
+      "scene": "tricky",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "small-icon",
+          "desc": "the small bell notification icon",
+          "rect": {
+            "x": 2504,
+            "y": 22,
+            "width": 24,
+            "height": 24
+          },
+          "pointed": {
+            "x": 2517.5,
+            "y": 55,
+            "screenIndex": 0,
+            "label": "bell notification icon"
+          },
+          "verdict": "near",
+          "errorPx": 21,
+          "rectDistPx": 9,
+          "userText": "point at the small bell notification icon",
+          "assistantText": "that’s the little bell notification icon. if you click it, you could also clear any old alerts so new ones stand out more.",
+          "latency": {
+            "askToFirstToolCallMs": 2083,
+            "askToFirstAudioDeltaMs": 4085,
+            "askToDoneMs": 5455
+          },
+          "usage": {
+            "inputTokens": 21255,
+            "outputTokens": 229,
+            "totalTokens": 21484,
+            "inputTextTokens": 10273,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 10982,
+            "cachedTokens": 20707,
+            "outputTextTokens": 78,
+            "outputAudioTokens": 151,
+            "responses": 2
+          }
+        },
+        {
+          "name": "save",
+          "desc": "the save button (not save as)",
+          "rect": {
+            "x": 973,
+            "y": 291,
+            "width": 112,
+            "height": 59
+          },
+          "pointed": {
+            "x": 1102.5,
+            "y": 308.75,
+            "screenIndex": 0,
+            "label": "save button"
+          },
+          "verdict": "near",
+          "errorPx": 74,
+          "rectDistPx": 18,
+          "userText": "point at the save button (not save as)",
+          "assistantText": "that’s the save button, not save as. once you click it, you could test save as too, just to make sure you can keep a separate version when you need one.",
+          "latency": {
+            "askToFirstToolCallMs": 2223,
+            "askToFirstAudioDeltaMs": 3670,
+            "askToDoneMs": 5317
+          },
+          "usage": {
+            "inputTokens": 22402,
+            "outputTokens": 262,
+            "totalTokens": 22664,
+            "inputTextTokens": 10774,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 11628,
+            "cachedTokens": 21865,
+            "outputTextTokens": 86,
+            "outputAudioTokens": 176,
+            "responses": 2
+          }
+        },
+        {
+          "name": "save-as",
+          "desc": "the save as button",
+          "rect": {
+            "x": 1105,
+            "y": 291,
+            "width": 140,
+            "height": 59
+          },
+          "pointed": {
+            "x": 1205,
+            "y": 308.75,
+            "screenIndex": 0,
+            "label": "save as button"
+          },
+          "verdict": "hit",
+          "errorPx": 32,
+          "userText": "point at the save as button",
+          "assistantText": "that’s the save as button. after you use it, you could rename the copy with a version tag, like v2, so it’s easy to spot later.",
+          "latency": {
+            "askToFirstToolCallMs": 2101,
+            "askToFirstAudioDeltaMs": 3628,
+            "askToDoneMs": 5493
+          },
+          "usage": {
+            "inputTokens": 23560,
+            "outputTokens": 247,
+            "totalTokens": 23807,
+            "inputTextTokens": 11286,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 12274,
+            "cachedTokens": 22959,
+            "outputTextTokens": 84,
+            "outputAudioTokens": 163,
+            "responses": 2
+          }
+        },
+        {
+          "name": "edge-button",
+          "desc": "the help button in the bottom right corner of the screen",
+          "rect": {
+            "x": 2466,
+            "y": 1388,
+            "width": 86,
+            "height": 44
+          },
+          "pointed": {
+            "x": 2500,
+            "y": 1400,
+            "screenIndex": 0,
+            "label": "help button"
+          },
+          "verdict": "hit",
+          "errorPx": 13,
+          "userText": "point at the help button in the bottom right corner of the screen",
+          "assistantText": "that’s the help button in the bottom right. if you open it, you could also search for “export” to quickly find tips related to this screen.",
+          "latency": {
+            "askToFirstToolCallMs": 2113,
+            "askToFirstAudioDeltaMs": 3716,
+            "askToDoneMs": 5117
+          },
+          "usage": {
+            "inputTokens": 24728,
+            "outputTokens": 233,
+            "totalTokens": 24961,
+            "inputTextTokens": 11808,
+            "inputAudioTokens": 0,
+            "inputImageTokens": 12920,
+            "cachedTokens": 24117,
+            "outputTextTokens": 83,
+            "outputAudioTokens": 150,
+            "responses": 2
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "hit": 7,
+    "near": 5,
+    "miss": 8,
+    "error": 0
+  },
+  "finishedAt": "2026-07-12T17:09:21.870Z"
+}

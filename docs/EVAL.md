@@ -311,3 +311,119 @@ targets); full model doubles quality but still misses the strict gates at the cu
 3. Keep the no-refusal persona clause + residual-playback barge-in fix (both landed in this
    eval); consider forcing `tool_choice` for "point at …"-style asks as a belt-and-braces
    adherence guarantee.
+
+Recommendations 1 and 2 were executed as M8.6 — see §8 for the re-gate results and the final
+configuration decision.
+
+## 8. Pointing re-gate (M8.6, 2026-07-12)
+
+Same machine (4K@150%, 2560×1440 DIP), same scenes/gates as §7.3. Changes under test:
+capture cap raised **1280 → 2048** px longest edge (`CAPTURE_MAX_EDGE`, `shared/constants.ts`;
+each image px now covers 1.25 DIP instead of 2 DIP), model ladder mini → full, and one
+prompt-side lever (coordinate anchors + a fraction→pixel worked example in the image-framing
+text, `session.ts buildImageContent`). Gates: unambiguous scenes (toolbar/form/shop, 15
+targets) strict ≥70%, strict+near ≥90%.
+
+### 8.1 Config matrix
+
+Strict / strict+near on the 15 unambiguous targets; "median err" is over pointed turns on
+those scenes (px, global DIP). Calibration hit in every run (0-30px), so the mapping pipeline
+stayed exact throughout.
+
+| config (resolution × model × lever) | strict | strict+near | median err | worst err | tricky (4) | evidence |
+|---|---:|---:|---:|---:|---|---|
+| 1280 × mini × none (§7.3 baseline) | 13% | 40% | ~110 | 714 | 0 hit | §7.7 |
+| 2048 × mini × none | **0%** | 27% | 150 | 615 | 0 hit, all miss | `results/2026-07-12T16-59-46` |
+| 2048 × full × none | 33% | 53% | 105 | 239 | 2 hit (24px icon at 10px err) | `results/2026-07-12T17-03-09` |
+| 2048 × full × anchors v1 (incl. center landmark) | 27% | 47% | 88 | 482 | 2 hit 2 near | `results/2026-07-12T17-07-31` |
+| 2048 × full × anchors v2 (corners only, final) | 40-47% | 53% | 90 | 533 | 1 hit 2 near | `results/2026-07-12T17-10-12`, shop re-run `…T17-12-58` |
+
+Per-scene notes (why the lever is a wash overall but ships anyway):
+
+- **mini did NOT benefit from 2048** — its coordinate frame is mis-scaled regardless of input
+  resolution (at 2048 it drifted the opposite direction: expansion ~1.2-1.4x down-right vs
+  the compression seen at 1280). Resolution was never mini's bottleneck; its localization is.
+- **full clearly benefits from 2048**: finds every small element (24px tricky icon HIT at
+  10px, 30px menu item HIT at 13px, screen-corner button HIT at 8px — all impossible at
+  1280), and its worst-case error dropped ~3x vs mini.
+- **anchors lever**: dramatic on top-left-anchored UI — toolbar went 2 hit → 5 hit + 1 near
+  (errors 2-90px), form errors halved, tricky's twin save/save-as disambiguated — but it
+  *pulls left-column targets toward the horizontal center* on the realistic shop page
+  (reviews/price/add-to-cart missed right by 180-530px in both lever runs; without the lever
+  shop was full's best scene). v1's explicit "center (1024,576)" landmark caused literal
+  center-snapping (3 targets pointed at exactly x=1024) and was removed in v2.
+- Drift measured across all runs is **scene-dependent in sign and magnitude** (toolbar
+  compresses x toward origin without the lever, shop pulls toward center with it, form drifts
+  y only) — NOT a stable linear transform, so a response-side affine/display-profile
+  correction was evaluated and rejected as unsound.
+
+### 8.2 Final configuration (shipped)
+
+**`gpt-realtime-2.1` (full) default + 2048px capture + coordinate-anchor framing.**
+
+- `CAPTURE_MAX_EDGE` 1280 → 2048 (`src/shared/constants.ts`).
+- `DEFAULT_SETTINGS.model` / `DEFAULT_MODEL` → `'gpt-realtime-2.1'` (orchestrator-approved;
+  `src/shared/types.ts`, `src/shared/constants.ts`). mini stays selectable — settings load
+  validation fixed to accept both ids so a stored mini choice survives the default flip
+  (`src/main/settings.ts`). Panel labels now say mini = faster/cheaper, full = best pointing.
+- Image-framing text now states the coordinate convention with corner anchors + a
+  fraction→pixel worked example and an anti-center-default instruction
+  (`src/main/realtime/session.ts`). Rationale: toolbar/menu/form chrome is the primary MVP
+  pointing surface and improved 2-4x; the shop-style regression is documented above.
+
+### 8.3 Gate verdicts at the final configuration
+
+| Gate | Target | Measured | Verdict |
+|---|---|---|---|
+| Pointing strict (unambiguous) | ≥70% | 40-47% (6-7/15) | **FAIL** |
+| Pointing strict+near | ≥90% | 53% (8/15) | **FAIL** |
+| Capture latency at 2048 | <800ms | 564ms median voice-path (487-1094; one outlier >800), 436-446ms text-path (vs 343-411ms at 1280) | PASS (median) |
+| Release → first audio delta (voice ×5, full model) | p50 <2.5s | **p50 1997ms** (1693-2513) | PASS |
+| First delta → first played | <150ms | 10-65ms | PASS |
+| Barge-in stop | <300ms | 26ms ×3 | PASS |
+| Voice-driven pointing loop (toolbar, fake mic) | loop completes | 5/5 attempted turns: real ASR verbatim, pointer fired, audio played (2 hit / 3 miss — in line with text mode) | PASS (loop), accuracy as above |
+| Ask → first pointer (text) | report | p50 ~1.7s, p90 ~2.4s (full; mini 2.1/2.8) | — |
+
+Token/latency cost of 2048: ~3.4k image tokens/response (~2.3x the 1280 cost), absorbed
+almost entirely by caching within a session (94% of input tokens cached across the runs);
+ask→pointer p50 actually *improved* on full (1.7s at 2048 vs mini's 1.5s at 1280 §7.2, and
+full-at-2048 beat mini-at-2048's 2.1s). The full model adds no measurable latency penalty
+over mini on this workload — the p50 voice gate passes with 500ms of headroom.
+
+M8.6 spend: 89 scored turns / 178 responses (+~15 unscored: voice round-trip phases,
+evidence turns) — 1.05M input tokens (95% cached), 27k output. Estimated **≈$1.50-2.00**
+at published gpt-realtime(-mini) rates.
+
+Evidence: run dirs listed in the matrix; live-point screenshot (buddy on the Save button
+with label chip + lowercase caption, verified by reading the 4K PNG):
+`eval/results/2026-07-12-m8.6-evidence/live-point-save.png`.
+
+Known harness/robustness follow-ups found during M8.6 (not pointing-related):
+`app-toolbar--menu-file` was missing from the utterance catalog, so the voice run scored 5/6
+with 1 harness error (fixed: catalog entry + wav added). And one live voice-roundtrip run
+wedged after barge-in when a ~60ms hold was committed — the API rejects commits under 100ms
+of audio ("buffer too small"), the session entered error state and the next turn timed out;
+open follow-up: the hold-side guard should skip the commit below the server minimum.
+
+### 8.4 Honest assessment — pointing UX today
+
+The strict gates remain **NO-GO at every tested configuration**. What ships is the best
+measured combination, and its real-world shape is:
+
+- **Reading/labeling is solved** — the model names the right element essentially every time,
+  in both voice and text; ASR, latency, barge-in and persona all pass with margin.
+- **Coarse pointing is credible**: on toolbar/menu/form chrome the buddy now lands on or
+  within a finger's width of the target (median ~50-90px ≈ one button off at worst); small
+  icons are found. On dense/realistic pages a miss can still be half a card away.
+- The residual error is the model's **image-space coordinate estimation**, which is
+  scene-dependent and not correctable by resolution (mini), prompting (only partially), or a
+  fixed affine (drift isn't stable). This is a model-capability ceiling today.
+
+Post-MVP path to actually pass the gates: **element snapping** — enumerate on-screen
+elements via UIA (`IUIAutomation` tree walk, ~50-200ms cached per foreground window) and/or
+OCR (Windows.Media.Ocr on the existing capture), then snap the model's point to the nearest
+element whose name/role matches the spoken label (the label is already near-perfect, so
+label-matching does most of the work and the coordinate only breaks ties). Estimated effort:
+UIA provider + label matcher + overlay snap ≈ 1-2 weeks including tests; it also unlocks
+click-through "do it for me" later. Alternative/complement: a per-turn grounding call to a
+dedicated vision model with known-good localization, at +1 round-trip of latency.
