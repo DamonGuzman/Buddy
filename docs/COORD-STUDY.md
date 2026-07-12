@@ -58,24 +58,27 @@ strong non-realtime vision model via REST (`rest-sanity.mjs`, gpt-5.2,
 strict-JSON coords) to see whether coordinate weakness is
 realtime-family-specific.
 
-## 3. Results — gpt-realtime-2.1, synthetic (24 targets/condition: 12 x 2 layouts)
+## 3. Results — synthetic images (24 targets/condition: 12 x 2 layouts)
 
-> STATUS: partial. The OpenAI account hit `insufficient_quota` mid-run
-> (2026-07-12, after ~$0.36 of this study's spend; other agents were spending
-> from the same account concurrently). Completed: baseline-plain,
-> baseline-anchors, grid-100 (full), ruler-edge (9/24). Pending: rest of
-> ruler-edge, fiducials, normalized, think-first, mini transfer, REST sanity,
-> real-screenshot runs. `resume-when-quota.sh` re-runs the remainder.
+(Run note: the account hit `insufficient_quota` mid-experiment on 2026-07-12
+— other agents were spending from the same key concurrently; the run resumed
+cleanly after quota restoration. One ruler-edge session was re-run in full.)
 
-| condition | n ok | median err | p90 err | max | ≤40px | ≤100px | hit% | p50 latency |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| baseline-plain | 24 | 83 | 243 | 292 | 29% | 54% | 33% | 1.2s |
-| baseline-anchors (production) | 24 | 81 | 283 | 313 | 38% | 58% | 25% | 1.1s |
-| grid-100 | 24 | 84 | 133 | 200 | 29% | 58% | 17% | 1.2s |
-| ruler-edge (partial, 9 ok) | 9 | 82 | 240 | 280 | 11% | 67% | 22% | 1.0s |
-| fiducials | — | | | | | | | |
-| normalized | — | | | | | | | |
-| think-first | — | | | | | | | |
+All rows `gpt-realtime-2.1` except where marked. 24/24 turns pointed in every
+condition (no refusals — the production no-refusal persona clause was used);
+the target LABEL echoed by the model was correct on every single turn, in
+every condition, on every model. Only coordinates are wrong, ever.
+
+| condition | median err | p90 err | max | ≤40px | ≤100px | in-element hit% | p50 ask→pointer |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| baseline-plain | 83 | 243 | 292 | 29% | 54% | 33% | 1.2s |
+| baseline-anchors (production) | 81 | 283 | 313 | 38% | 58% | 25% | 1.1s |
+| grid-100 | 84 | 133 | **200** | 29% | 58% | 17% | 1.2s |
+| ruler-edge | 71 | 191 | 240 | 33% | 54% | 38% | 1.1s |
+| fiducials | 88 | 309 | 453 | 8% | 54% | 21% | 1.8s |
+| **normalized (0-1000 tool)** | **56** | 248 | 405 | 29% | 63% | 33% | 1.0s |
+| think-first | 126 | 207 | 358 | 33% | 46% | 29% | 1.3s |
+| gpt-5.2 via REST (plain) | **40** | **62** | **106** | **50%** | **92%** | 42% | 1.3s |
 
 Zone medians (px), pooled per condition:
 
@@ -84,6 +87,11 @@ Zone medians (px), pooled per condition:
 | baseline-plain | 40 | 44 | 53 | 237 | 161 |
 | baseline-anchors | 31 | 85 | 65 | 166 | 158 |
 | grid-100 | 57 | 72 | 39 | 128 | 122 |
+| ruler-edge | 49 | 121 | 15 | 185 | 87 |
+| fiducials | 54 | 118 | 51 | 292 | 120 |
+| normalized | 25 | 119 | 74 | 133 | 138 |
+| think-first | 33 | 180 | 36 | 155 | 153 |
+| gpt-5.2 REST | 27 | 50 | 34 | 47 | 39 |
 
 ## 4. Drift structure
 
@@ -122,34 +130,120 @@ Key structural findings (per-target error vectors):
 - **grid-100 doesn't move the median (84px) but halves the tail**: p90
   243→133, max 292→200, cluster median 237→128. The model uses gridlines to
   avoid gross mislocation but still can't do better than ~1 grid cell.
+- **Fiducial markers actively hurt** (max error 453px, within-40 8%, +0.6s
+  latency): the model attends to the labeled crosshairs but interpolates
+  badly between them, and the added clutter degrades everything else. Ruler
+  ticks are mildly useful on edge targets (median 15px!) and useless
+  in the interior — the model can't project accurately across 1000px of
+  empty screen.
+- **think-first exposes WHERE the error lives.** The verbal descriptions are
+  structurally right ("CART about 1/2 across, 1/12 down" → 0px error) but the
+  stated fractions are themselves wrong for interior targets: it said COPY
+  sits "2/5 across" (819px) when it sits at 30% (620px) — and its point_at
+  matched its words, not the pixels. The same wrong fractions appear
+  verbatim in the normalized condition's raw output (COPY/PASTE/CUT emitted
+  at exactly 400/500/600 of 1000). Coordinate EMISSION is faithful;
+  fractional-position PERCEPTION is what's broken. Prompting cannot fix
+  perception, which is why every framing lever plateaus at ~the same error.
+- **Normalized 0-1000 coordinates are the best cheap lever** (median 83→56,
+  and corner targets drop to 25px median): removing the fraction→pixel
+  multiplication step eliminates the arithmetic-sloppiness component. The
+  tail stays (405px max) because perception drift remains.
+- **gpt-5.2 (non-realtime, REST, bare image) halves the error across the
+  board** — median 40px, p90 62, max 106, 92% within 100px, and the dense
+  cluster (realtime's nemesis: 130-290px) lands at 47px median. Coordinate
+  weakness is a REALTIME-FAMILY limitation, not a general vision ceiling:
+  the realtime models trade visual grounding precision for latency.
 
-## 5. Real-screenshot check
+## 5. Real-screenshot check (gpt-realtime-2.1, 5 targets, this machine's 4K desktop at 2048px)
 
-Pending quota (images + ground truth ready: `images/real-*.jpg`,
-`real-targets.json`).
+| condition | startbtn | clock | review | newtask | openin | median |
+|---|---:|---:|---:|---:|---:|---:|
+| baseline-anchors (production) | 670 | 50 | 289 | 100 | 65 | 100 |
+| grid-100 overlay | 254 | 51 | 76 | 130 | 108 | 108 |
+| normalized tool | 651 | 37 (HIT) | 310 | 160 | 52 | 160 |
+
+Synthetic results carry over (medians ~100-160 vs ~56-84 — real content is
+harder), plus one new failure mode invisible on synthetic scenes:
+**prior-driven pointing**. Asked for the Windows Start button on this
+centered Win11 taskbar (truth x=706), both bare-image conditions put it in
+the bottom-LEFT corner (x=36 and x=55 — a Windows-10 prior overriding what is
+actually visible; err ~660px). The grid overlay partially snapped it back
+toward reality (x=960, still 254px off). The "Review" button inside the app
+window missed by ~300px in both bare conditions, 76px with the grid.
+Same shape as synthetic: gridlines can't fix the median but clamp the
+catastrophes (max 254 vs 670/651).
 
 ## 6. Model comparison
 
-Pending quota (`gpt-realtime-2.1-mini` transfer + `rest-sanity.mjs` on
-gpt-5.2).
+Transfer of the two best interventions to `gpt-realtime-2.1-mini`
+(synthetic, 24 targets each) — **they do not transfer**:
 
-## 7. Conclusions (updated as results land)
+| model x condition | median | p90 | max | ≤40px | hit% |
+|---|---:|---:|---:|---:|---:|
+| full x normalized | 56 | 248 | 405 | 29% | 33% |
+| mini x normalized | 133 | 234 | 275 | 17% | 21% |
+| full x grid-100 | 84 | 133 | 200 | 29% | 17% |
+| mini x grid-100 | 114 | 336 | **951** | 4% | 4% |
 
-1. **Nothing app-side is off.** On a bare WS harness with programmatically
-   exact ground truth — no capture, no DPI/DIP mapping, no overlay — the raw
-   model reproduces the live numbers (~80px median, ~300px tail vs live
-   ~90-105px median, 533px worst). Combined with the 0px calibration, the
-   entire pointing error is the model's image-space coordinate estimation.
-2. **Anchor framing (shipped in M8.6) does not measurably improve neutral
-   scenes**; it is not harmful either (38% vs 29% within-40 is noise at n=24).
-3. **Gridline compositing is the most promising overlay so far**: it doesn't
-   fix typical error but reliably clips the catastrophic tail (worst-case
-   halved). Whether that's worth polluting the model's view of the screen
-   depends on the remaining conditions.
-4. Neither baseline nor any completed intervention approaches the bar that
-   would change the product decision (median <40px or ≥70% within 40px).
-   Element snapping (UIA/OCR label-matching, EVAL.md §8.4) remains the only
-   credible route to strict-gate accuracy.
+mini's localization is so noisy that gridlines make it worse (it points at
+grid labels/lines; 951px worst). No prompt- or image-side lever rescues mini
+— consistent with §8.1's finding that resolution didn't either.
+
+The non-realtime sanity model (`gpt-5.2`, REST chat API, bare image,
+strict-JSON coords) is the strongest condition in the whole study: median
+40px, p90 62, max 106, 92% within 100px — on the same images where the
+realtime full model does 83/243/292. The realtime family specifically, not
+"LLMs", is weak at coordinate grounding. (Harness note for the mini rows:
+one session initially wedged on a client-side timeout because the stuck
+response was never cancelled server-side — subsequent `response.create`s were
+rejected with "conversation already has an active response". Fixed in
+`harness.mjs` by sending `response.cancel` on timeout; the app's session.ts
+already handles this via its watchdog + cancel path.)
+
+## 7. Conclusions
+
+1. **Nothing app-side is off — verdict: genuine model limitation.** On a
+   bare WS harness with programmatically exact ground truth — no capture, no
+   DPI/DIP mapping, no overlay, no app code at all — the raw model reproduces
+   the live numbers (synthetic median 81-83px / tail ~300px vs live median
+   ~90-105px / worst 533px). Combined with the app's 0px calibration, 100% of
+   the production pointing error is the model's image-space coordinate
+   estimation. The suspicion that "something may be off" is answered: no.
+2. **The error is perceptual, not arithmetic.** think-first + normalized
+   jointly show the model states and emits the same wrong fractional
+   position (~consistent to the pixel across framings); relative geometry is
+   preserved (clusters displace rigidly) while the absolute frame drifts
+   scene-dependently. That is why no framing text can fix it.
+3. **No intervention reaches the bar that would matter** (median <40px or
+   ≥70% within 40px). Best levers on the full model: normalized 0-1000
+   coords cut the median 83→56px (-33%) but leave the tail; a 100px grid
+   overlay leaves the median but halves the tail (p90 243→133, max 292→200,
+   real-screenshot max 670→254). Fiducial markers and think-first HURT.
+   Anchor framing (shipped in M8.6) is a wash. Nothing transfers to mini.
+4. **Coordinate weakness is realtime-family-specific**: gpt-5.2 over REST on
+   identical images scores 40/62/106 (median/p90/max) — 2x better median,
+   4x better p90, and it nails the dense clusters that break the realtime
+   models. A per-turn grounding call to a non-realtime model would roughly
+   match the app's "near" radius at +1 round trip (~1.3s measured here).
+5. **Recommendation:**
+   - Keep `gpt-realtime-2.1` + current anchors framing (harmless), accept
+     the model ceiling for MVP, and build **element snapping** (UIA/OCR
+     label-matching, EVAL.md §8.4) as the accuracy fix — the label is right
+     on 100% of turns in every condition of this study, so label-matching
+     carries the accuracy and coordinates only break ties.
+   - **Do not composite grid overlays into production captures**: +0-25px
+     median cost, screen pollution the model can also *talk about*, and the
+     tail-taming it buys (254-670px misses → still misses) doesn't change
+     any user-visible outcome; snapping supersedes it.
+   - **Consider switching the point_at tool to normalized 0-1000 coords**
+     (median -33% on the full model for free, no image pollution, trivially
+     mapped in `coords.ts`) — worthwhile even alongside snapping, since it
+     improves the tie-breaking coordinate. Re-verify on live scenes first
+     (n=24 synthetic only).
+   - If snapping slips, a **grounding assist call to gpt-5.2-class** per
+     pointing turn is the only measured path near gate territory
+     (50% within 40px, 92% within 100px) without UIA work.
 
 ## 8. Reproduce / resume
 
@@ -161,9 +255,18 @@ node harness.mjs --condition grid-100 --model gpt-realtime-2.1 --layouts A,B
 node rest-sanity.mjs --model gpt-5.2            # REST sanity
 node harness.mjs --condition baseline-anchors --model gpt-realtime-2.1 \
   --image images/real-plain.jpg --targets real-targets.json   # real screenshot
+node harness.mjs --condition normalized --model gpt-realtime-2.1-mini --layouts A,B
 node analyze.mjs                                # summary table + affine fits
-sh resume-when-quota.sh                         # poll quota, run remainder
+sh resume-when-quota.sh                         # poll quota, run remainder (outage recovery)
+sh run-phase2.sh <cond1> <cond2> <best>         # mini transfer + real runs
 ```
 
 API key: user-scope `OPENAI_API_KEY` (registry); never logged or committed.
-Spend so far: ≈$0.36 (usage-metered: 292k input tokens, 85% cached, 5.4k out).
+
+Total spend (usage-metered from `response.done`/REST usage): realtime runs
+778k input tokens (85% cached) + 17.5k output ≈ **$1.00** priced entirely at
+full-model rates (upper bound; the mini rows are cheaper), plus gpt-5.2 REST
+64.7k in / 0.5k out ≈ $0.10 — **≈$1.10 total**, of ~$2 budgeted.
+353 scored model responses (338 valid): 7 conditions x 24 + mini 2x24 +
+gpt-5.2 2x12 + real 3x5, plus 15 lost to the mid-study quota outage and one
+wedged session (both re-run).

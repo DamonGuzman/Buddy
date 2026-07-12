@@ -1,12 +1,12 @@
 {
   "model": "gpt-realtime-2.1",
-  "condition": "ruler-edge",
+  "condition": "normalized",
   "layout": "A",
   "imageDims": {
     "W": 2048,
     "H": 1152
   },
-  "timestamp": "2026-07-12T20:23:57.449Z",
+  "timestamp": "2026-07-12T20:25:12.637Z",
   "records": [
     {
       "id": "save",
@@ -19,24 +19,24 @@
       "w": 130,
       "h": 48,
       "pred": {
-        "x": 300,
-        "y": 100
+        "x": 194.56,
+        "y": 80.64000000000001
       },
       "rawArgs": {
-        "x": 300,
-        "y": 100,
-        "label": "the SAVE button",
+        "x": 95,
+        "y": 70,
+        "label": "SAVE button",
         "screen": 0
       },
-      "errX": 120,
-      "errY": 4,
-      "err": 120.06664815842908,
-      "hit": false,
-      "latencyMs": 2375,
+      "errX": 14.560000000000002,
+      "errY": -15.359999999999985,
+      "err": 21.164196181286915,
+      "hit": true,
+      "latencyMs": 1496,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 2378
+      "totalMs": 1499
     },
     {
       "id": "open",
@@ -49,24 +49,24 @@
       "w": 130,
       "h": 48,
       "pred": {
-        "x": 1840,
-        "y": 120
+        "x": 1904.64,
+        "y": 86.39999999999999
       },
       "rawArgs": {
-        "x": 1840,
-        "y": 120,
-        "label": "the OPEN button",
+        "x": 930,
+        "y": 75,
+        "label": "OPEN button",
         "screen": 0
       },
-      "errX": -60,
-      "errY": 10,
-      "err": 60.82762530298219,
+      "errX": 4.6400000000001,
+      "errY": -23.60000000000001,
+      "err": 24.051810742644747,
       "hit": true,
-      "latencyMs": 755,
+      "latencyMs": 724,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 760
+      "totalMs": 728
     },
     {
       "id": "help",
@@ -79,24 +79,24 @@
       "w": 130,
       "h": 48,
       "pred": {
-        "x": 140,
-        "y": 1030
+        "x": 163.84,
+        "y": 1054.08
       },
       "rawArgs": {
-        "x": 140,
-        "y": 1030,
-        "label": "the HELP button",
+        "x": 80,
+        "y": 915,
+        "label": "HELP button",
         "screen": 0
       },
-      "errX": -10,
-      "errY": -20,
-      "err": 22.360679774997898,
+      "errX": 13.840000000000003,
+      "errY": 4.079999999999927,
+      "err": 14.42885996882635,
       "hit": true,
-      "latencyMs": 803,
+      "latencyMs": 699,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 809
+      "totalMs": 704
     },
     {
       "id": "exit",
@@ -109,24 +109,24 @@
       "w": 130,
       "h": 48,
       "pred": {
-        "x": 1830,
-        "y": 1030
+        "x": 1904.64,
+        "y": 1048.32
       },
       "rawArgs": {
-        "x": 1830,
-        "y": 1030,
-        "label": "the EXIT button",
+        "x": 930,
+        "y": 910,
+        "label": "EXIT button",
         "screen": 0
       },
-      "errX": -60,
-      "errY": -10,
-      "err": 60.82762530298219,
+      "errX": 14.6400000000001,
+      "errY": 8.319999999999936,
+      "err": 16.839002345744888,
       "hit": true,
-      "latencyMs": 880,
+      "latencyMs": 752,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 883
+      "totalMs": 756
     },
     {
       "id": "start",
@@ -139,24 +139,24 @@
       "w": 150,
       "h": 52,
       "pred": {
-        "x": 1110,
-        "y": 560
+        "x": 1146.88,
+        "y": 512.64
       },
       "rawArgs": {
-        "x": 1110,
-        "y": 560,
-        "label": "the START button",
+        "x": 560,
+        "y": 445,
+        "label": "START button",
         "screen": 0
       },
-      "errX": 100,
-      "errY": -30,
-      "err": 104.40306508910551,
+      "errX": 136.8800000000001,
+      "errY": -77.36000000000001,
+      "err": 157.2281908564747,
       "hit": false,
-      "latencyMs": 944,
+      "latencyMs": 773,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 949
+      "totalMs": 776
     },
     {
       "id": "cart",
@@ -169,24 +169,24 @@
       "w": 130,
       "h": 46,
       "pred": {
-        "x": 1020,
-        "y": 90
+        "x": 1126.4,
+        "y": 80.64000000000001
       },
       "rawArgs": {
-        "x": 1020,
-        "y": 90,
-        "label": "the CART button",
+        "x": 550,
+        "y": 70,
+        "label": "CART button",
         "screen": 0
       },
-      "errX": -4,
-      "errY": 20,
-      "err": 20.39607805437114,
-      "hit": true,
-      "latencyMs": 964,
+      "errX": 102.40000000000009,
+      "errY": 10.640000000000015,
+      "err": 102.95129722349311,
+      "hit": false,
+      "latencyMs": 814,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 968
+      "totalMs": 817
     },
     {
       "id": "send",
@@ -199,24 +199,24 @@
       "w": 120,
       "h": 46,
       "pred": {
-        "x": 1890,
-        "y": 590
+        "x": 1955.84,
+        "y": 576
       },
       "rawArgs": {
-        "x": 1890,
-        "y": 590,
-        "label": "the SEND button",
+        "x": 955,
+        "y": 500,
+        "label": "SEND button",
         "screen": 0
       },
-      "errX": -76,
-      "errY": -30,
-      "err": 81.70679286326198,
+      "errX": -10.160000000000082,
+      "errY": -44,
+      "err": 45.157785596727415,
       "hit": false,
-      "latencyMs": 998,
+      "latencyMs": 903,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1002
+      "totalMs": 907
     },
     {
       "id": "copy",
@@ -229,24 +229,24 @@
       "w": 128,
       "h": 46,
       "pred": {
-        "x": 860,
-        "y": 820
+        "x": 819.2,
+        "y": 748.8000000000001
       },
       "rawArgs": {
-        "x": 860,
-        "y": 820,
-        "label": "the COPY button",
+        "x": 400,
+        "y": 650,
+        "label": "COPY button",
         "screen": 0
       },
-      "errX": 240,
-      "errY": 0,
-      "err": 240,
+      "errX": 199.20000000000005,
+      "errY": -71.19999999999993,
+      "err": 211.542147100761,
       "hit": false,
-      "latencyMs": 1038,
+      "latencyMs": 1367,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1043
+      "totalMs": 1371
     },
     {
       "id": "paste",
@@ -259,24 +259,24 @@
       "w": 128,
       "h": 46,
       "pred": {
-        "x": 990,
-        "y": 820
+        "x": 1024,
+        "y": 748.8000000000001
       },
       "rawArgs": {
-        "x": 990,
-        "y": 820,
-        "label": "the PASTE button",
+        "x": 500,
+        "y": 650,
+        "label": "PASTE button",
         "screen": 0
       },
-      "errX": 220,
-      "errY": 0,
-      "err": 220,
+      "errX": 254,
+      "errY": -71.19999999999993,
+      "err": 263.79052295334645,
       "hit": false,
-      "latencyMs": 1099,
+      "latencyMs": 947,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1106
+      "totalMs": 953
     },
     {
       "id": "cut",
@@ -289,24 +289,24 @@
       "w": 128,
       "h": 46,
       "pred": {
-        "x": 1120,
-        "y": 820
+        "x": 1228.8,
+        "y": 748.8000000000001
       },
       "rawArgs": {
-        "x": 1120,
-        "y": 820,
-        "label": "the CUT button",
+        "x": 600,
+        "y": 650,
+        "label": "CUT button",
         "screen": 0
       },
-      "errX": 200,
-      "errY": 0,
-      "err": 200,
+      "errX": 308.79999999999995,
+      "errY": -71.19999999999993,
+      "err": 316.9020037803484,
       "hit": false,
-      "latencyMs": 1140,
+      "latencyMs": 964,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1145
+      "totalMs": 969
     },
     {
       "id": "dot",
@@ -319,24 +319,24 @@
       "w": 24,
       "h": 24,
       "pred": {
-        "x": 1340,
-        "y": 330
+        "x": 1331.2,
+        "y": 328.32
       },
       "rawArgs": {
-        "x": 1340,
-        "y": 330,
-        "label": "the small red dot",
+        "x": 650,
+        "y": 285,
+        "label": "small red dot",
         "screen": 0
       },
-      "errX": -160,
-      "errY": -20,
-      "err": 161.24515496597098,
+      "errX": -168.79999999999995,
+      "errY": -21.680000000000007,
+      "err": 170.18655176011995,
       "hit": false,
-      "latencyMs": 1239,
+      "latencyMs": 1029,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1243
+      "totalMs": 1034
     },
     {
       "id": "square",
@@ -349,54 +349,54 @@
       "w": 16,
       "h": 16,
       "pred": {
-        "x": 420,
-        "y": 500
+        "x": 491.52,
+        "y": 472.32
       },
       "rawArgs": {
-        "x": 420,
-        "y": 500,
-        "label": "the small blue square",
+        "x": 240,
+        "y": 410,
+        "label": "small blue square",
         "screen": 0
       },
-      "errX": 0,
-      "errY": 20,
-      "err": 20,
+      "errX": 71.51999999999998,
+      "errY": -7.680000000000007,
+      "err": 71.93116709744112,
       "hit": false,
-      "latencyMs": 1558,
+      "latencyMs": 1046,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1564
+      "totalMs": 1056
     }
   ],
   "usage": [
     {
-      "total_tokens": 1179,
-      "input_tokens": 990,
-      "output_tokens": 189,
+      "total_tokens": 1055,
+      "input_tokens": 972,
+      "output_tokens": 83,
       "input_token_details": {
-        "text_tokens": 667,
+        "text_tokens": 649,
         "audio_tokens": 0,
         "image_tokens": 323,
-        "cached_tokens": 0,
+        "cached_tokens": 128,
         "cached_tokens_details": {
-          "text_tokens": 0,
+          "text_tokens": 128,
           "audio_tokens": 0,
           "image_tokens": 0
         }
       },
       "output_token_details": {
-        "text_tokens": 189,
+        "text_tokens": 83,
         "audio_tokens": 0,
-        "reasoning_tokens": 157
+        "reasoning_tokens": 52
       }
     },
     {
-      "total_tokens": 1515,
-      "input_tokens": 1482,
-      "output_tokens": 33,
+      "total_tokens": 1469,
+      "input_tokens": 1438,
+      "output_tokens": 31,
       "input_token_details": {
-        "text_tokens": 836,
+        "text_tokens": 792,
         "audio_tokens": 0,
         "image_tokens": 646,
         "cached_tokens": 963,
@@ -407,16 +407,16 @@
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 31,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 2008,
-      "input_tokens": 1975,
-      "output_tokens": 33,
+      "total_tokens": 1935,
+      "input_tokens": 1904,
+      "output_tokens": 31,
       "input_token_details": {
-        "text_tokens": 1006,
+        "text_tokens": 935,
         "audio_tokens": 0,
         "image_tokens": 969,
         "cached_tokens": 1478,
@@ -427,103 +427,63 @@
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 31,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 2502,
-      "input_tokens": 2468,
-      "output_tokens": 34,
+      "total_tokens": 2401,
+      "input_tokens": 2370,
+      "output_tokens": 31,
       "input_token_details": {
-        "text_tokens": 1176,
+        "text_tokens": 1078,
         "audio_tokens": 0,
         "image_tokens": 1292,
-        "cached_tokens": 1993,
+        "cached_tokens": 1929,
         "cached_tokens_details": {
-          "text_tokens": 1024,
+          "text_tokens": 960,
           "audio_tokens": 0,
           "image_tokens": 969
         }
       },
       "output_token_details": {
-        "text_tokens": 34,
+        "text_tokens": 31,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 2995,
-      "input_tokens": 2962,
-      "output_tokens": 33,
+      "total_tokens": 2867,
+      "input_tokens": 2836,
+      "output_tokens": 31,
       "input_token_details": {
-        "text_tokens": 1347,
+        "text_tokens": 1221,
         "audio_tokens": 0,
         "image_tokens": 1615,
-        "cached_tokens": 2508,
+        "cached_tokens": 2380,
         "cached_tokens_details": {
-          "text_tokens": 1216,
+          "text_tokens": 1088,
           "audio_tokens": 0,
           "image_tokens": 1292
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 31,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 3488,
-      "input_tokens": 3455,
-      "output_tokens": 33,
-      "input_token_details": {
-        "text_tokens": 1517,
-        "audio_tokens": 0,
-        "image_tokens": 1938,
-        "cached_tokens": 2959,
-        "cached_tokens_details": {
-          "text_tokens": 1344,
-          "audio_tokens": 0,
-          "image_tokens": 1615
-        }
-      },
-      "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
-      }
-    },
-    {
-      "total_tokens": 3981,
-      "input_tokens": 3948,
-      "output_tokens": 33,
-      "input_token_details": {
-        "text_tokens": 1687,
-        "audio_tokens": 0,
-        "image_tokens": 2261,
-        "cached_tokens": 3474,
-        "cached_tokens_details": {
-          "text_tokens": 1536,
-          "audio_tokens": 0,
-          "image_tokens": 1938
-        }
-      },
-      "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
-      }
-    },
-    {
-      "total_tokens": 4473,
-      "input_tokens": 4441,
+      "total_tokens": 3334,
+      "input_tokens": 3302,
       "output_tokens": 32,
       "input_token_details": {
-        "text_tokens": 1857,
+        "text_tokens": 1364,
         "audio_tokens": 0,
-        "image_tokens": 2584,
-        "cached_tokens": 3989,
+        "image_tokens": 1938,
+        "cached_tokens": 2831,
         "cached_tokens_details": {
-          "text_tokens": 1728,
+          "text_tokens": 1216,
           "audio_tokens": 0,
-          "image_tokens": 2261
+          "image_tokens": 1615
         }
       },
       "output_token_details": {
@@ -532,82 +492,122 @@
       }
     },
     {
-      "total_tokens": 4967,
-      "input_tokens": 4934,
-      "output_tokens": 33,
+      "total_tokens": 3800,
+      "input_tokens": 3769,
+      "output_tokens": 31,
       "input_token_details": {
-        "text_tokens": 2027,
+        "text_tokens": 1508,
+        "audio_tokens": 0,
+        "image_tokens": 2261,
+        "cached_tokens": 3346,
+        "cached_tokens_details": {
+          "text_tokens": 1408,
+          "audio_tokens": 0,
+          "image_tokens": 1938
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 31,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 4266,
+      "input_tokens": 4235,
+      "output_tokens": 31,
+      "input_token_details": {
+        "text_tokens": 1651,
+        "audio_tokens": 0,
+        "image_tokens": 2584,
+        "cached_tokens": 3797,
+        "cached_tokens_details": {
+          "text_tokens": 1536,
+          "audio_tokens": 0,
+          "image_tokens": 2261
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 31,
+        "audio_tokens": 0
+      }
+    },
+    {
+      "total_tokens": 4734,
+      "input_tokens": 4702,
+      "output_tokens": 32,
+      "input_token_details": {
+        "text_tokens": 1795,
         "audio_tokens": 0,
         "image_tokens": 2907,
-        "cached_tokens": 4440,
+        "cached_tokens": 4248,
         "cached_tokens_details": {
-          "text_tokens": 1856,
+          "text_tokens": 1664,
           "audio_tokens": 0,
           "image_tokens": 2584
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 32,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 5460,
-      "input_tokens": 5427,
-      "output_tokens": 33,
+      "total_tokens": 5200,
+      "input_tokens": 5169,
+      "output_tokens": 31,
       "input_token_details": {
-        "text_tokens": 2197,
+        "text_tokens": 1939,
         "audio_tokens": 0,
         "image_tokens": 3230,
-        "cached_tokens": 4955,
+        "cached_tokens": 4763,
         "cached_tokens_details": {
-          "text_tokens": 2048,
+          "text_tokens": 1856,
           "audio_tokens": 0,
           "image_tokens": 2907
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 31,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 5955,
-      "input_tokens": 5921,
-      "output_tokens": 34,
+      "total_tokens": 5668,
+      "input_tokens": 5636,
+      "output_tokens": 32,
       "input_token_details": {
-        "text_tokens": 2368,
+        "text_tokens": 2083,
         "audio_tokens": 0,
         "image_tokens": 3553,
-        "cached_tokens": 5470,
+        "cached_tokens": 5214,
         "cached_tokens_details": {
-          "text_tokens": 2240,
+          "text_tokens": 1984,
           "audio_tokens": 0,
           "image_tokens": 3230
         }
       },
       "output_token_details": {
-        "text_tokens": 34,
+        "text_tokens": 32,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 6449,
-      "input_tokens": 6416,
-      "output_tokens": 33,
+      "total_tokens": 6136,
+      "input_tokens": 6104,
+      "output_tokens": 32,
       "input_token_details": {
-        "text_tokens": 2540,
+        "text_tokens": 2228,
         "audio_tokens": 0,
         "image_tokens": 3876,
-        "cached_tokens": 5921,
+        "cached_tokens": 5665,
         "cached_tokens_details": {
-          "text_tokens": 2368,
+          "text_tokens": 2112,
           "audio_tokens": 0,
           "image_tokens": 3553
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 32,
         "audio_tokens": 0
       }
     }

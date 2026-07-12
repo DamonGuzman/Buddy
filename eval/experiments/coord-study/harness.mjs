@@ -270,6 +270,10 @@ class StudySession {
       const t0 = Date.now();
       const timeout = setTimeout(() => {
         this.pending = null;
+        // cancel the stuck response server-side, otherwise every subsequent
+        // response.create in this session is rejected with
+        // "conversation already has an active response"
+        try { this.ws.send(JSON.stringify({ type: 'response.cancel' })); } catch { /* dead ws */ }
         reject(new Error(`response timeout after ${RESPONSE_TIMEOUT_MS}ms`));
       }, RESPONSE_TIMEOUT_MS);
       this.pending = {

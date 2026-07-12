@@ -97,7 +97,9 @@ function stats(records) {
 // group runs by model+condition
 const groups = new Map();
 for (const run of runs) {
-  const key = `${run.model}|${run.condition}`;
+  // real-screenshot runs are a separate population — never pool with synthetic
+  const condKey = run.layout === 'real' ? `${run.condition}-REAL` : run.condition;
+  const key = `${run.model}|${condKey}`;
   if (!groups.has(key)) groups.set(key, []);
   groups.get(key).push(run);
 }

@@ -1,12 +1,12 @@
 {
-  "model": "gpt-realtime-2.1",
-  "condition": "ruler-edge",
+  "model": "gpt-realtime-2.1-mini",
+  "condition": "grid-100",
   "layout": "A",
   "imageDims": {
     "W": 2048,
     "H": 1152
   },
-  "timestamp": "2026-07-12T20:23:57.449Z",
+  "timestamp": "2026-07-12T20:28:03.619Z",
   "records": [
     {
       "id": "save",
@@ -19,24 +19,24 @@
       "w": 130,
       "h": 48,
       "pred": {
-        "x": 300,
-        "y": 100
+        "x": 280,
+        "y": 120
       },
       "rawArgs": {
-        "x": 300,
-        "y": 100,
-        "label": "the SAVE button",
+        "x": 280,
+        "y": 120,
+        "label": "SAVE button",
         "screen": 0
       },
-      "errX": 120,
-      "errY": 4,
-      "err": 120.06664815842908,
+      "errX": 100,
+      "errY": 24,
+      "err": 102.83968105745953,
       "hit": false,
-      "latencyMs": 2375,
+      "latencyMs": 1879,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 2378
+      "totalMs": 1884
     },
     {
       "id": "open",
@@ -49,24 +49,24 @@
       "w": 130,
       "h": 48,
       "pred": {
-        "x": 1840,
-        "y": 120
+        "x": 1850,
+        "y": 1060
       },
       "rawArgs": {
-        "x": 1840,
-        "y": 120,
-        "label": "the OPEN button",
+        "x": 1850,
+        "y": 1060,
+        "label": "OPEN button",
         "screen": 0
       },
-      "errX": -60,
-      "errY": 10,
-      "err": 60.82762530298219,
-      "hit": true,
-      "latencyMs": 755,
+      "errX": -50,
+      "errY": 950,
+      "err": 951.3148795220224,
+      "hit": false,
+      "latencyMs": 1440,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 760
+      "totalMs": 1443
     },
     {
       "id": "help",
@@ -79,24 +79,24 @@
       "w": 130,
       "h": 48,
       "pred": {
-        "x": 140,
-        "y": 1030
+        "x": 130,
+        "y": 1080
       },
       "rawArgs": {
-        "x": 140,
-        "y": 1030,
-        "label": "the HELP button",
+        "x": 130,
+        "y": 1080,
+        "label": "HELP button",
         "screen": 0
       },
-      "errX": -10,
-      "errY": -20,
-      "err": 22.360679774997898,
-      "hit": true,
-      "latencyMs": 803,
+      "errX": -20,
+      "errY": 30,
+      "err": 36.05551275463989,
+      "hit": false,
+      "latencyMs": 1178,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 809
+      "totalMs": 1182
     },
     {
       "id": "exit",
@@ -109,24 +109,24 @@
       "w": 130,
       "h": 48,
       "pred": {
-        "x": 1830,
-        "y": 1030
+        "x": 1880,
+        "y": 1080
       },
       "rawArgs": {
-        "x": 1830,
-        "y": 1030,
-        "label": "the EXIT button",
+        "x": 1880,
+        "y": 1080,
+        "label": "EXIT button",
         "screen": 0
       },
-      "errX": -60,
-      "errY": -10,
-      "err": 60.82762530298219,
-      "hit": true,
-      "latencyMs": 880,
+      "errX": -10,
+      "errY": 40,
+      "err": 41.23105625617661,
+      "hit": false,
+      "latencyMs": 1702,
       "extraCalls": 0,
-      "modelText": "",
+      "modelText": "Let me quickly pick the center of that button based on its position in the grid.",
       "status": "completed",
-      "totalMs": 883
+      "totalMs": 1707
     },
     {
       "id": "start",
@@ -139,24 +139,24 @@
       "w": 150,
       "h": 52,
       "pred": {
-        "x": 1110,
-        "y": 560
+        "x": 1130,
+        "y": 620
       },
       "rawArgs": {
-        "x": 1110,
-        "y": 560,
-        "label": "the START button",
+        "x": 1130,
+        "y": 620,
+        "label": "START button",
         "screen": 0
       },
-      "errX": 100,
-      "errY": -30,
-      "err": 104.40306508910551,
+      "errX": 120,
+      "errY": 30,
+      "err": 123.69316876852982,
       "hit": false,
-      "latencyMs": 944,
+      "latencyMs": 1473,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 949
+      "totalMs": 1479
     },
     {
       "id": "cart",
@@ -169,24 +169,24 @@
       "w": 130,
       "h": 46,
       "pred": {
-        "x": 1020,
-        "y": 90
+        "x": 1150,
+        "y": 150
       },
       "rawArgs": {
-        "x": 1020,
-        "y": 90,
-        "label": "the CART button",
+        "x": 1150,
+        "y": 150,
+        "label": "CART button",
         "screen": 0
       },
-      "errX": -4,
-      "errY": 20,
-      "err": 20.39607805437114,
-      "hit": true,
-      "latencyMs": 964,
+      "errX": 126,
+      "errY": 80,
+      "err": 149.2514656544451,
+      "hit": false,
+      "latencyMs": 1379,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 968
+      "totalMs": 1388
     },
     {
       "id": "send",
@@ -199,24 +199,24 @@
       "w": 120,
       "h": 46,
       "pred": {
-        "x": 1890,
-        "y": 590
+        "x": 1820,
+        "y": 760
       },
       "rawArgs": {
-        "x": 1890,
-        "y": 590,
-        "label": "the SEND button",
+        "x": 1820,
+        "y": 760,
+        "label": "SEND button",
         "screen": 0
       },
-      "errX": -76,
-      "errY": -30,
-      "err": 81.70679286326198,
+      "errX": -146,
+      "errY": 140,
+      "err": 202.27703774773843,
       "hit": false,
-      "latencyMs": 998,
+      "latencyMs": 1623,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1002
+      "totalMs": 1628
     },
     {
       "id": "copy",
@@ -229,24 +229,24 @@
       "w": 128,
       "h": 46,
       "pred": {
-        "x": 860,
-        "y": 820
+        "x": 910,
+        "y": 580
       },
       "rawArgs": {
-        "x": 860,
-        "y": 820,
-        "label": "the COPY button",
+        "x": 910,
+        "y": 580,
+        "label": "COPY button",
         "screen": 0
       },
-      "errX": 240,
-      "errY": 0,
-      "err": 240,
+      "errX": 290,
+      "errY": -240,
+      "err": 376.4306044943742,
       "hit": false,
-      "latencyMs": 1038,
+      "latencyMs": 2150,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1043
+      "totalMs": 2155
     },
     {
       "id": "paste",
@@ -259,24 +259,24 @@
       "w": 128,
       "h": 46,
       "pred": {
-        "x": 990,
-        "y": 820
+        "x": 1020,
+        "y": 580
       },
       "rawArgs": {
-        "x": 990,
-        "y": 820,
-        "label": "the PASTE button",
+        "x": 1020,
+        "y": 580,
+        "label": "PASTE button",
         "screen": 0
       },
-      "errX": 220,
-      "errY": 0,
-      "err": 220,
+      "errX": 250,
+      "errY": -240,
+      "err": 346.5544690232691,
       "hit": false,
-      "latencyMs": 1099,
+      "latencyMs": 1842,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1106
+      "totalMs": 1848
     },
     {
       "id": "cut",
@@ -290,23 +290,23 @@
       "h": 46,
       "pred": {
         "x": 1120,
-        "y": 820
+        "y": 580
       },
       "rawArgs": {
         "x": 1120,
-        "y": 820,
-        "label": "the CUT button",
+        "y": 580,
+        "label": "CUT button",
         "screen": 0
       },
       "errX": 200,
-      "errY": 0,
-      "err": 200,
+      "errY": -240,
+      "err": 312.4099870362662,
       "hit": false,
-      "latencyMs": 1140,
+      "latencyMs": 1528,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1145
+      "totalMs": 1535
     },
     {
       "id": "dot",
@@ -319,24 +319,24 @@
       "w": 24,
       "h": 24,
       "pred": {
-        "x": 1340,
-        "y": 330
+        "x": 1450,
+        "y": 380
       },
       "rawArgs": {
-        "x": 1340,
-        "y": 330,
-        "label": "the small red dot",
+        "x": 1450,
+        "y": 380,
+        "label": "small red dot",
         "screen": 0
       },
-      "errX": -160,
-      "errY": -20,
-      "err": 161.24515496597098,
+      "errX": -50,
+      "errY": 30,
+      "err": 58.309518948453,
       "hit": false,
-      "latencyMs": 1239,
+      "latencyMs": 1587,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1243
+      "totalMs": 1592
     },
     {
       "id": "square",
@@ -349,33 +349,33 @@
       "w": 16,
       "h": 16,
       "pred": {
-        "x": 420,
-        "y": 500
+        "x": 350,
+        "y": 450
       },
       "rawArgs": {
-        "x": 420,
-        "y": 500,
-        "label": "the small blue square",
+        "x": 350,
+        "y": 450,
+        "label": "small blue square",
         "screen": 0
       },
-      "errX": 0,
-      "errY": 20,
-      "err": 20,
+      "errX": -70,
+      "errY": -30,
+      "err": 76.15773105863909,
       "hit": false,
-      "latencyMs": 1558,
+      "latencyMs": 2090,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1564
+      "totalMs": 2097
     }
   ],
   "usage": [
     {
-      "total_tokens": 1179,
-      "input_tokens": 990,
-      "output_tokens": 189,
+      "total_tokens": 1295,
+      "input_tokens": 991,
+      "output_tokens": 304,
       "input_token_details": {
-        "text_tokens": 667,
+        "text_tokens": 668,
         "audio_tokens": 0,
         "image_tokens": 323,
         "cached_tokens": 0,
@@ -386,37 +386,38 @@
         }
       },
       "output_token_details": {
-        "text_tokens": 189,
+        "text_tokens": 304,
         "audio_tokens": 0,
-        "reasoning_tokens": 157
+        "reasoning_tokens": 273
       }
     },
     {
-      "total_tokens": 1515,
-      "input_tokens": 1482,
-      "output_tokens": 33,
+      "total_tokens": 1586,
+      "input_tokens": 1483,
+      "output_tokens": 103,
       "input_token_details": {
-        "text_tokens": 836,
+        "text_tokens": 837,
         "audio_tokens": 0,
         "image_tokens": 646,
-        "cached_tokens": 963,
+        "cached_tokens": 954,
         "cached_tokens_details": {
           "text_tokens": 640,
           "audio_tokens": 0,
-          "image_tokens": 323
+          "image_tokens": 314
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
+        "text_tokens": 103,
+        "audio_tokens": 0,
+        "reasoning_tokens": 70
       }
     },
     {
-      "total_tokens": 2008,
-      "input_tokens": 1975,
-      "output_tokens": 33,
+      "total_tokens": 2098,
+      "input_tokens": 1977,
+      "output_tokens": 121,
       "input_token_details": {
-        "text_tokens": 1006,
+        "text_tokens": 1008,
         "audio_tokens": 0,
         "image_tokens": 969,
         "cached_tokens": 1478,
@@ -427,56 +428,58 @@
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
+        "text_tokens": 121,
+        "audio_tokens": 0,
+        "reasoning_tokens": 89
       }
     },
     {
-      "total_tokens": 2502,
-      "input_tokens": 2468,
-      "output_tokens": 34,
+      "total_tokens": 2527,
+      "input_tokens": 2470,
+      "output_tokens": 57,
       "input_token_details": {
-        "text_tokens": 1176,
+        "text_tokens": 1178,
         "audio_tokens": 0,
         "image_tokens": 1292,
-        "cached_tokens": 1993,
+        "cached_tokens": 1990,
         "cached_tokens_details": {
           "text_tokens": 1024,
           "audio_tokens": 0,
-          "image_tokens": 969
+          "image_tokens": 966
         }
       },
       "output_token_details": {
-        "text_tokens": 34,
+        "text_tokens": 57,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 2995,
-      "input_tokens": 2962,
-      "output_tokens": 33,
+      "total_tokens": 3161,
+      "input_tokens": 2988,
+      "output_tokens": 173,
       "input_token_details": {
-        "text_tokens": 1347,
+        "text_tokens": 1373,
         "audio_tokens": 0,
         "image_tokens": 1615,
-        "cached_tokens": 2508,
+        "cached_tokens": 2444,
         "cached_tokens_details": {
-          "text_tokens": 1216,
+          "text_tokens": 1152,
           "audio_tokens": 0,
           "image_tokens": 1292
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
+        "text_tokens": 173,
+        "audio_tokens": 0,
+        "reasoning_tokens": 141
       }
     },
     {
-      "total_tokens": 3488,
-      "input_tokens": 3455,
-      "output_tokens": 33,
+      "total_tokens": 3621,
+      "input_tokens": 3481,
+      "output_tokens": 140,
       "input_token_details": {
-        "text_tokens": 1517,
+        "text_tokens": 1543,
         "audio_tokens": 0,
         "image_tokens": 1938,
         "cached_tokens": 2959,
@@ -487,56 +490,59 @@
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
+        "text_tokens": 140,
+        "audio_tokens": 0,
+        "reasoning_tokens": 107
       }
     },
     {
-      "total_tokens": 3981,
-      "input_tokens": 3948,
-      "output_tokens": 33,
+      "total_tokens": 4054,
+      "input_tokens": 3975,
+      "output_tokens": 79,
       "input_token_details": {
-        "text_tokens": 1687,
+        "text_tokens": 1714,
         "audio_tokens": 0,
         "image_tokens": 2261,
-        "cached_tokens": 3474,
+        "cached_tokens": 3471,
         "cached_tokens_details": {
           "text_tokens": 1536,
           "audio_tokens": 0,
-          "image_tokens": 1938
+          "image_tokens": 1935
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
+        "text_tokens": 79,
+        "audio_tokens": 0,
+        "reasoning_tokens": 47
       }
     },
     {
-      "total_tokens": 4473,
-      "input_tokens": 4441,
-      "output_tokens": 32,
+      "total_tokens": 4665,
+      "input_tokens": 4468,
+      "output_tokens": 197,
       "input_token_details": {
-        "text_tokens": 1857,
+        "text_tokens": 1884,
         "audio_tokens": 0,
         "image_tokens": 2584,
-        "cached_tokens": 3989,
+        "cached_tokens": 3972,
         "cached_tokens_details": {
           "text_tokens": 1728,
           "audio_tokens": 0,
-          "image_tokens": 2261
+          "image_tokens": 2244
         }
       },
       "output_token_details": {
-        "text_tokens": 32,
-        "audio_tokens": 0
+        "text_tokens": 197,
+        "audio_tokens": 0,
+        "reasoning_tokens": 166
       }
     },
     {
-      "total_tokens": 4967,
-      "input_tokens": 4934,
-      "output_tokens": 33,
+      "total_tokens": 5104,
+      "input_tokens": 4961,
+      "output_tokens": 143,
       "input_token_details": {
-        "text_tokens": 2027,
+        "text_tokens": 2054,
         "audio_tokens": 0,
         "image_tokens": 2907,
         "cached_tokens": 4440,
@@ -547,36 +553,37 @@
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
+        "text_tokens": 143,
+        "audio_tokens": 0,
+        "reasoning_tokens": 110
       }
     },
     {
-      "total_tokens": 5460,
-      "input_tokens": 5427,
-      "output_tokens": 33,
+      "total_tokens": 5487,
+      "input_tokens": 5455,
+      "output_tokens": 32,
       "input_token_details": {
-        "text_tokens": 2197,
+        "text_tokens": 2225,
         "audio_tokens": 0,
         "image_tokens": 3230,
-        "cached_tokens": 4955,
+        "cached_tokens": 4945,
         "cached_tokens_details": {
           "text_tokens": 2048,
           "audio_tokens": 0,
-          "image_tokens": 2907
+          "image_tokens": 2897
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 32,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 5955,
-      "input_tokens": 5921,
-      "output_tokens": 34,
+      "total_tokens": 6071,
+      "input_tokens": 5949,
+      "output_tokens": 122,
       "input_token_details": {
-        "text_tokens": 2368,
+        "text_tokens": 2396,
         "audio_tokens": 0,
         "image_tokens": 3553,
         "cached_tokens": 5470,
@@ -587,28 +594,30 @@
         }
       },
       "output_token_details": {
-        "text_tokens": 34,
-        "audio_tokens": 0
+        "text_tokens": 122,
+        "audio_tokens": 0,
+        "reasoning_tokens": 89
       }
     },
     {
-      "total_tokens": 6449,
-      "input_tokens": 6416,
-      "output_tokens": 33,
+      "total_tokens": 6591,
+      "input_tokens": 6444,
+      "output_tokens": 147,
       "input_token_details": {
-        "text_tokens": 2540,
+        "text_tokens": 2568,
         "audio_tokens": 0,
         "image_tokens": 3876,
-        "cached_tokens": 5921,
+        "cached_tokens": 5915,
         "cached_tokens_details": {
           "text_tokens": 2368,
           "audio_tokens": 0,
-          "image_tokens": 3553
+          "image_tokens": 3547
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
+        "text_tokens": 147,
+        "audio_tokens": 0,
+        "reasoning_tokens": 115
       }
     }
   ]

@@ -1,442 +1,441 @@
 {
   "model": "gpt-realtime-2.1",
-  "condition": "ruler-edge",
-  "layout": "A",
+  "condition": "think-first",
+  "layout": "B",
   "imageDims": {
     "W": 2048,
     "H": 1152
   },
-  "timestamp": "2026-07-12T20:23:57.449Z",
+  "timestamp": "2026-07-12T20:26:00.704Z",
   "records": [
     {
       "id": "save",
       "ask": "the SAVE button",
       "zone": "corner",
       "gt": {
-        "x": 180,
-        "y": 96
+        "x": 1880,
+        "y": 90
       },
       "w": 130,
       "h": 48,
       "pred": {
-        "x": 300,
-        "y": 100
+        "x": 1820,
+        "y": 80
       },
       "rawArgs": {
-        "x": 300,
-        "y": 100,
-        "label": "the SAVE button",
-        "screen": 0
-      },
-      "errX": 120,
-      "errY": 4,
-      "err": 120.06664815842908,
-      "hit": false,
-      "latencyMs": 2375,
-      "extraCalls": 0,
-      "modelText": "",
-      "status": "completed",
-      "totalMs": 2378
-    },
-    {
-      "id": "open",
-      "ask": "the OPEN button",
-      "zone": "corner",
-      "gt": {
-        "x": 1900,
-        "y": 110
-      },
-      "w": 130,
-      "h": 48,
-      "pred": {
-        "x": 1840,
-        "y": 120
-      },
-      "rawArgs": {
-        "x": 1840,
-        "y": 120,
-        "label": "the OPEN button",
-        "screen": 0
-      },
-      "errX": -60,
-      "errY": 10,
-      "err": 60.82762530298219,
-      "hit": true,
-      "latencyMs": 755,
-      "extraCalls": 0,
-      "modelText": "",
-      "status": "completed",
-      "totalMs": 760
-    },
-    {
-      "id": "help",
-      "ask": "the HELP button",
-      "zone": "corner",
-      "gt": {
-        "x": 150,
-        "y": 1050
-      },
-      "w": 130,
-      "h": 48,
-      "pred": {
-        "x": 140,
-        "y": 1030
-      },
-      "rawArgs": {
-        "x": 140,
-        "y": 1030,
-        "label": "the HELP button",
-        "screen": 0
-      },
-      "errX": -10,
-      "errY": -20,
-      "err": 22.360679774997898,
-      "hit": true,
-      "latencyMs": 803,
-      "extraCalls": 0,
-      "modelText": "",
-      "status": "completed",
-      "totalMs": 809
-    },
-    {
-      "id": "exit",
-      "ask": "the EXIT button",
-      "zone": "corner",
-      "gt": {
-        "x": 1890,
-        "y": 1040
-      },
-      "w": 130,
-      "h": 48,
-      "pred": {
-        "x": 1830,
-        "y": 1030
-      },
-      "rawArgs": {
-        "x": 1830,
-        "y": 1030,
-        "label": "the EXIT button",
+        "x": 1820,
+        "y": 80,
+        "label": "SAVE button",
         "screen": 0
       },
       "errX": -60,
       "errY": -10,
       "err": 60.82762530298219,
       "hit": true,
-      "latencyMs": 880,
+      "latencyMs": 1034,
       "extraCalls": 0,
-      "modelText": "",
+      "modelText": "Top-right quadrant, about 7/8 across and 1/12 down, just left of the screen’s right edge near the top.",
       "status": "completed",
-      "totalMs": 883
+      "totalMs": 1035
+    },
+    {
+      "id": "open",
+      "ask": "the OPEN button",
+      "zone": "corner",
+      "gt": {
+        "x": 140,
+        "y": 100
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 140,
+        "y": 70
+      },
+      "rawArgs": {
+        "x": 140,
+        "y": 70,
+        "label": "OPEN button",
+        "screen": 0
+      },
+      "errX": 0,
+      "errY": -30,
+      "err": 30,
+      "hit": false,
+      "latencyMs": 962,
+      "extraCalls": 0,
+      "modelText": "Top-left quadrant, about 1/12 across and 1/16 down, just above a large light gray panel.",
+      "status": "completed",
+      "totalMs": 965
+    },
+    {
+      "id": "help",
+      "ask": "the HELP button",
+      "zone": "corner",
+      "gt": {
+        "x": 1900,
+        "y": 1060
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 1920,
+        "y": 1080
+      },
+      "rawArgs": {
+        "x": 1920,
+        "y": 1080,
+        "label": "HELP button",
+        "screen": 0
+      },
+      "errX": 20,
+      "errY": 20,
+      "err": 28.284271247461902,
+      "hit": true,
+      "latencyMs": 1052,
+      "extraCalls": 0,
+      "modelText": "Bottom-right quadrant, about 9/10 across and 19/20 down, near the lower-right corner below a light gray panel.",
+      "status": "completed",
+      "totalMs": 1055
+    },
+    {
+      "id": "exit",
+      "ask": "the EXIT button",
+      "zone": "corner",
+      "gt": {
+        "x": 170,
+        "y": 1030
+      },
+      "w": 130,
+      "h": 48,
+      "pred": {
+        "x": 140,
+        "y": 1010
+      },
+      "rawArgs": {
+        "x": 140,
+        "y": 1010,
+        "label": "EXIT button",
+        "screen": 0
+      },
+      "errX": -30,
+      "errY": -20,
+      "err": 36.05551275463989,
+      "hit": true,
+      "latencyMs": 1087,
+      "extraCalls": 0,
+      "modelText": "Bottom-left quadrant, about 1/8 across and 9/10 down, just left of the red dot and near the lower-left edge.",
+      "status": "completed",
+      "totalMs": 1092
     },
     {
       "id": "start",
       "ask": "the START button",
       "zone": "center",
       "gt": {
-        "x": 1010,
-        "y": 590
+        "x": 1120,
+        "y": 530
       },
       "w": 150,
       "h": 52,
       "pred": {
-        "x": 1110,
-        "y": 560
+        "x": 1230,
+        "y": 380
       },
       "rawArgs": {
-        "x": 1110,
-        "y": 560,
-        "label": "the START button",
+        "x": 1230,
+        "y": 380,
+        "label": "START button",
         "screen": 0
       },
-      "errX": 100,
-      "errY": -30,
-      "err": 104.40306508910551,
+      "errX": 110,
+      "errY": -150,
+      "err": 186.01075237738272,
       "hit": false,
-      "latencyMs": 944,
+      "latencyMs": 1210,
       "extraCalls": 0,
-      "modelText": "",
+      "modelText": "Center-right area, about 3/5 across and 1/3 down, between the top buttons and the lower gray panel.",
       "status": "completed",
-      "totalMs": 949
+      "totalMs": 1212
     },
     {
       "id": "cart",
       "ask": "the CART button",
       "zone": "edge",
       "gt": {
-        "x": 1024,
-        "y": 70
+        "x": 84,
+        "y": 600
       },
       "w": 130,
       "h": 46,
       "pred": {
-        "x": 1020,
-        "y": 90
+        "x": 90,
+        "y": 390
       },
       "rawArgs": {
-        "x": 1020,
-        "y": 90,
-        "label": "the CART button",
+        "x": 90,
+        "y": 390,
+        "label": "CART button",
         "screen": 0
       },
-      "errX": -4,
-      "errY": 20,
-      "err": 20.39607805437114,
-      "hit": true,
-      "latencyMs": 964,
+      "errX": 6,
+      "errY": -210,
+      "err": 210.08569680013917,
+      "hit": false,
+      "latencyMs": 1147,
       "extraCalls": 0,
-      "modelText": "",
+      "modelText": "Left-middle quadrant, about 1/20 across and 1/3 down, just left of the large left gray panel.",
       "status": "completed",
-      "totalMs": 968
+      "totalMs": 1149
     },
     {
       "id": "send",
       "ask": "the SEND button",
       "zone": "edge",
       "gt": {
-        "x": 1966,
-        "y": 620
+        "x": 1024,
+        "y": 1092
       },
       "w": 120,
       "h": 46,
       "pred": {
-        "x": 1890,
-        "y": 590
+        "x": 1024,
+        "y": 1080
       },
       "rawArgs": {
-        "x": 1890,
-        "y": 590,
-        "label": "the SEND button",
+        "x": 1024,
+        "y": 1080,
+        "label": "SEND button",
         "screen": 0
       },
-      "errX": -76,
-      "errY": -30,
-      "err": 81.70679286326198,
-      "hit": false,
-      "latencyMs": 998,
+      "errX": 0,
+      "errY": -12,
+      "err": 12,
+      "hit": true,
+      "latencyMs": 1228,
       "extraCalls": 0,
-      "modelText": "",
+      "modelText": "Bottom-center, about 1/2 across and 19/20 down, between the EXIT and HELP buttons.",
       "status": "completed",
-      "totalMs": 1002
+      "totalMs": 1233
     },
     {
       "id": "copy",
       "ask": "the COPY button",
       "zone": "cluster",
       "gt": {
-        "x": 620,
-        "y": 820
+        "x": 1450,
+        "y": 300
       },
       "w": 128,
       "h": 46,
       "pred": {
-        "x": 860,
-        "y": 820
+        "x": 1320,
+        "y": 240
       },
       "rawArgs": {
-        "x": 860,
-        "y": 820,
-        "label": "the COPY button",
+        "x": 1320,
+        "y": 240,
+        "label": "COPY button",
         "screen": 0
       },
-      "errX": 240,
-      "errY": 0,
-      "err": 240,
+      "errX": -130,
+      "errY": -60,
+      "err": 143.17821063276352,
       "hit": false,
-      "latencyMs": 1038,
+      "latencyMs": 1285,
       "extraCalls": 0,
-      "modelText": "",
+      "modelText": "Upper-right quadrant, about 2/3 across and 1/5 down, just left of the PASTE and CUT buttons.",
       "status": "completed",
-      "totalMs": 1043
+      "totalMs": 1288
     },
     {
       "id": "paste",
       "ask": "the PASTE button",
       "zone": "cluster",
       "gt": {
-        "x": 770,
-        "y": 820
+        "x": 1600,
+        "y": 300
       },
       "w": 128,
       "h": 46,
       "pred": {
-        "x": 990,
-        "y": 820
+        "x": 1410,
+        "y": 240
       },
       "rawArgs": {
-        "x": 990,
-        "y": 820,
-        "label": "the PASTE button",
+        "x": 1410,
+        "y": 240,
+        "label": "PASTE button",
         "screen": 0
       },
-      "errX": 220,
-      "errY": 0,
-      "err": 220,
+      "errX": -190,
+      "errY": -60,
+      "err": 199.24858845171275,
       "hit": false,
-      "latencyMs": 1099,
+      "latencyMs": 1335,
       "extraCalls": 0,
-      "modelText": "",
+      "modelText": "Upper-right quadrant, about 5/8 across and 1/5 down, between the COPY and CUT buttons.",
       "status": "completed",
-      "totalMs": 1106
+      "totalMs": 1340
     },
     {
       "id": "cut",
       "ask": "the CUT button",
       "zone": "cluster",
       "gt": {
-        "x": 920,
-        "y": 820
+        "x": 1750,
+        "y": 300
       },
       "w": 128,
       "h": 46,
       "pred": {
-        "x": 1120,
-        "y": 820
+        "x": 1500,
+        "y": 240
       },
       "rawArgs": {
-        "x": 1120,
-        "y": 820,
-        "label": "the CUT button",
+        "x": 1500,
+        "y": 240,
+        "label": "CUT button",
         "screen": 0
       },
-      "errX": 200,
-      "errY": 0,
-      "err": 200,
+      "errX": -250,
+      "errY": -60,
+      "err": 257.0992026436488,
       "hit": false,
-      "latencyMs": 1140,
+      "latencyMs": 1391,
       "extraCalls": 0,
-      "modelText": "",
+      "modelText": "Upper-right quadrant, about 11/16 across and 1/5 down, just right of the PASTE button.",
       "status": "completed",
-      "totalMs": 1145
+      "totalMs": 1394
     },
     {
       "id": "dot",
       "ask": "the small red dot",
       "zone": "icon",
       "gt": {
-        "x": 1500,
-        "y": 350
+        "x": 500,
+        "y": 900
       },
       "w": 24,
       "h": 24,
       "pred": {
-        "x": 1340,
-        "y": 330
+        "x": 820,
+        "y": 740
       },
       "rawArgs": {
-        "x": 1340,
-        "y": 330,
-        "label": "the small red dot",
+        "x": 820,
+        "y": 740,
+        "label": "small red dot",
         "screen": 0
       },
-      "errX": -160,
-      "errY": -20,
-      "err": 161.24515496597098,
+      "errX": 320,
+      "errY": -160,
+      "err": 357.77087639996637,
       "hit": false,
-      "latencyMs": 1239,
+      "latencyMs": 1898,
       "extraCalls": 0,
-      "modelText": "",
+      "modelText": "Left-of-center lower-middle, about 2/5 across and 2/3 down, slightly above the EXIT button.",
       "status": "completed",
-      "totalMs": 1243
+      "totalMs": 1900
     },
     {
       "id": "square",
       "ask": "the small blue square",
       "zone": "icon",
       "gt": {
-        "x": 420,
-        "y": 480
+        "x": 1650,
+        "y": 750
       },
       "w": 16,
       "h": 16,
       "pred": {
-        "x": 420,
-        "y": 500
+        "x": 1520,
+        "y": 700
       },
       "rawArgs": {
-        "x": 420,
-        "y": 500,
-        "label": "the small blue square",
+        "x": 1520,
+        "y": 700,
+        "label": "small blue square",
         "screen": 0
       },
-      "errX": 0,
-      "errY": 20,
-      "err": 20,
+      "errX": -130,
+      "errY": -50,
+      "err": 139.2838827718412,
       "hit": false,
-      "latencyMs": 1558,
+      "latencyMs": 1449,
       "extraCalls": 0,
-      "modelText": "",
+      "modelText": "Right-middle quadrant, about 3/4 across and 3/4 down, inside the lower-right light gray panel.",
       "status": "completed",
-      "totalMs": 1564
+      "totalMs": 1452
     }
   ],
   "usage": [
     {
-      "total_tokens": 1179,
-      "input_tokens": 990,
-      "output_tokens": 189,
+      "total_tokens": 1067,
+      "input_tokens": 999,
+      "output_tokens": 68,
       "input_token_details": {
-        "text_tokens": 667,
+        "text_tokens": 676,
         "audio_tokens": 0,
         "image_tokens": 323,
-        "cached_tokens": 0,
+        "cached_tokens": 64,
         "cached_tokens_details": {
-          "text_tokens": 0,
+          "text_tokens": 64,
           "audio_tokens": 0,
           "image_tokens": 0
         }
       },
       "output_token_details": {
-        "text_tokens": 189,
-        "audio_tokens": 0,
-        "reasoning_tokens": 157
+        "text_tokens": 68,
+        "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 1515,
-      "input_tokens": 1482,
-      "output_tokens": 33,
+      "total_tokens": 1536,
+      "input_tokens": 1473,
+      "output_tokens": 63,
       "input_token_details": {
-        "text_tokens": 836,
+        "text_tokens": 827,
         "audio_tokens": 0,
         "image_tokens": 646,
-        "cached_tokens": 963,
+        "cached_tokens": 1027,
         "cached_tokens_details": {
-          "text_tokens": 640,
+          "text_tokens": 704,
           "audio_tokens": 0,
           "image_tokens": 323
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 63,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 2008,
-      "input_tokens": 1975,
-      "output_tokens": 33,
+      "total_tokens": 2010,
+      "input_tokens": 1942,
+      "output_tokens": 68,
       "input_token_details": {
-        "text_tokens": 1006,
+        "text_tokens": 973,
         "audio_tokens": 0,
         "image_tokens": 969,
-        "cached_tokens": 1478,
+        "cached_tokens": 1542,
         "cached_tokens_details": {
-          "text_tokens": 832,
+          "text_tokens": 896,
           "audio_tokens": 0,
           "image_tokens": 646
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 68,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 2502,
-      "input_tokens": 2468,
-      "output_tokens": 34,
+      "total_tokens": 2485,
+      "input_tokens": 2416,
+      "output_tokens": 69,
       "input_token_details": {
-        "text_tokens": 1176,
+        "text_tokens": 1124,
         "audio_tokens": 0,
         "image_tokens": 1292,
         "cached_tokens": 1993,
@@ -447,36 +446,36 @@
         }
       },
       "output_token_details": {
-        "text_tokens": 34,
+        "text_tokens": 69,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 2995,
-      "input_tokens": 2962,
-      "output_tokens": 33,
+      "total_tokens": 2957,
+      "input_tokens": 2891,
+      "output_tokens": 66,
       "input_token_details": {
-        "text_tokens": 1347,
+        "text_tokens": 1276,
         "audio_tokens": 0,
         "image_tokens": 1615,
-        "cached_tokens": 2508,
+        "cached_tokens": 2444,
         "cached_tokens_details": {
-          "text_tokens": 1216,
+          "text_tokens": 1152,
           "audio_tokens": 0,
           "image_tokens": 1292
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 66,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 3488,
-      "input_tokens": 3455,
-      "output_tokens": 33,
+      "total_tokens": 3428,
+      "input_tokens": 3363,
+      "output_tokens": 65,
       "input_token_details": {
-        "text_tokens": 1517,
+        "text_tokens": 1425,
         "audio_tokens": 0,
         "image_tokens": 1938,
         "cached_tokens": 2959,
@@ -487,127 +486,127 @@
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 65,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 3981,
-      "input_tokens": 3948,
-      "output_tokens": 33,
+      "total_tokens": 3897,
+      "input_tokens": 3834,
+      "output_tokens": 63,
       "input_token_details": {
-        "text_tokens": 1687,
+        "text_tokens": 1573,
         "audio_tokens": 0,
         "image_tokens": 2261,
-        "cached_tokens": 3474,
+        "cached_tokens": 3410,
         "cached_tokens_details": {
-          "text_tokens": 1536,
+          "text_tokens": 1472,
           "audio_tokens": 0,
           "image_tokens": 1938
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 63,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 4473,
-      "input_tokens": 4441,
-      "output_tokens": 32,
+      "total_tokens": 4369,
+      "input_tokens": 4303,
+      "output_tokens": 66,
       "input_token_details": {
-        "text_tokens": 1857,
+        "text_tokens": 1719,
         "audio_tokens": 0,
         "image_tokens": 2584,
-        "cached_tokens": 3989,
+        "cached_tokens": 3861,
         "cached_tokens_details": {
-          "text_tokens": 1728,
+          "text_tokens": 1600,
           "audio_tokens": 0,
           "image_tokens": 2261
         }
       },
       "output_token_details": {
-        "text_tokens": 32,
+        "text_tokens": 66,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 4967,
-      "input_tokens": 4934,
-      "output_tokens": 33,
+      "total_tokens": 4840,
+      "input_tokens": 4776,
+      "output_tokens": 64,
       "input_token_details": {
-        "text_tokens": 2027,
+        "text_tokens": 1869,
         "audio_tokens": 0,
         "image_tokens": 2907,
-        "cached_tokens": 4440,
+        "cached_tokens": 4376,
         "cached_tokens_details": {
-          "text_tokens": 1856,
+          "text_tokens": 1792,
           "audio_tokens": 0,
           "image_tokens": 2584
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 64,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 5460,
-      "input_tokens": 5427,
-      "output_tokens": 33,
+      "total_tokens": 5310,
+      "input_tokens": 5246,
+      "output_tokens": 64,
       "input_token_details": {
-        "text_tokens": 2197,
+        "text_tokens": 2016,
         "audio_tokens": 0,
         "image_tokens": 3230,
-        "cached_tokens": 4955,
+        "cached_tokens": 4827,
         "cached_tokens_details": {
-          "text_tokens": 2048,
+          "text_tokens": 1920,
           "audio_tokens": 0,
           "image_tokens": 2907
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 64,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 5955,
-      "input_tokens": 5921,
-      "output_tokens": 34,
+      "total_tokens": 5781,
+      "input_tokens": 5717,
+      "output_tokens": 64,
       "input_token_details": {
-        "text_tokens": 2368,
+        "text_tokens": 2164,
         "audio_tokens": 0,
         "image_tokens": 3553,
-        "cached_tokens": 5470,
+        "cached_tokens": 5278,
         "cached_tokens_details": {
-          "text_tokens": 2240,
+          "text_tokens": 2048,
           "audio_tokens": 0,
           "image_tokens": 3230
         }
       },
       "output_token_details": {
-        "text_tokens": 34,
+        "text_tokens": 64,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 6449,
-      "input_tokens": 6416,
-      "output_tokens": 33,
+      "total_tokens": 6253,
+      "input_tokens": 6188,
+      "output_tokens": 65,
       "input_token_details": {
-        "text_tokens": 2540,
+        "text_tokens": 2312,
         "audio_tokens": 0,
         "image_tokens": 3876,
-        "cached_tokens": 5921,
+        "cached_tokens": 5729,
         "cached_tokens_details": {
-          "text_tokens": 2368,
+          "text_tokens": 2176,
           "audio_tokens": 0,
           "image_tokens": 3553
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 65,
         "audio_tokens": 0
       }
     }

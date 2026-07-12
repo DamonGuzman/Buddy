@@ -1,12 +1,12 @@
 {
-  "model": "gpt-realtime-2.1",
-  "condition": "ruler-edge",
+  "model": "gpt-realtime-2.1-mini",
+  "condition": "normalized",
   "layout": "A",
   "imageDims": {
     "W": 2048,
     "H": 1152
   },
-  "timestamp": "2026-07-12T20:23:57.449Z",
+  "timestamp": "2026-07-12T20:30:04.036Z",
   "records": [
     {
       "id": "save",
@@ -19,24 +19,24 @@
       "w": 130,
       "h": 48,
       "pred": {
-        "x": 300,
-        "y": 100
+        "x": 307.2,
+        "y": 138.24
       },
       "rawArgs": {
-        "x": 300,
-        "y": 100,
-        "label": "the SAVE button",
+        "x": 150,
+        "y": 120,
+        "label": "SAVE button",
         "screen": 0
       },
-      "errX": 120,
-      "errY": 4,
-      "err": 120.06664815842908,
+      "errX": 127.19999999999999,
+      "errY": 42.24000000000001,
+      "err": 134.0300622994707,
       "hit": false,
-      "latencyMs": 2375,
+      "latencyMs": 1461,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 2378
+      "totalMs": 1461
     },
     {
       "id": "open",
@@ -49,24 +49,24 @@
       "w": 130,
       "h": 48,
       "pred": {
-        "x": 1840,
-        "y": 120
+        "x": 1761.28,
+        "y": 138.24
       },
       "rawArgs": {
-        "x": 1840,
+        "x": 860,
         "y": 120,
-        "label": "the OPEN button",
+        "label": "OPEN button",
         "screen": 0
       },
-      "errX": -60,
-      "errY": 10,
-      "err": 60.82762530298219,
-      "hit": true,
-      "latencyMs": 755,
+      "errX": -138.72000000000003,
+      "errY": 28.24000000000001,
+      "err": 141.56530648432195,
+      "hit": false,
+      "latencyMs": 1024,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 760
+      "totalMs": 1025
     },
     {
       "id": "help",
@@ -79,24 +79,24 @@
       "w": 130,
       "h": 48,
       "pred": {
-        "x": 140,
-        "y": 1030
+        "x": 307.2,
+        "y": 1198.08
       },
       "rawArgs": {
-        "x": 140,
-        "y": 1030,
-        "label": "the HELP button",
+        "x": 150,
+        "y": 1040,
+        "label": "HELP button",
         "screen": 0
       },
-      "errX": -10,
-      "errY": -20,
-      "err": 22.360679774997898,
-      "hit": true,
-      "latencyMs": 803,
+      "errX": 157.2,
+      "errY": 148.07999999999993,
+      "err": 215.96186329998167,
+      "hit": false,
+      "latencyMs": 1266,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 809
+      "totalMs": 1270
     },
     {
       "id": "exit",
@@ -109,24 +109,24 @@
       "w": 130,
       "h": 48,
       "pred": {
-        "x": 1830,
-        "y": 1030
+        "x": 1720.32,
+        "y": 1140.48
       },
       "rawArgs": {
-        "x": 1830,
-        "y": 1030,
-        "label": "the EXIT button",
+        "x": 840,
+        "y": 990,
+        "label": "EXIT button",
         "screen": 0
       },
-      "errX": -60,
-      "errY": -10,
-      "err": 60.82762530298219,
-      "hit": true,
-      "latencyMs": 880,
+      "errX": -169.68000000000006,
+      "errY": 100.48000000000002,
+      "err": 197.19922109379647,
+      "hit": false,
+      "latencyMs": 1143,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 883
+      "totalMs": 1146
     },
     {
       "id": "start",
@@ -139,24 +139,24 @@
       "w": 150,
       "h": 52,
       "pred": {
-        "x": 1110,
-        "y": 560
+        "x": 819.2,
+        "y": 668.16
       },
       "rawArgs": {
-        "x": 1110,
-        "y": 560,
-        "label": "the START button",
+        "x": 400,
+        "y": 580,
+        "label": "START button",
         "screen": 0
       },
-      "errX": 100,
-      "errY": -30,
-      "err": 104.40306508910551,
+      "errX": -190.79999999999995,
+      "errY": 78.15999999999997,
+      "err": 206.18832556670125,
       "hit": false,
-      "latencyMs": 944,
+      "latencyMs": 1435,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 949
+      "totalMs": 1468
     },
     {
       "id": "cart",
@@ -169,24 +169,24 @@
       "w": 130,
       "h": 46,
       "pred": {
-        "x": 1020,
-        "y": 90
+        "x": 1126.4,
+        "y": 138.24
       },
       "rawArgs": {
-        "x": 1020,
-        "y": 90,
-        "label": "the CART button",
+        "x": 550,
+        "y": 120,
+        "label": "CART button",
         "screen": 0
       },
-      "errX": -4,
-      "errY": 20,
-      "err": 20.39607805437114,
-      "hit": true,
-      "latencyMs": 964,
+      "errX": 102.40000000000009,
+      "errY": 68.24000000000001,
+      "err": 123.05469353096623,
+      "hit": false,
+      "latencyMs": 1462,
       "extraCalls": 0,
-      "modelText": "",
+      "modelText": "Aiming for the center of the CART button.",
       "status": "completed",
-      "totalMs": 968
+      "totalMs": 1463
     },
     {
       "id": "send",
@@ -199,24 +199,24 @@
       "w": 120,
       "h": 46,
       "pred": {
-        "x": 1890,
-        "y": 590
+        "x": 1884.16,
+        "y": 668.16
       },
       "rawArgs": {
-        "x": 1890,
-        "y": 590,
-        "label": "the SEND button",
+        "x": 920,
+        "y": 580,
+        "label": "SEND button",
         "screen": 0
       },
-      "errX": -76,
-      "errY": -30,
-      "err": 81.70679286326198,
+      "errX": -81.83999999999992,
+      "errY": 48.15999999999997,
+      "err": 94.95878684987495,
       "hit": false,
-      "latencyMs": 998,
+      "latencyMs": 1741,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1002
+      "totalMs": 1755
     },
     {
       "id": "copy",
@@ -229,24 +229,24 @@
       "w": 128,
       "h": 46,
       "pred": {
-        "x": 860,
-        "y": 820
+        "x": 512,
+        "y": 835.1999999999999
       },
       "rawArgs": {
-        "x": 860,
-        "y": 820,
-        "label": "the COPY button",
+        "x": 250,
+        "y": 725,
+        "label": "COPY button",
         "screen": 0
       },
-      "errX": 240,
-      "errY": 0,
-      "err": 240,
+      "errX": -108,
+      "errY": 15.199999999999932,
+      "err": 109.06438465420321,
       "hit": false,
-      "latencyMs": 1038,
+      "latencyMs": 2100,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1043
+      "totalMs": 2100
     },
     {
       "id": "paste",
@@ -259,24 +259,24 @@
       "w": 128,
       "h": 46,
       "pred": {
-        "x": 990,
-        "y": 820
+        "x": 737.28,
+        "y": 817.92
       },
       "rawArgs": {
-        "x": 990,
-        "y": 820,
-        "label": "the PASTE button",
+        "x": 360,
+        "y": 710,
+        "label": "PASTE button",
         "screen": 0
       },
-      "errX": 220,
-      "errY": 0,
-      "err": 220,
-      "hit": false,
-      "latencyMs": 1099,
+      "errX": -32.72000000000003,
+      "errY": -2.080000000000041,
+      "err": 32.78604581220495,
+      "hit": true,
+      "latencyMs": 1819,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1106
+      "totalMs": 1825
     },
     {
       "id": "cut",
@@ -289,24 +289,24 @@
       "w": 128,
       "h": 46,
       "pred": {
-        "x": 1120,
-        "y": 820
+        "x": 921.6,
+        "y": 817.92
       },
       "rawArgs": {
-        "x": 1120,
-        "y": 820,
-        "label": "the CUT button",
+        "x": 450,
+        "y": 710,
+        "label": "CUT button",
         "screen": 0
       },
-      "errX": 200,
-      "errY": 0,
-      "err": 200,
-      "hit": false,
-      "latencyMs": 1140,
+      "errX": 1.6000000000000227,
+      "errY": -2.080000000000041,
+      "err": 2.6241951146971223,
+      "hit": true,
+      "latencyMs": 1137,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1145
+      "totalMs": 1138
     },
     {
       "id": "dot",
@@ -319,24 +319,24 @@
       "w": 24,
       "h": 24,
       "pred": {
-        "x": 1340,
-        "y": 330
+        "x": 1474.56,
+        "y": 299.52
       },
       "rawArgs": {
-        "x": 1340,
-        "y": 330,
-        "label": "the small red dot",
+        "x": 720,
+        "y": 260,
+        "label": "Red dot",
         "screen": 0
       },
-      "errX": -160,
-      "errY": -20,
-      "err": 161.24515496597098,
+      "errX": -25.440000000000055,
+      "errY": -50.48000000000002,
+      "err": 56.52808151706552,
       "hit": false,
-      "latencyMs": 1239,
+      "latencyMs": 1401,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1243
+      "totalMs": 1408
     },
     {
       "id": "square",
@@ -349,54 +349,54 @@
       "w": 16,
       "h": 16,
       "pred": {
-        "x": 420,
-        "y": 500
+        "x": 307.2,
+        "y": 345.59999999999997
       },
       "rawArgs": {
-        "x": 420,
-        "y": 500,
-        "label": "the small blue square",
+        "x": 150,
+        "y": 300,
+        "label": "Small blue square",
         "screen": 0
       },
-      "errX": 0,
-      "errY": 20,
-      "err": 20,
+      "errX": -112.80000000000001,
+      "errY": -134.40000000000003,
+      "err": 175.46281657376875,
       "hit": false,
-      "latencyMs": 1558,
+      "latencyMs": 1471,
       "extraCalls": 0,
       "modelText": "",
       "status": "completed",
-      "totalMs": 1564
+      "totalMs": 1474
     }
   ],
   "usage": [
     {
-      "total_tokens": 1179,
-      "input_tokens": 990,
-      "output_tokens": 189,
+      "total_tokens": 1125,
+      "input_tokens": 972,
+      "output_tokens": 153,
       "input_token_details": {
-        "text_tokens": 667,
+        "text_tokens": 649,
         "audio_tokens": 0,
         "image_tokens": 323,
-        "cached_tokens": 0,
+        "cached_tokens": 941,
         "cached_tokens_details": {
-          "text_tokens": 0,
+          "text_tokens": 640,
           "audio_tokens": 0,
-          "image_tokens": 0
+          "image_tokens": 301
         }
       },
       "output_token_details": {
-        "text_tokens": 189,
+        "text_tokens": 153,
         "audio_tokens": 0,
-        "reasoning_tokens": 157
+        "reasoning_tokens": 122
       }
     },
     {
-      "total_tokens": 1515,
-      "input_tokens": 1482,
-      "output_tokens": 33,
+      "total_tokens": 1549,
+      "input_tokens": 1438,
+      "output_tokens": 111,
       "input_token_details": {
-        "text_tokens": 836,
+        "text_tokens": 792,
         "audio_tokens": 0,
         "image_tokens": 646,
         "cached_tokens": 963,
@@ -407,208 +407,218 @@
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
+        "text_tokens": 111,
+        "audio_tokens": 0,
+        "reasoning_tokens": 80
       }
     },
     {
-      "total_tokens": 2008,
-      "input_tokens": 1975,
-      "output_tokens": 33,
+      "total_tokens": 1998,
+      "input_tokens": 1904,
+      "output_tokens": 94,
       "input_token_details": {
-        "text_tokens": 1006,
+        "text_tokens": 935,
         "audio_tokens": 0,
         "image_tokens": 969,
-        "cached_tokens": 1478,
+        "cached_tokens": 1406,
         "cached_tokens_details": {
-          "text_tokens": 832,
+          "text_tokens": 768,
           "audio_tokens": 0,
-          "image_tokens": 646
+          "image_tokens": 638
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
+        "text_tokens": 94,
+        "audio_tokens": 0,
+        "reasoning_tokens": 62
       }
     },
     {
-      "total_tokens": 2502,
-      "input_tokens": 2468,
-      "output_tokens": 34,
+      "total_tokens": 2475,
+      "input_tokens": 2371,
+      "output_tokens": 104,
       "input_token_details": {
-        "text_tokens": 1176,
+        "text_tokens": 1079,
         "audio_tokens": 0,
         "image_tokens": 1292,
-        "cached_tokens": 1993,
+        "cached_tokens": 1929,
         "cached_tokens_details": {
-          "text_tokens": 1024,
+          "text_tokens": 960,
           "audio_tokens": 0,
           "image_tokens": 969
         }
       },
       "output_token_details": {
-        "text_tokens": 34,
-        "audio_tokens": 0
+        "text_tokens": 104,
+        "audio_tokens": 0,
+        "reasoning_tokens": 73
       }
     },
     {
-      "total_tokens": 2995,
-      "input_tokens": 2962,
-      "output_tokens": 33,
+      "total_tokens": 2912,
+      "input_tokens": 2837,
+      "output_tokens": 75,
       "input_token_details": {
-        "text_tokens": 1347,
+        "text_tokens": 1222,
         "audio_tokens": 0,
         "image_tokens": 1615,
-        "cached_tokens": 2508,
+        "cached_tokens": 2367,
         "cached_tokens_details": {
-          "text_tokens": 1216,
+          "text_tokens": 1088,
           "audio_tokens": 0,
-          "image_tokens": 1292
+          "image_tokens": 1279
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
+        "text_tokens": 75,
+        "audio_tokens": 0,
+        "reasoning_tokens": 44
       }
     },
     {
-      "total_tokens": 3488,
-      "input_tokens": 3455,
-      "output_tokens": 33,
+      "total_tokens": 3464,
+      "input_tokens": 3303,
+      "output_tokens": 161,
       "input_token_details": {
-        "text_tokens": 1517,
+        "text_tokens": 1365,
         "audio_tokens": 0,
         "image_tokens": 1938,
-        "cached_tokens": 2959,
+        "cached_tokens": 2831,
         "cached_tokens_details": {
-          "text_tokens": 1344,
+          "text_tokens": 1216,
           "audio_tokens": 0,
           "image_tokens": 1615
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
+        "text_tokens": 161,
+        "audio_tokens": 0,
+        "reasoning_tokens": 112
       }
     },
     {
-      "total_tokens": 3981,
-      "input_tokens": 3948,
-      "output_tokens": 33,
+      "total_tokens": 3898,
+      "input_tokens": 3787,
+      "output_tokens": 111,
       "input_token_details": {
-        "text_tokens": 1687,
+        "text_tokens": 1526,
         "audio_tokens": 0,
         "image_tokens": 2261,
-        "cached_tokens": 3474,
+        "cached_tokens": 3265,
         "cached_tokens_details": {
-          "text_tokens": 1536,
+          "text_tokens": 1344,
           "audio_tokens": 0,
-          "image_tokens": 1938
+          "image_tokens": 1921
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
+        "text_tokens": 111,
+        "audio_tokens": 0,
+        "reasoning_tokens": 80
       }
     },
     {
-      "total_tokens": 4473,
-      "input_tokens": 4441,
-      "output_tokens": 32,
+      "total_tokens": 4401,
+      "input_tokens": 4253,
+      "output_tokens": 148,
       "input_token_details": {
-        "text_tokens": 1857,
+        "text_tokens": 1669,
         "audio_tokens": 0,
         "image_tokens": 2584,
-        "cached_tokens": 3989,
+        "cached_tokens": 3797,
         "cached_tokens_details": {
-          "text_tokens": 1728,
+          "text_tokens": 1536,
           "audio_tokens": 0,
           "image_tokens": 2261
         }
       },
       "output_token_details": {
-        "text_tokens": 32,
-        "audio_tokens": 0
+        "text_tokens": 148,
+        "audio_tokens": 0,
+        "reasoning_tokens": 117
       }
     },
     {
-      "total_tokens": 4967,
-      "input_tokens": 4934,
-      "output_tokens": 33,
+      "total_tokens": 4843,
+      "input_tokens": 4720,
+      "output_tokens": 123,
       "input_token_details": {
-        "text_tokens": 2027,
+        "text_tokens": 1813,
         "audio_tokens": 0,
         "image_tokens": 2907,
-        "cached_tokens": 4440,
+        "cached_tokens": 4241,
         "cached_tokens_details": {
-          "text_tokens": 1856,
+          "text_tokens": 1664,
           "audio_tokens": 0,
-          "image_tokens": 2584
+          "image_tokens": 2577
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
+        "text_tokens": 123,
+        "audio_tokens": 0,
+        "reasoning_tokens": 91
       }
     },
     {
-      "total_tokens": 5460,
-      "input_tokens": 5427,
-      "output_tokens": 33,
+      "total_tokens": 5218,
+      "input_tokens": 5187,
+      "output_tokens": 31,
       "input_token_details": {
-        "text_tokens": 2197,
+        "text_tokens": 1957,
         "audio_tokens": 0,
         "image_tokens": 3230,
-        "cached_tokens": 4955,
+        "cached_tokens": 4699,
         "cached_tokens_details": {
-          "text_tokens": 2048,
+          "text_tokens": 1792,
           "audio_tokens": 0,
           "image_tokens": 2907
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
+        "text_tokens": 31,
         "audio_tokens": 0
       }
     },
     {
-      "total_tokens": 5955,
-      "input_tokens": 5921,
-      "output_tokens": 34,
+      "total_tokens": 5724,
+      "input_tokens": 5654,
+      "output_tokens": 70,
       "input_token_details": {
-        "text_tokens": 2368,
+        "text_tokens": 2101,
         "audio_tokens": 0,
         "image_tokens": 3553,
-        "cached_tokens": 5470,
+        "cached_tokens": 5214,
         "cached_tokens_details": {
-          "text_tokens": 2240,
+          "text_tokens": 1984,
           "audio_tokens": 0,
           "image_tokens": 3230
         }
       },
       "output_token_details": {
-        "text_tokens": 34,
-        "audio_tokens": 0
+        "text_tokens": 70,
+        "audio_tokens": 0,
+        "reasoning_tokens": 39
       }
     },
     {
-      "total_tokens": 6449,
-      "input_tokens": 6416,
-      "output_tokens": 33,
+      "total_tokens": 6196,
+      "input_tokens": 6121,
+      "output_tokens": 75,
       "input_token_details": {
-        "text_tokens": 2540,
+        "text_tokens": 2245,
         "audio_tokens": 0,
         "image_tokens": 3876,
-        "cached_tokens": 5921,
+        "cached_tokens": 5665,
         "cached_tokens_details": {
-          "text_tokens": 2368,
+          "text_tokens": 2112,
           "audio_tokens": 0,
           "image_tokens": 3553
         }
       },
       "output_token_details": {
-        "text_tokens": 33,
-        "audio_tokens": 0
+        "text_tokens": 75,
+        "audio_tokens": 0,
+        "reasoning_tokens": 43
       }
     }
   ]

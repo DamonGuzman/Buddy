@@ -1,0 +1,269 @@
+{
+  "model": "gpt-realtime-2.1",
+  "condition": "grid-100",
+  "layout": "real",
+  "imageDims": {
+    "W": 2048,
+    "H": 1152
+  },
+  "timestamp": "2026-07-12T20:28:45.183Z",
+  "records": [
+    {
+      "id": "startbtn",
+      "ask": "the Windows Start button in the taskbar",
+      "zone": "edge",
+      "gt": {
+        "x": 706,
+        "y": 1130
+      },
+      "w": 44,
+      "h": 44,
+      "pred": {
+        "x": 960,
+        "y": 1128
+      },
+      "rawArgs": {
+        "x": 960,
+        "y": 1128,
+        "label": "Windows Start button",
+        "screen": 0
+      },
+      "errX": 254,
+      "errY": -2,
+      "err": 254.00787389370433,
+      "hit": false,
+      "latencyMs": 2807,
+      "extraCalls": 0,
+      "modelText": "I’m going to line up the pointer with the center of the Start button based on the grid.",
+      "status": "completed",
+      "totalMs": 2812
+    },
+    {
+      "id": "clock",
+      "ask": "the clock in the system tray (bottom-right corner)",
+      "zone": "corner",
+      "gt": {
+        "x": 2011,
+        "y": 1130
+      },
+      "w": 90,
+      "h": 44,
+      "pred": {
+        "x": 1960,
+        "y": 1128
+      },
+      "rawArgs": {
+        "x": 1960,
+        "y": 1128,
+        "label": "system tray clock",
+        "screen": 0
+      },
+      "errX": -51,
+      "errY": -2,
+      "err": 51.03920062069938,
+      "hit": false,
+      "latencyMs": 2301,
+      "extraCalls": 0,
+      "modelText": "I’ll aim the pointer at the center of the clock using the grid as a guide.",
+      "status": "completed",
+      "totalMs": 2307
+    },
+    {
+      "id": "review",
+      "ask": "the Review button in the 'Edited 5 files' card",
+      "zone": "center",
+      "gt": {
+        "x": 1466,
+        "y": 640
+      },
+      "w": 58,
+      "h": 26,
+      "pred": {
+        "x": 1420,
+        "y": 700
+      },
+      "rawArgs": {
+        "x": 1420,
+        "y": 700,
+        "label": "Review button",
+        "screen": 0
+      },
+      "errX": -46,
+      "errY": 60,
+      "err": 75.6042326857432,
+      "hit": false,
+      "latencyMs": 1779,
+      "extraCalls": 0,
+      "modelText": "I’m aligning to the center of the Review button in that card.",
+      "status": "completed",
+      "totalMs": 1782
+    },
+    {
+      "id": "newtask",
+      "ask": "the 'New task' item at the top of the left sidebar",
+      "zone": "corner",
+      "gt": {
+        "x": 46,
+        "y": 82
+      },
+      "w": 120,
+      "h": 24,
+      "pred": {
+        "x": 150,
+        "y": 160
+      },
+      "rawArgs": {
+        "x": 150,
+        "y": 160,
+        "label": "New task item",
+        "screen": 0
+      },
+      "errX": 104,
+      "errY": 78,
+      "err": 130,
+      "hit": false,
+      "latencyMs": 2040,
+      "extraCalls": 0,
+      "modelText": "I’m going to point at the center of the “New task” item in the sidebar.",
+      "status": "completed",
+      "totalMs": 2043
+    },
+    {
+      "id": "openin",
+      "ask": "the 'Open in' button in the top-right toolbar",
+      "zone": "corner",
+      "gt": {
+        "x": 1920,
+        "y": 50
+      },
+      "w": 80,
+      "h": 26,
+      "pred": {
+        "x": 1860,
+        "y": 140
+      },
+      "rawArgs": {
+        "x": 1860,
+        "y": 140,
+        "label": "Open in button",
+        "screen": 0
+      },
+      "errX": -60,
+      "errY": 90,
+      "err": 108.16653826391968,
+      "hit": false,
+      "latencyMs": 2019,
+      "extraCalls": 0,
+      "modelText": "I’m lining up the pointer with the center of the “Open in” button.",
+      "status": "completed",
+      "totalMs": 2022
+    }
+  ],
+  "usage": [
+    {
+      "total_tokens": 1250,
+      "input_tokens": 996,
+      "output_tokens": 254,
+      "input_token_details": {
+        "text_tokens": 673,
+        "audio_tokens": 0,
+        "image_tokens": 323,
+        "cached_tokens": 0,
+        "cached_tokens_details": {
+          "text_tokens": 0,
+          "audio_tokens": 0,
+          "image_tokens": 0
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 254,
+        "audio_tokens": 0,
+        "reasoning_tokens": 194
+      }
+    },
+    {
+      "total_tokens": 1727,
+      "input_tokens": 1524,
+      "output_tokens": 203,
+      "input_token_details": {
+        "text_tokens": 878,
+        "audio_tokens": 0,
+        "image_tokens": 646,
+        "cached_tokens": 1027,
+        "cached_tokens_details": {
+          "text_tokens": 704,
+          "audio_tokens": 0,
+          "image_tokens": 323
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 203,
+        "audio_tokens": 0,
+        "reasoning_tokens": 144
+      }
+    },
+    {
+      "total_tokens": 2191,
+      "input_tokens": 2053,
+      "output_tokens": 138,
+      "input_token_details": {
+        "text_tokens": 1084,
+        "audio_tokens": 0,
+        "image_tokens": 969,
+        "cached_tokens": 1542,
+        "cached_tokens_details": {
+          "text_tokens": 896,
+          "audio_tokens": 0,
+          "image_tokens": 646
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 138,
+        "audio_tokens": 0,
+        "reasoning_tokens": 85
+      }
+    },
+    {
+      "total_tokens": 2709,
+      "input_tokens": 2577,
+      "output_tokens": 132,
+      "input_token_details": {
+        "text_tokens": 1285,
+        "audio_tokens": 0,
+        "image_tokens": 1292,
+        "cached_tokens": 2057,
+        "cached_tokens_details": {
+          "text_tokens": 1088,
+          "audio_tokens": 0,
+          "image_tokens": 969
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 132,
+        "audio_tokens": 0,
+        "reasoning_tokens": 74
+      }
+    },
+    {
+      "total_tokens": 3235,
+      "input_tokens": 3104,
+      "output_tokens": 131,
+      "input_token_details": {
+        "text_tokens": 1489,
+        "audio_tokens": 0,
+        "image_tokens": 1615,
+        "cached_tokens": 2572,
+        "cached_tokens_details": {
+          "text_tokens": 1280,
+          "audio_tokens": 0,
+          "image_tokens": 1292
+        }
+      },
+      "output_token_details": {
+        "text_tokens": 131,
+        "audio_tokens": 0,
+        "reasoning_tokens": 74
+      }
+    }
+  ]
+}
