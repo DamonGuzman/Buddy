@@ -5,7 +5,7 @@
 
 ## 1. Product in one paragraph
 
-A Windows tray app. You **hold Ctrl+Alt and talk**. It screenshots your monitors, streams your
+A Windows tray app. You **hold Ctrl+Alt (left Alt) and talk**. It screenshots your monitors, streams your
 voice + the screenshots to a realtime speech-to-speech model (OpenAI `gpt-realtime` family), speaks
 the answer back, and **flies an animated "buddy" pointer** (a friendly blue triangle) across a
 transparent overlay to physically point at the UI element it's describing. No chat window. Warm,
@@ -15,7 +15,8 @@ and is always signposted by a visible indicator.
 ## 2. MVP scope
 
 **In:**
-- Hold-to-talk global hotkey (default **Ctrl+Alt**, both held; release = send).
+- Hold-to-talk global hotkey (default **Ctrl+Alt**, both held; release = send). Only the LEFT
+  Alt participates — Right Alt is AltGr on international layouts and never triggers.
 - Multi-monitor screenshot capture on hotkey press (resized ≤1280px longest edge, JPEG ~80%).
 - OpenAI Realtime API session over **WebSocket** (PCM16 audio append / manual commit — push-to-talk,
   no server VAD). Audio out streamed and played as it arrives.

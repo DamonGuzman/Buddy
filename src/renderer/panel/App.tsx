@@ -194,7 +194,7 @@ export function App(): React.JSX.Element {
           ) : null
         ) : (
           <>
-            <Transcript entries={entries} hotkeyLabel={settings?.hotkeyLabel ?? 'Ctrl+Alt'} />
+            <Transcript entries={entries} hotkeyLabel={settings?.hotkeyLabel ?? 'Ctrl+Alt (left alt)'} />
             <Composer
               disabled={composerDisabled}
               disabledReason="add your openai key in settings so clicky can connect"

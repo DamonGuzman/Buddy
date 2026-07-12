@@ -1,0 +1,277 @@
+{
+  "backend": "MOCK (tools/mock-realtime)",
+  "startedAt": "2026-07-12T14:59:17.692Z",
+  "voiceTurns": [
+    {
+      "turnId": "turn_1",
+      "chunksIn": 57,
+      "chunksOut": 6,
+      "committedAudioSec": 3.42,
+      "captureMs": 414,
+      "releaseToCommitMs": 3,
+      "releaseToFirstAudioDeltaMs": 628,
+      "firstDeltaToFirstPlayedMs": 67,
+      "releaseToFirstTranscriptMs": 7,
+      "releaseToDoneMs": 835,
+      "playback": {
+        "rms": 0.1676297439862747,
+        "peak": 0.25,
+        "underruns": 0,
+        "samplesPlayed": 35760
+      },
+      "spectral": {
+        "pass": true,
+        "notes": [
+          {
+            "freq": 523.25,
+            "marginDb": 26.9,
+            "pass": true
+          },
+          {
+            "freq": 659.25,
+            "marginDb": 24.5,
+            "pass": true
+          },
+          {
+            "freq": 783.99,
+            "marginDb": 27.7,
+            "pass": true
+          }
+        ],
+        "playedSeconds": 1.42
+      }
+    },
+    {
+      "turnId": "turn_2",
+      "chunksIn": 57,
+      "chunksOut": 6,
+      "committedAudioSec": 3.42,
+      "captureMs": 428,
+      "releaseToCommitMs": 1,
+      "releaseToFirstAudioDeltaMs": 609,
+      "firstDeltaToFirstPlayedMs": 33,
+      "releaseToFirstTranscriptMs": 3,
+      "releaseToDoneMs": 818,
+      "playback": {
+        "rms": 0.1676297439862747,
+        "peak": 0.25,
+        "underruns": 0,
+        "samplesPlayed": 35760
+      },
+      "spectral": {
+        "pass": true,
+        "notes": [
+          {
+            "freq": 523.25,
+            "marginDb": 26.9,
+            "pass": true
+          },
+          {
+            "freq": 659.25,
+            "marginDb": 24.5,
+            "pass": true
+          },
+          {
+            "freq": 783.99,
+            "marginDb": 27.7,
+            "pass": true
+          }
+        ],
+        "playedSeconds": 2.86
+      }
+    },
+    {
+      "turnId": "turn_3",
+      "chunksIn": 57,
+      "chunksOut": 6,
+      "committedAudioSec": 3.42,
+      "captureMs": 373,
+      "releaseToCommitMs": 2,
+      "releaseToFirstAudioDeltaMs": 604,
+      "firstDeltaToFirstPlayedMs": 45,
+      "releaseToFirstTranscriptMs": 3,
+      "releaseToDoneMs": 797,
+      "playback": {
+        "rms": 0.1676297439862747,
+        "peak": 0.25,
+        "underruns": 0,
+        "samplesPlayed": 35760
+      },
+      "spectral": {
+        "pass": true,
+        "notes": [
+          {
+            "freq": 523.25,
+            "marginDb": 26.9,
+            "pass": true
+          },
+          {
+            "freq": 659.25,
+            "marginDb": 24.5,
+            "pass": true
+          },
+          {
+            "freq": 783.99,
+            "marginDb": 27.7,
+            "pass": true
+          }
+        ],
+        "playedSeconds": 4.28
+      }
+    },
+    {
+      "turnId": "turn_4",
+      "chunksIn": 57,
+      "chunksOut": 6,
+      "committedAudioSec": 3.42,
+      "captureMs": 386,
+      "releaseToCommitMs": 1,
+      "releaseToFirstAudioDeltaMs": 603,
+      "firstDeltaToFirstPlayedMs": 34,
+      "releaseToFirstTranscriptMs": 3,
+      "releaseToDoneMs": 789,
+      "playback": {
+        "rms": 0.1676297439862747,
+        "peak": 0.25,
+        "underruns": 0,
+        "samplesPlayed": 35760
+      },
+      "spectral": {
+        "pass": true,
+        "notes": [
+          {
+            "freq": 523.25,
+            "marginDb": 26.9,
+            "pass": true
+          },
+          {
+            "freq": 659.25,
+            "marginDb": 24.5,
+            "pass": true
+          },
+          {
+            "freq": 783.99,
+            "marginDb": 27.7,
+            "pass": true
+          }
+        ],
+        "playedSeconds": 5.72
+      }
+    },
+    {
+      "turnId": "turn_5",
+      "chunksIn": 57,
+      "chunksOut": 6,
+      "committedAudioSec": 3.42,
+      "captureMs": 448,
+      "releaseToCommitMs": 1,
+      "releaseToFirstAudioDeltaMs": 598,
+      "firstDeltaToFirstPlayedMs": 39,
+      "releaseToFirstTranscriptMs": 3,
+      "releaseToDoneMs": 813,
+      "playback": {
+        "rms": 0.1676297439862747,
+        "peak": 0.25,
+        "underruns": 0,
+        "samplesPlayed": 35760
+      },
+      "spectral": {
+        "pass": true,
+        "notes": [
+          {
+            "freq": 523.25,
+            "marginDb": 26.9,
+            "pass": true
+          },
+          {
+            "freq": 659.25,
+            "marginDb": 24.5,
+            "pass": true
+          },
+          {
+            "freq": 783.99,
+            "marginDb": 27.7,
+            "pass": true
+          }
+        ],
+        "playedSeconds": 7.14
+      }
+    }
+  ],
+  "bargeIns": [
+    {
+      "turnId": "turn_6",
+      "bargeInStopMs": 25
+    },
+    {
+      "turnId": "turn_6",
+      "bargeInStopMs": 25
+    },
+    {
+      "turnId": "turn_6",
+      "bargeInStopMs": 25
+    }
+  ],
+  "textTurns": [
+    {
+      "turnId": "turn_12",
+      "captureMs": 358,
+      "askToCommitMs": 359,
+      "askToFirstTranscriptMs": 361,
+      "askToFirstAudioDeltaMs": 926,
+      "firstDeltaToFirstPlayedMs": 8,
+      "askToDoneMs": 1128
+    },
+    {
+      "turnId": "turn_13",
+      "captureMs": 388,
+      "askToCommitMs": 389,
+      "askToFirstTranscriptMs": 390,
+      "askToFirstAudioDeltaMs": 940,
+      "firstDeltaToFirstPlayedMs": 9,
+      "askToDoneMs": 1143
+    },
+    {
+      "turnId": "turn_14",
+      "captureMs": 350,
+      "askToCommitMs": 350,
+      "askToFirstTranscriptMs": 352,
+      "askToFirstAudioDeltaMs": 922,
+      "firstDeltaToFirstPlayedMs": 2,
+      "askToDoneMs": 1113
+    }
+  ],
+  "shortHold": {
+    "turnCreated": false,
+    "assistantState": "idle",
+    "pass": true
+  },
+  "silenceHold": {
+    "turnId": "turn_1",
+    "chunksIn": 57,
+    "committedAudioSec": 3.42,
+    "responseDone": true,
+    "assistantStateAfter": "speaking",
+    "pass": true
+  },
+  "medians": {
+    "captureMs": 414,
+    "releaseToCommitMs": 1,
+    "releaseToFirstAudioDeltaMs": 604,
+    "firstDeltaToFirstPlayedMs": 39,
+    "releaseToDoneMs": 813,
+    "bargeInStopMs": 25,
+    "textAskToFirstAudioDeltaMs": 926,
+    "textFirstDeltaToFirstPlayedMs": 8
+  },
+  "gates": {
+    "audioIn": true,
+    "audioOutRms": true,
+    "underruns": true,
+    "spectral": true,
+    "bargeInUnder300": true,
+    "shortHold": true,
+    "silenceHold": true
+  },
+  "finishedAt": "2026-07-12T15:00:24.673Z"
+}

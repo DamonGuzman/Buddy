@@ -28,6 +28,7 @@
  *   in-place when the async ASR transcript arrives.
  */
 
+import { AUDIO_SAMPLE_RATE } from '../shared/constants';
 import { captureAllDisplays } from './capture';
 import type { CaptureResult } from './capture';
 import { mapModelPoint } from './coords';
@@ -37,6 +38,7 @@ import type { ToolCall } from './realtime/session';
 import type { PointAtArgs } from './realtime/protocol';
 import type { SettingsStore } from './settings';
 import type { OverlayManager } from './windows/overlay';
+import { showPanelOnce } from './windows/panel';
 import type { PanelManager } from './windows/panel';
 import type {
   AssistantState,
@@ -241,8 +243,20 @@ export class Conversation {
       this.activeTurn.tFirstAudioPlayed = stats.firstPlayedAt || Date.now();
     }
     // Barge-in: playback of the cancelled turn's item actually stopped.
+    // Release-QA fix: derive the stop moment from the playback tap (wall time
+    // of the last rendered sample) instead of Date.now() here — the hotkey
+    // press also kicks the screenshot resize/JPEG crunch in main, which
+    // delays THIS handler by 100-300ms on a 4K display and used to inflate
+    // the metric with pure main-loop congestion (renderer stops in ~10-20ms).
+    // firstPlayedAt + samples/rate is exact when underruns == 0 (barge-in
+    // items in practice); with underruns it undercounts, so fall back.
     if (this.bargeWatch && stats.done && this.bargeWatch.itemIds.has(stats.itemId)) {
-      this.bargeWatch.turn.bargeInStopMs = Date.now() - this.bargeWatch.t0;
+      const renderedStopAt =
+        stats.firstPlayedAt + (stats.samplesPlayed / AUDIO_SAMPLE_RATE) * 1000;
+      this.bargeWatch.turn.bargeInStopMs =
+        stats.underruns === 0 && stats.firstPlayedAt > 0
+          ? Math.max(0, Math.round(renderedStopAt - this.bargeWatch.t0))
+          : Date.now() - this.bargeWatch.t0;
       this.bargeWatch = null;
     }
   }
@@ -525,6 +539,10 @@ export class Conversation {
       streaming: false,
       timestamp: Date.now(),
     });
+    // No key = almost certainly a first-time user talking to a hidden panel.
+    // Surface it (at most once per run, focus-less) so the "add your openai
+    // key" message is actually seen instead of dying behind the tray icon.
+    if (noKey) showPanelOnce();
     this.setState('error');
   }
 

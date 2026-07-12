@@ -1,0 +1,45 @@
+{
+  "backend": "MOCK (tools/mock-realtime)",
+  "mode": "text",
+  "startedAt": "2026-07-12T15:03:00.557Z",
+  "scenes": [
+    {
+      "scene": "calibration",
+      "window": {
+        "screenX": 0,
+        "screenY": 0,
+        "innerWidth": 2560,
+        "innerHeight": 1440,
+        "outerWidth": 2560,
+        "outerHeight": 1440
+      },
+      "targets": [
+        {
+          "name": "calibration-center",
+          "desc": "the big green square in the center of the screen",
+          "rect": {
+            "x": 768,
+            "y": 475,
+            "width": 1024,
+            "height": 490
+          },
+          "pointed": {
+            "x": 1280,
+            "y": 720,
+            "screenIndex": 0,
+            "label": "the button"
+          },
+          "verdict": "hit",
+          "errorPx": 0
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "hit": 1,
+    "near": 0,
+    "miss": 0,
+    "error": 0
+  },
+  "finishedAt": "2026-07-12T15:03:08.021Z"
+}

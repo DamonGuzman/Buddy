@@ -174,11 +174,23 @@ export class OverlayManager {
     lockdownNavigation(win);
     // Crash recovery: a dead overlay renderer = invisible buddy. Drop the dead
     // window and let syncDisplays build a fresh one (bounded by crashGuard).
-    recoverOnRenderProcessGone(win, this.crashGuard, `overlay(display ${display.id})`, () => {
-      if (!win.isDestroyed()) win.destroy();
-      if (this.windows.get(display.id) === win) this.windows.delete(display.id);
-      this.syncDisplays();
-    });
+    recoverOnRenderProcessGone(
+      win,
+      this.crashGuard,
+      `overlay(display ${display.id})`,
+      () => {
+        if (!win.isDestroyed()) win.destroy();
+        if (this.windows.get(display.id) === win) this.windows.delete(display.id);
+        this.syncDisplays();
+      },
+      // Guard gave up: still destroy the zombie window (renderer is gone, the
+      // BrowserWindow isn't) and drop it from the map so overlayWindowCount
+      // stays accurate. No syncDisplays here — that would recreate it.
+      () => {
+        if (!win.isDestroyed()) win.destroy();
+        if (this.windows.get(display.id) === win) this.windows.delete(display.id);
+      },
+    );
 
     win.setAlwaysOnTop(true, 'screen-saver');
     // Click-through at the OS level; no forwarding — the overlay never reacts

@@ -23,7 +23,7 @@ export function createTray(callbacks: TrayCallbacks): Tray {
   const icon = nativeImage.createFromBuffer(Buffer.from(TRAY_ICON_BASE64, 'base64'));
   // Windows tray wants a 16x16 variant; nativeImage handles DPI from the 32px source.
   const tray = new Tray(icon.resize({ width: 16, height: 16 }));
-  tray.setToolTip(`${APP_NAME} — hold Ctrl+Alt and talk`);
+  tray.setToolTip(`${APP_NAME} — hold Ctrl + left Alt and talk`);
 
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Open Panel', click: () => callbacks.onOpenPanel() },

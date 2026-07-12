@@ -1,7 +1,7 @@
 {
   "name": "heyclicky",
   "version": "0.1.0",
-  "description": "Clicky for Windows — hold Ctrl+Alt, talk; it sees your screens and points at things.",
+  "description": "Clicky for Windows — hold Ctrl + left Alt, talk; it sees your screens and points at things.",
   "main": "out/main/index.js",
   "private": true,
   "author": "Fastyr, Inc.",

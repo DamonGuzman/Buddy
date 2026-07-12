@@ -57,20 +57,26 @@ export class CrashLoopGuard {
 /**
  * Recreate-on-crash wiring. `recreate` must fully replace the window (destroy
  * the dead one and build a fresh one). 'clean-exit' is a normal teardown and
- * is ignored.
+ * is ignored. When the guard gives up, `onGiveUp` (if provided) must clean up
+ * the dead window — otherwise a zombie BrowserWindow with a gone renderer
+ * lingers (and, for overlays, keeps inflating overlayWindowCount).
  */
 export function recoverOnRenderProcessGone(
   win: BrowserWindow,
   guard: CrashLoopGuard,
   label: string,
   recreate: () => void,
+  onGiveUp?: () => void,
 ): void {
   win.webContents.on('render-process-gone', (_event, details) => {
     if (details.reason === 'clean-exit') return;
     console.error(
       `[windows] ${label} renderer gone (reason: ${details.reason}, exitCode: ${details.exitCode})`,
     );
-    if (!guard.allowRecreate(details)) return;
+    if (!guard.allowRecreate(details)) {
+      onGiveUp?.();
+      return;
+    }
     console.log(`[windows] recreating ${label} window after renderer crash`);
     recreate();
   });

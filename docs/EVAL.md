@@ -23,7 +23,8 @@ Node 24, production build (`npm run build`).
 ## 2. Metrics — targets vs. measured
 
 Mock column measured 2026-07-12 (results in `eval/results/2026-07-12T07-31-18-voice/` and
-`eval/results/2026-07-12T07-38-14/`). Live column empty until an OpenAI key exists.
+`eval/results/2026-07-12T07-38-14/`; barge-in re-measured post-merge with the tap-derived metric,
+`eval/results/2026-07-12T14-59-17-voice/`). Live column empty until an OpenAI key exists.
 
 ### 2a. Voice round-trip (×5, fake mic `ask-point-save.wav`, 3.5s hold) — medians
 
@@ -45,10 +46,13 @@ Mock column measured 2026-07-12 (results in `eval/results/2026-07-12T07-31-18-vo
 
 | Metric | Target | Mock | Pass | Live |
 |---|---|---|---|---|
-| Cancel requested → playback actually stopped (median) | < 300ms | 285 ms | PASS | |
+| Cancel requested → playback actually stopped (median) | < 300ms | 25 ms | PASS | |
 
-Note: consistently ~285ms (main → renderer → worklet clear → tap finalize → renderer → main).
-Passes but is close to the gate; worth profiling which hop dominates before tightening the target.
+Note: `bargeInStopMs` is now derived from the playback tap (`firstPlayedAt + samplesPlayed/rate`
+of the cancelled item's final block), i.e. the wall time of the last rendered sample. The earlier
+~285-356ms readings stamped `Date.now()` when main PROCESSED the done-stats IPC — the same hotkey
+press kicks the screenshot resize/JPEG crunch in main, which delayed that handler by 100-300ms on
+a 4K display; the renderer itself stops rendering ~10-25ms after the press.
 
 ### 2c. Text turn (×3, `/ask "hello there friend"`) — medians
 
@@ -156,7 +160,7 @@ DIP. The runner opens scenes with `msedge --kiosk … --edge-kiosk-type=fullscre
   derived; the live API returns a real transcription instead (the eval then checks the words).
 - `tFirstAudioPlayed` uses `Date.now()` inside the audio worklet at the first rendered quantum;
   actual device output adds a few ms of hardware latency not visible from software.
-- Barge-in ~285ms is consistent and passes, but the gate margin is thin — profile before
-  relying on it for UX polish.
+- Barge-in truly stops playback in ~10-25ms (tap-derived); the old thin-margin ~285ms readings
+  were main-loop congestion in the measurement path (see §2b note), not audible latency.
 - `run.mjs --voice` relaunches the app per target (fake-capture file is a launch-time
   Chromium switch); expect ~15s per target.
