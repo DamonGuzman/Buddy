@@ -47,6 +47,7 @@ describe('settings schema', () => {
       codexSignedIn: false,
       codexValid: false,
       codexPlanType: '',
+      preferApiKeyGrounding: false,
     });
     // the renderer-safe view must never contain the key itself
     expect(JSON.stringify(next)).not.toContain('sk-secret');

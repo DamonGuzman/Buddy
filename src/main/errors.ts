@@ -53,7 +53,13 @@ export type ErrorKind =
   | 'hotkey_dead'
   | 'hold_too_long'
   | 'settings_reset'
-  | 'renderer_dead';
+  | 'renderer_dead'
+  // M18 additions (integration-approved): agent mode (docs/AGENT-MODE.md §7).
+  | 'agent_not_signed_in'
+  | 'agent_quota'
+  | 'agent_backend_down'
+  | 'agent_timed_out'
+  | 'agent_tool_failed';
 
 export type ErrorSurface = 'transcript' | 'pill' | 'caption' | 'tray';
 
@@ -203,6 +209,36 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
   renderer_dead: {
     copy: "clicky hit a snag it couldn't fix — a restart will patch things up.",
     surfaces: ['tray'],
+    autoShowPanel: false,
+  },
+  // M18 (integration): agent-mode failures (docs/AGENT-MODE.md §7). The two
+  // actionable gates (sign-in, plan quota) auto-show the panel once and add a
+  // caption — they hit while the user is looking at the screen, not the panel.
+  // The rest land on the agent Card + transcript; agent_quota and
+  // agent_backend_down FAIL CLOSED (the run stops, no retry storm).
+  agent_not_signed_in: {
+    copy: 'agent mode needs your chatgpt sign-in — connect it in settings.',
+    surfaces: ['transcript', 'caption'],
+    autoShowPanel: true,
+  },
+  agent_quota: {
+    copy: 'your chatgpt plan is out of agent runs for now — voice still works.',
+    surfaces: ['transcript', 'caption'],
+    autoShowPanel: true,
+  },
+  agent_backend_down: {
+    copy: "couldn't reach chatgpt just now — i stopped that agent; try again in a bit.",
+    surfaces: ['transcript'],
+    autoShowPanel: false,
+  },
+  agent_timed_out: {
+    copy: "that agent ran long and i had to stop it — here's what i got so far.",
+    surfaces: ['transcript'],
+    autoShowPanel: false,
+  },
+  agent_tool_failed: {
+    copy: "one of my tools kept failing on that task — here's what i got anyway.",
+    surfaces: ['transcript'],
     autoShowPanel: false,
   },
 };

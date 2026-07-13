@@ -1,4 +1,4 @@
-import { ArrowLeft, Settings } from 'lucide-react';
+import { ArrowLeft, Bot, Settings } from 'lucide-react';
 import { Triangle } from './Triangle';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -50,12 +50,13 @@ interface HeaderProps {
   session: SessionStatus | null;
   /** M11: CLICKY_* dev/QA flags set for this run (besides CLICKY_DEBUG). */
   devFlags?: string[];
-  settingsOpen: boolean;
-  onToggleSettings: () => void;
+  view: 'chat' | 'agents' | 'settings';
+  agentCount: number;
+  onView: (view: 'chat' | 'agents' | 'settings') => void;
 }
 
 export function Header(props: HeaderProps): React.JSX.Element {
-  const { assistantState, session, devFlags = [], settingsOpen, onToggleSettings } = props;
+  const { assistantState, session, devFlags = [], view, agentCount, onView } = props;
   const sessionState = session?.state ?? 'disconnected';
   const sessionTitle =
     sessionState === 'error' && session?.error
@@ -112,20 +113,32 @@ export function Header(props: HeaderProps): React.JSX.Element {
           </TooltipTrigger>
           <TooltipContent side="bottom">{sessionTitle}</TooltipContent>
         </Tooltip>
+        {view === 'chat' ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button type="button" variant="ghost" size="icon" aria-label="agents" className="relative size-7 text-muted-foreground" onClick={() => onView('agents')}>
+                <Bot className="size-4" />
+                {agentCount > 0 ? <span className="absolute -top-1 -right-1 grid min-w-4 place-items-center rounded-full bg-clicky px-1 text-[9px] leading-4 text-primary-foreground">{agentCount}</span> : null}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">agents</TooltipContent>
+          </Tooltip>
+        ) : null}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              className={cn('size-7 text-muted-foreground', settingsOpen && 'bg-accent text-accent-foreground')}
-              onClick={onToggleSettings}
+              aria-label={view !== 'chat' ? 'back to chat' : 'settings'}
+              className={cn('size-7 text-muted-foreground', view !== 'chat' && 'bg-accent text-accent-foreground')}
+              onClick={() => onView(view === 'chat' ? 'settings' : 'chat')}
             >
-              {settingsOpen ? <ArrowLeft className="size-4" /> : <Settings className="size-4" />}
+              {view !== 'chat' ? <ArrowLeft className="size-4" /> : <Settings className="size-4" />}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            {settingsOpen ? 'back to chat' : 'settings'}
+            {view !== 'chat' ? 'back to chat' : 'settings'}
           </TooltipContent>
         </Tooltip>
       </div>

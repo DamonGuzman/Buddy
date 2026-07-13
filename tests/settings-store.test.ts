@@ -176,6 +176,23 @@ describe('SettingsStore: codex sign-in fields (M17)', () => {
 });
 
 describe('SettingsStore: corrupt settings.json (M11 settings_reset)', () => {
+  it('migrates a healthy schema-v1 file to v2 without losing preferences', () => {
+    const path = freshPath();
+    writeFileSync(path, JSON.stringify({
+      version: 1,
+      apiKeyEncrypted: null,
+      model: 'gpt-realtime-2.1-mini',
+      voice: 'cedar',
+      captionsEnabled: false,
+      micDeviceId: 'mic-old',
+      buddyRest: null,
+    }), 'utf8');
+    const store = new SettingsStore(path);
+    expect(store.get().voice).toBe('cedar');
+    expect(store.get().preferApiKeyGrounding).toBe(false);
+    expect(JSON.parse(readFileSync(path, 'utf8')).version).toBe(2);
+  });
+
   it('resets to defaults and reports settingsWereReset', () => {
     const path = freshPath();
     writeFileSync(path, '{"version":1, THIS IS NOT JSON', 'utf8');

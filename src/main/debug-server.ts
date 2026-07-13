@@ -47,6 +47,7 @@ import { join } from 'node:path';
 import { DEBUG_HOST, DEBUG_PORT, ENV_DEBUG } from '../shared/constants';
 import type {
   AssistantState,
+  AgentSummary,
   DebugState,
   PlaybackCommand,
   PlaybackStatsUpdate,
@@ -82,11 +83,18 @@ export interface GroundingDebugDeps {
   query: (q: { x: number; y: number; label: string; radiusPx?: number }) => Promise<unknown>;
 }
 
+export interface AgentDebugDeps {
+  spawn(task: string): { ok: true; agentId: string } | { ok: false; reason: string };
+  list(): AgentSummary[];
+  cancel(id: string): void;
+}
+
 export interface DebugServerDeps {
   getState: () => DebugState;
   pipeline?: PipelineDebugDeps;
   audioEval?: AudioEvalDebugDeps;
   grounding?: GroundingDebugDeps;
+  agents?: AgentDebugDeps;
 }
 
 type RouteHandler = (
@@ -477,6 +485,30 @@ const PIPELINE_ROUTES: Record<string, RouteHandler> = {
 
 Object.assign(ROUTES, PIPELINE_ROUTES);
 // --- end M6 pipeline debug routes ---
+
+const AGENT_ROUTES: Record<string, RouteHandler> = {
+  'GET /agents': (deps, _req, res) => {
+    if (!deps.agents) return sendJson(res, 503, { error: 'agent runtime not wired' });
+    sendJson(res, 200, deps.agents.list());
+  },
+  'POST /agents/spawn': async (deps, req, res) => {
+    if (!deps.agents) return sendJson(res, 503, { error: 'agent runtime not wired' });
+    const body = asRecord(await readJsonBody(req));
+    const task = body?.['task'];
+    if (typeof task !== 'string' || !task.trim()) return sendJson(res, 400, { error: 'expected {task: string}' });
+    const result = deps.agents.spawn(task.trim());
+    sendJson(res, result.ok ? 202 : 409, result);
+  },
+  'POST /agents/cancel': async (deps, req, res) => {
+    if (!deps.agents) return sendJson(res, 503, { error: 'agent runtime not wired' });
+    const body = asRecord(await readJsonBody(req));
+    const id = body?.['id'];
+    if (typeof id !== 'string') return sendJson(res, 400, { error: 'expected {id: string}' });
+    deps.agents.cancel(id);
+    sendJson(res, 200, { ok: true });
+  },
+};
+Object.assign(ROUTES, AGENT_ROUTES);
 
 // ===========================================================================
 // --- M8.5 audio-experience eval routes (orchestrator-approved) ---

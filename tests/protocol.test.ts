@@ -237,7 +237,8 @@ describe('persona tool definition', () => {
     const instructions = getSessionInstructions();
     expect(instructions).toContain('clicky');
     expect(instructions).toContain('point_at');
-    expect(instructions).toContain('coming soon');
+    expect(instructions).toContain('chatgpt sign-in');
     expect(getToolDefinitions().map((t) => t.name)).toEqual(['point_at']);
+    expect(getToolDefinitions(true).map((t) => t.name)).toEqual(['point_at', 'spawn_agent']);
   });
 });

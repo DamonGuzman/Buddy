@@ -24,7 +24,7 @@ const CODEX_SIGNED_OUT: CodexSignInState = {
 
 /** On-disk shape. `apiKeyEncrypted` is a base64 safeStorage blob. */
 interface SettingsFile {
-  version: 1;
+  version: 2;
   apiKeyEncrypted: string | null;
   /**
    * M11: the stored blob failed DPAPI decryption (windows credentials
@@ -38,6 +38,7 @@ interface SettingsFile {
   micDeviceId: string;
   // M15 addition (orchestrator-approved): user-defined buddy rest position.
   buddyRest: BuddyRest | null;
+  preferApiKeyGrounding: boolean;
 }
 
 const FILE_NAME = 'settings.json';
@@ -61,6 +62,7 @@ export class SettingsStore {
   private listeners = new Set<(settings: Settings) => void>();
   /** M11: true when a settings.json EXISTED but was corrupt (reset to defaults). */
   private wasReset = false;
+  private needsMigration = false;
   /**
    * M17: resolves the renderer-safe Codex sign-in snapshot. Defaults to the
    * process-wide Codex auth provider (reads `~/.codex/auth.json` fresh);
@@ -73,6 +75,7 @@ export class SettingsStore {
     this.resolveCodexSignIn =
       codexSignIn ?? (() => getCodexAuthProvider().codexSignInState());
     this.file = this.load();
+    if (this.needsMigration) this.persist();
     // M15 addition (orchestrator-approved): see getSettingsStore above.
     activeStore = this;
   }
@@ -96,6 +99,7 @@ export class SettingsStore {
       codexSignedIn: codex.signedIn,
       codexValid: codex.valid,
       codexPlanType: codex.planType,
+      preferApiKeyGrounding: this.file.preferApiKeyGrounding,
     };
   }
 
@@ -140,6 +144,7 @@ export class SettingsStore {
     this.file.micDeviceId = merged.micDeviceId;
     // M15 addition (orchestrator-approved).
     this.file.buddyRest = merged.buddyRest;
+    this.file.preferApiKeyGrounding = merged.preferApiKeyGrounding;
     this.persist();
     this.notify();
     return this.get();
@@ -193,7 +198,7 @@ export class SettingsStore {
 
   private load(): SettingsFile {
     const fallback: SettingsFile = {
-      version: 1,
+      version: 2,
       apiKeyEncrypted: null,
       keyUnreadable: false,
       model: DEFAULT_SETTINGS.model,
@@ -202,12 +207,14 @@ export class SettingsStore {
       micDeviceId: DEFAULT_SETTINGS.micDeviceId,
       // M15 addition (orchestrator-approved).
       buddyRest: DEFAULT_SETTINGS.buddyRest,
+      preferApiKeyGrounding: DEFAULT_SETTINGS.preferApiKeyGrounding,
     };
     try {
       if (!existsSync(this.path)) return fallback;
       const parsed = JSON.parse(readFileSync(this.path, 'utf8')) as Partial<SettingsFile>;
+      this.needsMigration = parsed.version !== 2;
       return {
-        version: 1,
+        version: 2,
         apiKeyEncrypted: typeof parsed.apiKeyEncrypted === 'string' ? parsed.apiKeyEncrypted : null,
         keyUnreadable: parsed.keyUnreadable === true,
         // M8.6: validate against the full model list — a stored 'mini' choice
@@ -223,6 +230,10 @@ export class SettingsStore {
         micDeviceId: typeof parsed.micDeviceId === 'string' ? parsed.micDeviceId : fallback.micDeviceId,
         // M15 addition (orchestrator-approved): validate the persisted rest.
         buddyRest: parseBuddyRest(parsed.buddyRest),
+        preferApiKeyGrounding:
+          typeof parsed.preferApiKeyGrounding === 'boolean'
+            ? parsed.preferApiKeyGrounding
+            : fallback.preferApiKeyGrounding,
       };
     } catch (err) {
       console.error('[settings] failed to load, using defaults:', err);

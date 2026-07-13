@@ -163,6 +163,22 @@ export class CodexAuth {
     throw new Error('codex sub not signed in');
   }
 
+  /** Install tokens obtained by Clicky's own loopback PKCE flow. */
+  acceptOAuthTokens(accessToken: string, refreshToken: string): boolean {
+    const decoded = decodeAccessToken(accessToken);
+    if (decoded === null || refreshToken.length === 0) return false;
+    const stored: StoredCodexTokens = {
+      accessToken,
+      refreshToken,
+      accountId: decoded.accountId,
+      planType: decoded.planType,
+      expiresAt: decoded.expiresAt,
+    };
+    this.refreshed = stored;
+    this.tokenStore.save(stored);
+    return true;
+  }
+
   /** exp > now + 60s. */
   isValid(info: CodexAuthInfo): boolean {
     return info.expiresAt > this.now() + VALID_SKEW_MS;

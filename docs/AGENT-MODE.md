@@ -1,11 +1,15 @@
 # Clicky for Windows — Agent Mode Design ("clicky, agent")
 
-> Design doc, M14. Buildable spec for the "clicky, agent" feature: say it out loud and a
-> background agent goes off and does real work while the voice loop stays free. **This is design
-> only — no product code changes ship with this doc.** It slots onto the M16 baseline (shadcn
+> Design doc, M14; Phase 1 implemented in M18. Say it out loud and a
+> background agent goes off and does real work while the voice loop stays free. Product code
+> now lives in `src/main/agents/` and the panel. It slots onto the M16 baseline (shadcn
 > panel + buddy hover + error catalog) and depends on the parallel Codex-auth work
 > (`src/main/auth/`, an `AuthSource` abstraction + Codex subscription transport). Read
 > `docs/ARCHITECTURE.md` first; this doc assumes it.
+
+> Shipped-backend correction: live probing proved this endpoint requires `store:false` and
+> rejects `previous_response_id`, so the runtime replays bounded client-side history. Hosted
+> `{type:"web_search"}` is supported and used directly.
 
 ---
 

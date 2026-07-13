@@ -41,19 +41,36 @@ import { dipToPhysicalViaMeta, physicalToDipViaMeta } from './grounding/convert'
 import type { Pt } from './grounding/convert';
 import { getCodexAuthProvider } from './auth/codex-auth';
 import { resolveGroundingAuth } from './auth/auth-source';
-import type { CodexProvider } from './auth/auth-source';
+import type { CodexProvider, ChatGptCodexAuthSource } from './auth/auth-source';
+import { CodexResponsesSession } from './codex/responses-session';
+import type {
+  CodexFunctionCall,
+  CodexResponsesCallbacks,
+  CodexToolDef,
+  CodexTurnResult,
+  CodexUserTurn,
+} from './codex/responses-session';
 import { classifyError, describeKind } from './errors';
 import type { ErrorKind, ErrorParams, ErrorPresentation } from './errors';
-import { getSessionInstructions, getToolDefinitions } from './persona';
+import {
+  getSessionInstructions,
+  getTextInstructions,
+  getTextToolDefinitions,
+  getToolDefinitions,
+} from './persona';
 import { RealtimeSession } from './realtime/session';
 import type { ToolCall } from './realtime/session';
 import type { PointAtArgs } from './realtime/protocol';
+import { validatePointAtArgs } from './realtime/protocol';
+import type { AgentManager } from './agents/manager';
+import type { AgentBrief } from './agents/types';
 import type { SettingsStore } from './settings';
 import type { OverlayManager } from './windows/overlay';
 import { showPanelOnce } from './windows/panel';
 import type { PanelManager } from './windows/panel';
 import type {
   AssistantState,
+  AgentSummary,
   AudioDeviceError,
   CaptureMeta,
   GroundingAttribution,
@@ -105,6 +122,20 @@ export const CAPTURE_FAILED_CONTEXT =
   'screen capture failed for this turn — you have NO screenshots. answer from the words ' +
   'alone, say you could not see the screen if it matters, and never call point_at.';
 
+/**
+ * M18: the narrow slice of `CodexResponsesSession` the conversation drives for
+ * the TEXT panel path. Kept as an interface so tests can inject a fake without
+ * the real transport (see `buildCodexSession`).
+ */
+export interface CodexTextSession {
+  submit(turn: CodexUserTurn, cb: CodexResponsesCallbacks): Promise<CodexTurnResult>;
+  continue(cb: CodexResponsesCallbacks): Promise<CodexTurnResult>;
+  sendToolOutput(callId: string, output: object): void;
+  hasPendingToolOutputs(): boolean;
+  cancel(): void;
+  lastUsedPercent(): CodexUsedPercent | null;
+}
+
 export interface ConversationDeps {
   settings: SettingsStore;
   overlays: OverlayManager;
@@ -115,7 +146,18 @@ export interface ConversationDeps {
    * `~/.codex/auth.json`). Injected in unit tests for determinism.
    */
   codexAuth?: CodexProvider;
+  /**
+   * M18 seam: build the TEXT-path Codex session for a resolved sub. Optional —
+   * defaults to a real `CodexResponsesSession` with the text persona + tools.
+   * Injected in unit tests to drive the text turn deterministically.
+   */
+  buildCodexSession?: (auth: ChatGptCodexAuthSource) => CodexTextSession;
+  /** Background-agent runtime; omitted in focused conversation tests. */
+  agents?: AgentManager;
 }
+
+/** Guard on the tool-output continue loop of a single text turn. */
+const MAX_CODEX_CONTINUES = 8;
 
 // M17 (integration): `GroundingAttribution` was promoted to the shared
 // contract (src/shared/types.ts) so DebugState + the panel can read it; it is
@@ -175,6 +217,20 @@ export class Conversation {
   private readonly codexDisabled = process.env['CLICKY_NO_CODEX_SUB'] === '1';
   /** M13-core: attribution of the most recent grounding call. */
   private lastGrounding: GroundingAttribution | null = null;
+  // M18: TEXT panel path — a typed question runs on gpt-5.6-sol over the Codex
+  // sub (text in, text out) with the SAME tool harness, when a valid sub is
+  // signed in; otherwise it falls back to the realtime voice model (below).
+  private readonly injectedBuildCodex:
+    | ((auth: ChatGptCodexAuthSource) => CodexTextSession)
+    | null;
+  /** Reused across text turns so the session's client-side history gives memory. */
+  private codexTextSession: CodexTextSession | null = null;
+  /** Plan-usage telemetry of the most recent text turn (debug surface). */
+  private codexTextUsedPercent: CodexUsedPercent | null = null;
+  private readonly agents: AgentManager | null;
+  private agentModeAvailableSnapshot = false;
+  private agentSeq = 0;
+  private readonly pendingAgentRecaps = new Map<string, AgentSummary>();
   /**
    * M17: the turnToken (episode) for which the `codex_plan_limit` message has
    * already been surfaced — so a multi-point turn that repeatedly hits the
@@ -256,6 +312,11 @@ export class Conversation {
     // M13-core: hold any injected Codex provider; otherwise the process-wide
     // one is resolved lazily at grounding time (codexProvider()).
     this.injectedCodexAuth = deps.codexAuth ?? null;
+    // M18: hold any injected text-session factory (tests); else the default
+    // builds a real CodexResponsesSession lazily on the first text turn.
+    this.injectedBuildCodex = deps.buildCodexSession ?? null;
+    this.agents = deps.agents ?? null;
+    this.agentModeAvailableSnapshot = this.agents?.isReady() ?? false;
     const snapshot = this.settings.get();
     this.sessionModel = snapshot.model;
     this.sessionVoice = snapshot.voice;
@@ -294,6 +355,24 @@ export class Conversation {
    */
   private codexProvider(): CodexProvider {
     return this.injectedCodexAuth ?? getCodexAuthProvider();
+  }
+
+  /**
+   * M18: the TEXT-path Codex session (built once, reused so multi-turn memory
+   * replays through its client-side history). The injected factory wins in
+   * tests; otherwise a real CodexResponsesSession with the text persona.
+   */
+  private getCodexSession(auth: ChatGptCodexAuthSource): CodexTextSession {
+    if (this.codexTextSession === null) {
+      this.codexTextSession = this.injectedBuildCodex
+        ? this.injectedBuildCodex(auth)
+        : new CodexResponsesSession({
+            auth,
+            instructions: getTextInstructions(this.agentModeAvailableSnapshot),
+            tools: getTextToolDefinitions(this.agentModeAvailableSnapshot) as CodexToolDef[],
+          });
+    }
+    return this.codexTextSession;
   }
 
   // ---------------------------------------------------------------------
@@ -433,6 +512,9 @@ export class Conversation {
    */
   holdStart(): void {
     if (this.closed || this.holding) return;
+    // M18: a voice hold supersedes any in-flight TEXT turn (abort the Codex
+    // request so its stream stops emitting into the transcript).
+    this.codexTextSession?.cancel();
     // BARGE-IN: kill the in-flight response and its queued audio.
     if (this.pendingResponses > 0) this.cancelActiveResponse('stop');
     // Live-eval finding (M8.5): response.done arrives long before the queued
@@ -555,6 +637,9 @@ export class Conversation {
     // A typed question while the hotkey is held supersedes the hold —
     // never two concurrent turns (m1) / response.creates.
     if (this.holding) this.cancelHold();
+    // M18: a new ask supersedes any in-flight TEXT turn (abort the Codex
+    // request; its stream stops emitting).
+    this.codexTextSession?.cancel();
     // Supersede: cancel the current response and drop its queued audio.
     if (this.pendingResponses > 0) this.cancelActiveResponse('flush');
     // Same live-eval finding as holdStart: a completed response's audio may
@@ -604,6 +689,25 @@ export class Conversation {
       contextText = CAPTURE_FAILED_CONTEXT;
     }
 
+    // M18: route the typed question. When a valid ChatGPT (Codex) sub is
+    // signed in, the answer runs text-in/text-out on gpt-5.6-sol (sub-billed —
+    // works even with the metered key out of credit), with the SAME tool
+    // harness + screenshots. Otherwise fall back to the realtime voice model
+    // so text still works for non-signed-in users.
+    const auth = resolveGroundingAuth({
+      getApiKey: () => this.settings.getApiKey(),
+      codex: this.codexProvider(),
+      preferApiKey: this.codexDisabled || this.settings.get().preferApiKeyGrounding,
+    });
+    // The mock-realtime harness must remain deterministic even on a developer
+    // machine that happens to be signed in to Codex. Focused Codex tests opt in
+    // by injecting buildCodexSession; production has no CLICKY_MOCK_URL.
+    const codexTextAllowed = !process.env['CLICKY_MOCK_URL'] || this.injectedBuildCodex !== null;
+    if (codexTextAllowed && auth !== null && auth.kind === 'chatgptCodex') {
+      await this.runCodexTextTurn(trimmed, captures, contextText, token, turn, auth);
+      return;
+    }
+
     try {
       await this.session.askText(trimmed, captures, contextText);
       turn.tCommitSent = Date.now(); // M8.5
@@ -613,13 +717,245 @@ export class Conversation {
     }
   }
 
+  // ---------------------------------------------------------------------
+  // M18: text turn on the Codex subscription (gpt-5.6-sol, text in/out)
+  // ---------------------------------------------------------------------
+
+  /**
+   * Run one typed turn on the Codex Responses backend: stream text to the
+   * transcript (+ caption), dispatch point_at through the shared dispatcher in
+   * TEXT-ACCURATE mode (skips the redundant REST grounding — sol is already
+   * pixel-exact per COORD-STUDY §11), and round-trip tool outputs like voice.
+   * Fails closed on plan quota (codex_plan_limit) instead of spending the key.
+   */
+  private async runCodexTextTurn(
+    text: string,
+    captures: CaptureResult[],
+    contextText: string,
+    token: number,
+    turn: TurnTimings,
+    auth: ChatGptCodexAuthSource,
+  ): Promise<void> {
+    const session = this.getCodexSession(auth);
+    const framing = buildCodexFraming(
+      captures.map((c) => c.meta),
+      contextText,
+    );
+    const input: CodexUserTurn = {
+      text,
+      ...(framing.length > 0 ? { context: framing } : {}),
+      images: captures.map((c) => ({ jpegBase64: c.jpegBase64 })),
+    };
+    const cb: CodexResponsesCallbacks = {
+      onTextDelta: (itemId, full) => this.onCodexTextDelta(itemId, full, token),
+      onTextDone: (itemId, done) => this.onCodexTextDone(itemId, done, token),
+      onFunctionCall: (call) => this.onCodexFunctionCall(call, captures, token),
+      onCompleted: (info) => {
+        this.codexTextUsedPercent = info.usedPercent;
+      },
+      // Transport/protocol errors surface via the returned result below.
+      onError: () => undefined,
+    };
+
+    let result: CodexTurnResult;
+    try {
+      result = await session.submit(input, cb);
+    } catch (err) {
+      if (token === this.turnToken) this.failTurn(err);
+      return;
+    }
+    turn.tCommitSent ??= Date.now();
+    this.codexTextUsedPercent = result.usedPercent ?? this.codexTextUsedPercent;
+    if (this.closed || token !== this.turnToken) return;
+    if (result.quotaExhausted) {
+      this.surfaceCodexPlanLimit(token);
+      return;
+    }
+    if (result.aborted) return; // superseded mid-stream
+    if (result.error !== null) {
+      this.failTurn(result.error);
+      return;
+    }
+
+    // Tool round-trip: buffered function_call_output(s) -> continue, like voice.
+    let guard = 0;
+    while (
+      session.hasPendingToolOutputs() &&
+      !this.closed &&
+      token === this.turnToken &&
+      guard < MAX_CODEX_CONTINUES
+    ) {
+      guard += 1;
+      let next: CodexTurnResult;
+      try {
+        next = await session.continue(cb);
+      } catch (err) {
+        if (token === this.turnToken) this.failTurn(err);
+        return;
+      }
+      this.codexTextUsedPercent = next.usedPercent ?? this.codexTextUsedPercent;
+      if (this.closed || token !== this.turnToken) return;
+      if (next.quotaExhausted) {
+        this.surfaceCodexPlanLimit(token);
+        return;
+      }
+      if (next.aborted) return;
+      if (next.error !== null) {
+        this.failTurn(next.error);
+        return;
+      }
+    }
+
+    this.finishCodexTextTurn(token);
+  }
+
+  /** Streamed assistant text (full-so-far) -> transcript + caption (streaming). */
+  private onCodexTextDelta(itemId: string, full: string, token: number): void {
+    if (this.closed || token !== this.turnToken) return;
+    if (this.activeTurn && this.activeTurn.tFirstAssistantTranscript === undefined) {
+      this.activeTurn.tFirstAssistantTranscript = Date.now();
+    }
+    if (this.settings.get().captionsEnabled) {
+      this.overlays.broadcast('overlay:caption', { itemId, text: full, done: false });
+    }
+    const existing = this.entries.find((e) => e.id === itemId);
+    this.pushTranscript({
+      id: itemId,
+      role: 'assistant',
+      text: full,
+      streaming: true,
+      timestamp: existing?.timestamp ?? Date.now(),
+    });
+  }
+
+  /** A text item finished -> finalize transcript + caption. */
+  private onCodexTextDone(itemId: string, done: string, token: number): void {
+    if (this.closed || token !== this.turnToken) return;
+    if (this.settings.get().captionsEnabled) {
+      this.overlays.broadcast('overlay:caption', { itemId, text: done, done: true });
+    }
+    const existing = this.entries.find((e) => e.id === itemId);
+    this.pushTranscript({
+      id: itemId,
+      role: 'assistant',
+      text: done,
+      streaming: false,
+      timestamp: existing?.timestamp ?? Date.now(),
+    });
+  }
+
+  /**
+   * A complete tool call from the text model. point_at buffers its tool output
+   * immediately (the answer is never gated on grounding) and kicks the async
+   * pointer dispatch through the SHARED dispatcher in text-accurate mode.
+   */
+  private onCodexFunctionCall(
+    call: CodexFunctionCall,
+    captures: CaptureResult[],
+    token: number,
+  ): void {
+    if (this.closed || token !== this.turnToken) return;
+    const session = this.codexTextSession;
+    if (session === null) return;
+    if (this.activeTurn && this.activeTurn.tFirstToolCall === undefined) {
+      this.activeTurn.tFirstToolCall = Date.now();
+    }
+    if (call.name === 'spawn_agent') {
+      let parsed: unknown;
+      try { parsed = JSON.parse(call.argsJson); } catch { parsed = {}; }
+      session.sendToolOutput(call.callId, this.spawnAgent(parsed));
+      return;
+    }
+    if (call.name !== 'point_at') {
+      session.sendToolOutput(call.callId, { error: `unknown tool: ${call.name}` });
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(call.argsJson);
+    } catch {
+      session.sendToolOutput(call.callId, { error: 'arguments were not valid JSON' });
+      return;
+    }
+    const metas = captures.map((c) => c.meta);
+    const args = validatePointAtArgs(parsed, metas);
+    if (args === null) {
+      session.sendToolOutput(call.callId, { error: 'x, y and screen must be numbers' });
+      return;
+    }
+    const byIndex = captures.find((c) => c.meta.screenIndex === args.screen);
+    const capture = byIndex ?? captures.find((c) => c.meta.isActive) ?? captures[0];
+    if (!capture) {
+      session.sendToolOutput(call.callId, { error: 'no screenshot available for that screen' });
+      return;
+    }
+    const mapped = mapModelPoint(
+      { x: args.x, y: args.y, ...(args.label !== undefined ? { label: args.label } : {}) },
+      capture.meta,
+    );
+    session.sendToolOutput(call.callId, { ok: true, pointed_at: args.label ?? '' });
+    this.pointerChain = this.pointerChain.then(() =>
+      this.dispatchPointer(args, capture, mapped, { primaryModelIsAccurate: true }),
+    );
+  }
+
+  /** codex_plan_limit copy, once per text turn (matches the grounding path). */
+  private surfaceCodexPlanLimit(token: number): void {
+    if (this.codexPlanLimitSurfacedToken === token) return;
+    this.codexPlanLimitSurfacedToken = token;
+    this.surfaceError(describeKind('codex_plan_limit'));
+  }
+
+  /** Settle a completed text turn: finalize any streaming entry, back to idle. */
+  private finishCodexTextTurn(token: number): void {
+    if (this.closed || token !== this.turnToken) return;
+    for (const entry of this.entries) {
+      if (entry.streaming && entry.role === 'assistant') {
+        this.pushTranscript({ ...entry, streaming: false });
+      }
+    }
+    if (this.activeTurn) this.activeTurn.tResponseDone = Date.now();
+    if (this.state !== 'error') this.setState('idle');
+  }
+
   /** Settings changed: model/voice require a fresh session (key does not). */
   onSettingsChanged(next: Settings): void {
     if (next.model === this.sessionModel && next.voice === this.sessionVoice) return;
     this.sessionModel = next.model;
     this.sessionVoice = next.voice;
+    this.rebuildRealtimeSession();
+  }
+
+  /** Rebuild tool/persona availability when the Codex sign-in changes. */
+  onAgentAvailabilityChanged(): void {
+    const available = this.agents?.isReady() ?? false;
+    if (available === this.agentModeAvailableSnapshot) return;
+    this.agentModeAvailableSnapshot = available;
+    this.codexTextSession?.cancel();
+    this.codexTextSession = null;
+    this.rebuildRealtimeSession();
+  }
+
+  /** AgentManager completion hook: panel is already updated; deliver by voice when possible. */
+  deliverAgentResult(summary: AgentSummary): void {
+    if (this.closed) return;
+    this.pendingAgentRecaps.set(summary.id, summary);
+    if (this.session.status().state !== 'ready' || this.holding || this.pendingResponses > 0) return;
+    const context = this.agentRecapContext([summary]);
+    this.pendingAgentRecaps.delete(summary.id);
+    this.agents?.markSpoken(summary.id);
+    this.setState('thinking');
+    void this.session.injectSystemAndRespond(context).catch((error) => {
+      this.pendingAgentRecaps.set(summary.id, summary);
+      this.failTurn(error);
+    });
+  }
+
+  private rebuildRealtimeSession(): void {
     // F1 fix (m3): a mid-turn rebuild must not leave debris.
     if (this.holding) this.cancelHold(); // graceful: mic released, no turn
+    // M18: abort any in-flight text turn too (its stream stops emitting).
+    this.codexTextSession?.cancel();
     this.turnToken += 1;
     // Flush playback under the new epoch so queued/in-flight audio of the
     // dying session can never play into the rebuilt one.
@@ -657,6 +993,7 @@ export class Conversation {
     this.errorTimer = null;
     this.idleTimer = null;
     this.grounding?.dispose(); // M9: kill the snapper daemon
+    this.codexTextSession?.cancel(); // M18: abort any in-flight text turn
     this.session.close();
   }
 
@@ -713,6 +1050,8 @@ export class Conversation {
       this.surfaceError(describeKind('capture_failed'));
       contextText = CAPTURE_FAILED_CONTEXT;
     }
+    const recap = this.consumePendingAgentRecaps();
+    if (recap) contextText = contextText ? `${contextText}\n\n${recap}` : recap;
     try {
       await this.session.commitAudioAndRespond(captures, contextText);
       if (this.activeTurn) this.activeTurn.tCommitSent = Date.now(); // M8.5
@@ -906,8 +1245,8 @@ export class Conversation {
     const session = new RealtimeSession({
       model: this.sessionModel,
       voice: this.sessionVoice,
-      instructions: getSessionInstructions(),
-      tools: getToolDefinitions(),
+      instructions: getSessionInstructions(this.agentModeAvailableSnapshot),
+      tools: getToolDefinitions(this.agentModeAvailableSnapshot),
       getApiKey: () => this.settings.getApiKey(),
     });
     this.wireSession(session);
@@ -1110,6 +1449,11 @@ export class Conversation {
   // ---------------------------------------------------------------------
 
   private handleToolCall(call: ToolCall): void {
+    if (call.name === 'spawn_agent') {
+      this.session.sendToolOutput(call.callId, this.spawnAgent(call.args));
+      this.session.continueResponse();
+      return;
+    }
     if (call.name !== 'point_at') {
       this.session.sendToolOutput(call.callId, { error: `unknown tool: ${call.name}` });
       this.session.continueResponse(); // deferred until response.done (M4)
@@ -1142,6 +1486,51 @@ export class Conversation {
     this.pointerChain = this.pointerChain.then(() => this.dispatchPointer(args, capture, mapped));
   }
 
+  private spawnAgent(value: unknown): object {
+    if (this.agents === null) return { error: 'agent mode is unavailable' };
+    const args = value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+    const task = typeof args['task'] === 'string' ? args['task'].trim().slice(0, 2_000) : '';
+    if (!task) return { error: 'task is required' };
+    const why = typeof args['why'] === 'string' ? args['why'].trim().slice(0, 1_000) : '';
+    const capture = this.turnCaptures.find((item) => item.meta.isActive) ?? this.turnCaptures[0];
+    const id = `agent_${(this.agentSeq += 1)}_${Date.now()}`;
+    const brief: AgentBrief = {
+      id,
+      task,
+      ...(why ? { why } : {}),
+      ...(capture ? { screenshot: { jpegBase64: capture.jpegBase64, meta: capture.meta } } : {}),
+      recentTranscript: this.entries
+        .slice(-6)
+        .map((entry) => `${entry.role === 'assistant' ? 'clicky' : entry.role}: ${entry.text}`)
+        .join('\n')
+        .slice(-1_500),
+      createdAt: Date.now(),
+    };
+    const result = this.agents.spawn(brief);
+    if (result.ok) return { ok: true, agent_id: result.agentId };
+    if (result.reason === 'at_capacity') return { error: 'at capacity — three agents are already running' };
+    showPanelOnce('agent_not_signed_in');
+    return { error: 'agent mode needs chatgpt sign-in' };
+  }
+
+  private consumePendingAgentRecaps(): string {
+    if (this.pendingAgentRecaps.size === 0) return '';
+    const summaries = [...this.pendingAgentRecaps.values()];
+    this.pendingAgentRecaps.clear();
+    for (const summary of summaries) this.agents?.markSpoken(summary.id);
+    return this.agentRecapContext(summaries);
+  }
+
+  private agentRecapContext(summaries: AgentSummary[]): string {
+    const details = summaries.map((summary) => {
+      const result = summary.summary || summary.error || 'the agent stopped without a result';
+      return `task: ${summary.task}\nstatus: ${summary.status}\nresult: ${result}`;
+    }).join('\n\n');
+    return `background agent result(s) are ready. briefly tell the person the useful conclusion in your natural voice; do not read urls aloud.\n\n${details}`;
+  }
+
   /**
    * M9/M10 layered grounding: ground the model's (already §6-mapped) point,
    * then fly the buddy. Layers, in order (docs/ARCHITECTURE.md §6b):
@@ -1158,15 +1547,25 @@ export class Conversation {
    * grounding); a barge-in / superseding turn while grounding runs drops the
    * pointer via the turnToken check. The label chip always shows the MODEL's
    * label, not the element name.
+   *
+   * SHARED by the voice tool-call path AND the M18 text path. When
+   * `primaryModelIsAccurate` is set (text mode: the point comes straight from
+   * gpt-5.6-sol, which is 1px-median / 100% in-element per COORD-STUDY §11),
+   * the redundant REST grounding call is SKIPPED — the UIA element-snap still
+   * runs (it snaps to the true element center), otherwise the model's own
+   * already-accurate point stands. Voice keeps the full layered pipeline
+   * because its raw coordinates need it.
    */
   private async dispatchPointer(
     args: PointAtArgs,
     capture: CaptureResult,
     mapped: MappedPoint & { adjusted: boolean },
+    opts: { primaryModelIsAccurate?: boolean } = {},
   ): Promise<void> {
     const token = this.turnToken;
     const turn = this.activeTurn;
     const meta = capture.meta;
+    const textAccurate = opts.primaryModelIsAccurate === true;
     let local = mapped.local;
     let snap: PointerSnapInfo | undefined;
     let groundingSource: 'uia' | 'rest' | 'raw' = 'raw';
@@ -1230,7 +1629,14 @@ export class Conversation {
     let groundingBackend: GroundSource = 'none';
     let quotaExhausted = false;
     let usedPercent: CodexUsedPercent | null = null;
-    if (
+    if (textAccurate) {
+      // M18: text mode — the point came from gpt-5.6-sol itself (pixel-exact),
+      // so no second grounding-model call is made. Attribute it to the codex
+      // sub and carry the text turn's plan-usage telemetry for the debug
+      // surface / the >40% live-validation stop.
+      groundingBackend = 'codex';
+      usedPercent = this.codexTextUsedPercent;
+    } else if (
       groundingSource !== 'uia' &&
       !this.restGroundDisabled &&
       args.label !== undefined &&
@@ -1242,7 +1648,7 @@ export class Conversation {
       const auth = resolveGroundingAuth({
         getApiKey: () => this.settings.getApiKey(),
         codex: this.codexProvider(),
-        preferApiKey: this.codexDisabled,
+            preferApiKey: this.codexDisabled || this.settings.get().preferApiKeyGrounding,
       });
       if (auth !== null) {
         restUsed = true;
@@ -1446,4 +1852,43 @@ export class Conversation {
     }
     this.panel.send('panel:transcript', entry);
   }
+}
+
+/**
+ * M18: the factual framing text sent with a text turn — the same convention
+ * the realtime session uses (screen dims, coordinate anchors, a worked
+ * fraction→pixel example) so point_at coordinates land in the right frame,
+ * minus the audio-specific wording. Prefixed `context:` to match the app-wide
+ * CONTEXT_PREFIX convention. Returns '' when there is nothing to frame.
+ */
+function buildCodexFraming(metas: CaptureMeta[], contextText: string): string {
+  if (metas.length === 0) {
+    return contextText.length > 0 ? `context: ${contextText}` : '';
+  }
+  const screens = metas
+    .map(
+      (m) =>
+        `screen${m.screenIndex} is ${m.imageW}x${m.imageH} pixels` +
+        (m.isActive ? ' (active screen, the cursor is here)' : ''),
+    )
+    .join('; ');
+  const anchors = metas
+    .map(
+      (m) =>
+        `screen${m.screenIndex}: top-left corner (0,0), ` +
+        `bottom-right corner (${m.imageW},${m.imageH})`,
+    )
+    .join('; ');
+  const first = metas[0]!;
+  return (
+    `context: ${metas.length} screenshot(s) attached. ${screens}. ` +
+    `point_at coordinates must be pixel coordinates within the named screenshot. ` +
+    `coordinate anchors — ${anchors}. ` +
+    `to point accurately: judge how far across and down the target sits as a fraction ` +
+    `of the full screenshot, then multiply by that screenshot's pixel size ` +
+    `(e.g. a target 1/3 across and 1/4 down screen${first.screenIndex} is at ` +
+    `(${Math.round(first.imageW / 3)},${Math.round(first.imageH / 4)})); ` +
+    `commit to the target's actual offset — never default to the middle of the screen.` +
+    (contextText.length > 0 ? ` ${contextText}` : '')
+  );
 }

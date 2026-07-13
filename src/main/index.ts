@@ -14,12 +14,17 @@
  *   permission prompt (use-fake-ui-for-media-stream).
  */
 
-import { app, ipcMain, powerMonitor } from 'electron';
+import { app, ipcMain, powerMonitor, shell } from 'electron';
 import type { Tray } from 'electron';
 import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { captureAllDisplays } from './capture';
 import { getCodexAuthProvider } from './auth/codex-auth';
+import { CodexOAuthLoopback } from './auth/oauth-loopback';
+import { CodexAgentBackend } from './agents/backend';
+import { AgentManager } from './agents/manager';
+import { MockAgentBackend } from './agents/mock-backend';
+import type { AgentBackend } from './agents/types';
 import { Conversation } from './conversation';
 import { startDebugServer } from './debug-server';
 import { describeKind } from './errors';
@@ -70,8 +75,23 @@ async function main(): Promise<void> {
   const overlays = new OverlayManager();
   const panel = new PanelManager();
   const hotkey = new HotkeyManager();
-  const conversation = new Conversation({ settings, overlays, panel });
   let tray: Tray | null = null;
+  const codexAuth = getCodexAuthProvider();
+  const codexAgentBackend = new CodexAgentBackend(codexAuth);
+  const agentMock = process.env['CLICKY_AGENT_MOCK'] === '1';
+  const agentBackend: AgentBackend = agentMock ? new MockAgentBackend() : codexAgentBackend;
+  let conversation!: Conversation;
+  const agents = new AgentManager({
+    backend: agentBackend,
+    isReady: () => agentMock || codexAgentBackend.isReady(),
+    persistencePath: join(app.getPath('userData'), 'agents.json'),
+    onAgentsChanged: (list) => panel.send('panel:agents', list),
+    onFinished: (summary) => conversation.deliverAgentResult(summary),
+    notify: (title, body) => {
+      try { tray?.displayBalloon({ title, content: body }); } catch { /* unavailable on some systems */ }
+    },
+  });
+  conversation = new Conversation({ settings, overlays, panel, codexAuth, agents });
 
   // ---------------------------------------------------------------------
   // M11: last-resort crash handling. An uncaught main-process exception used
@@ -128,7 +148,13 @@ async function main(): Promise<void> {
     lastCodexSignin = key;
     panel.send('panel:codex-signin', state);
     panel.send('panel:settings', settings.get());
+    conversation.onAgentAvailabilityChanged();
   };
+  const codexOAuth = new CodexOAuthLoopback({
+    auth: codexAuth,
+    openExternal: (url) => shell.openExternal(url),
+    onComplete: () => pushCodexSignin(true),
+  });
 
   // ---------------------------------------------------------------------
   // Typed invoke handlers (single registration point for InvokeChannels)
@@ -152,6 +178,11 @@ async function main(): Promise<void> {
   handle('panel:get-runtime', () => runtimeFlags());
   // M17 addition (integration-approved): Codex sign-in snapshot bootstrap.
   handle('codex:signin-state', () => getCodexAuthProvider().codexSignInState());
+  handle('codex:sign-in', () => codexOAuth.start());
+  handle('agents:list', () => agents.list());
+  handle('agents:cancel', (id) => agents.cancel(id));
+  handle('agents:cancel-all', () => agents.cancelAll());
+  handle('agents:mark-seen', (id) => agents.markSeen(id));
 
   ipcMain.on('audio:chunk', (_event, chunk: ArrayBuffer) => {
     conversation.handleAudioChunk(chunk);
@@ -244,6 +275,7 @@ async function main(): Promise<void> {
     pushRuntime();
     // M17: hand the (re)loaded panel the current Codex sign-in snapshot.
     pushCodexSignin(true);
+    panel.send('panel:agents', agents.list());
   });
 
   // M17 (integration): warm the Codex auth provider at boot so the first
@@ -320,6 +352,16 @@ async function main(): Promise<void> {
     grounding: {
       query: (q) => conversation.debugGroundingQuery(q),
     },
+    agents: {
+      spawn: (task) => agents.spawn({
+        id: `agent_debug_${Date.now()}`,
+        task,
+        recentTranscript: '',
+        createdAt: Date.now(),
+      }),
+      list: () => agents.list(),
+      cancel: (id) => agents.cancel(id),
+    },
   });
 
   // Tray app: stay alive with zero visible windows.
@@ -328,8 +370,10 @@ async function main(): Promise<void> {
   });
   app.on('will-quit', () => {
     clearInterval(codexPoll); // M17: stop the Codex sign-in refresh poll
+    codexOAuth.stop();
     hotkey.stop();
     conversation.close();
+    agents.dispose();
     overlays.destroy();
     panel.destroy();
   });

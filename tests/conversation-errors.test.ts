@@ -61,7 +61,7 @@ type MockServer = Awaited<ReturnType<typeof mock.createMockServer>>;
 // ---------------------------------------------------------------------------
 
 interface FakeDeps {
-  deps: { settings: never; overlays: never; panel: never };
+  deps: { settings: never; overlays: never; panel: never; codexAuth: never };
   captions: { itemId: string; text: string; done: boolean }[];
   flags: { apiKeyUnreadable: boolean; settingsWereReset: boolean; captionsEnabled: boolean };
 }
@@ -91,8 +91,11 @@ function fakeDeps(): FakeDeps {
     count: () => 0,
   };
   const panel = { send: () => {} };
+  // Keep these realtime error tests independent of the developer machine's
+  // ~/.codex/auth.json sign-in state.
+  const codexAuth = { getCodexAuth: () => null, getBearer: async () => '' };
   return {
-    deps: { settings: settings as never, overlays: overlays as never, panel: panel as never },
+    deps: { settings: settings as never, overlays: overlays as never, panel: panel as never, codexAuth: codexAuth as never },
     captions,
     flags,
   };

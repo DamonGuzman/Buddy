@@ -14,10 +14,12 @@ import { Header } from './components/Header';
 import { Transcript } from './components/Transcript';
 import { Composer } from './components/Composer';
 import { SettingsView } from './components/SettingsView';
+import { AgentsView } from './components/AgentsView';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import type {
   AssistantState,
+  AgentSummary,
   MicDevice,
   RuntimeFlags,
   SessionStatus,
@@ -56,7 +58,8 @@ export function App(): React.JSX.Element {
   const [session, setSession] = useState<SessionStatus | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
-  const [view, setView] = useState<'chat' | 'settings'>('chat');
+  const [view, setView] = useState<'chat' | 'agents' | 'settings'>('chat');
+  const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [micDevices, setMicDevices] = useState<MicDevice[]>([]);
   const [micError, setMicError] = useState<string | null>(null);
   // M11 addition (orchestrator-approved): hookAlive + dev flags from main.
@@ -85,6 +88,7 @@ export function App(): React.JSX.Element {
   // ---- subscriptions + boot ----------------------------------------------
   useEffect(() => {
     void clicky.getSettings().then(setSettings);
+    void clicky.listAgents().then(setAgents);
     // M11: tolerate an older preload (crash-recreate races) — best-effort.
     try {
       void clicky.getRuntime().then(setRuntime);
@@ -97,6 +101,7 @@ export function App(): React.JSX.Element {
       clicky.onSessionStatus(setSession),
       clicky.onSettings(setSettings),
       clicky.onRuntime(setRuntime),
+      clicky.onAgents(setAgents),
       // M17: merge the Codex sign-in snapshot into settings (the "ChatGPT"
       // settings card reads it) — lower latency than waiting for the next
       // panel:settings, and reflects the CLI's auth.json rotating live.
@@ -180,6 +185,7 @@ export function App(): React.JSX.Element {
       clearTranscript: () => setEntries([]),
       openSettings: () => setView('settings'),
       openChat: () => setView('chat'),
+      openAgents: () => setView('agents'),
       // Visual QA (dev-only): drive main-owned state locally for screenshots.
       setAssistantState: (state: AssistantState) => setAssistantState(state),
       setSession: (status: SessionStatus | null) => setSession(status),
@@ -209,8 +215,9 @@ export function App(): React.JSX.Element {
         assistantState={assistantState}
         session={session}
         devFlags={runtime?.devFlags ?? []}
-        settingsOpen={view === 'settings'}
-        onToggleSettings={() => setView((v) => (v === 'chat' ? 'settings' : 'chat'))}
+        view={view}
+        agentCount={agents.filter((agent) => agent.status === 'running' || agent.unseen).length}
+        onView={setView}
       />
 
       {view === 'chat' && noKey ? (
@@ -229,6 +236,12 @@ export function App(): React.JSX.Element {
           settings ? (
             <SettingsView settings={settings} micDevices={micDevices} micError={micError} />
           ) : null
+        ) : view === 'agents' ? (
+          <AgentsView
+            agents={agents}
+            connected={(settings?.codexSignedIn === true && settings.codexValid) || (runtime?.devFlags.includes('agent_mock') ?? false)}
+            onOpenSettings={() => setView('settings')}
+          />
         ) : (
           <>
             <Transcript

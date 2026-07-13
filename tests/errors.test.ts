@@ -36,6 +36,12 @@ const ALL_KINDS: ErrorKind[] = [
   'hold_too_long',
   'settings_reset',
   'renderer_dead',
+  // M18 additions (integration-approved): agent mode (docs/AGENT-MODE.md §7).
+  'agent_not_signed_in',
+  'agent_quota',
+  'agent_backend_down',
+  'agent_timed_out',
+  'agent_tool_failed',
 ];
 
 describe('error catalog (describeKind)', () => {
@@ -68,6 +74,10 @@ describe('error catalog (describeKind)', () => {
         // M17 (integration): the fail-closed ChatGPT plan-limit prompt is
         // actionable (try later / add a key), so it auto-shows once.
         'codex_plan_limit',
+        // M18 (integration): the two actionable agent-mode gates — connect
+        // chatgpt in settings / plan out of agent runs — auto-show once.
+        'agent_not_signed_in',
+        'agent_quota',
       ].sort(),
     );
     for (const kind of ALL_KINDS) {
@@ -88,6 +98,13 @@ describe('error catalog (describeKind)', () => {
     expect(describeKind('hold_too_long').surfaces).toContain('caption');
     expect(describeKind('capture_failed').surfaces).toContain('caption');
     expect(describeKind('audio_output_failed').surfaces).toContain('caption');
+    // M18: the actionable agent gates caption (they hit while the user is
+    // looking at the screen); the run-level failures stay transcript-only.
+    expect(describeKind('agent_not_signed_in').surfaces).toEqual(['transcript', 'caption']);
+    expect(describeKind('agent_quota').surfaces).toEqual(['transcript', 'caption']);
+    expect(describeKind('agent_backend_down').surfaces).toEqual(['transcript']);
+    expect(describeKind('agent_timed_out').surfaces).toEqual(['transcript']);
+    expect(describeKind('agent_tool_failed').surfaces).toEqual(['transcript']);
     // Informational — never flips the assistant to the error state.
     expect(describeKind('response_incomplete').surfaces).not.toContain('pill');
     expect(describeKind('capture_failed').surfaces).not.toContain('pill');

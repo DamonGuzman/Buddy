@@ -50,6 +50,8 @@ export function SettingsView({
   const [keyDraft, setKeyDraft] = useState('');
   const [savingKey, setSavingKey] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
+  const [signInMessage, setSignInMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!justSaved) return;
@@ -72,6 +74,14 @@ export function SettingsView({
 
   const patch = (p: Parameters<typeof clicky.setSettings>[0]): void => {
     void clicky.setSettings(p);
+  };
+
+  const signIn = async (): Promise<void> => {
+    if (signingIn) return;
+    setSigningIn(true);
+    const result = await clicky.signInToCodex();
+    setSignInMessage(result.ok ? 'finish signing in in your browser' : result.error);
+    setSigningIn(false);
   };
 
   return (
@@ -171,10 +181,8 @@ export function SettingsView({
           </CardContent>
         </Card>
 
-        {/* M17 (integration): ChatGPT-subscription (Codex CLI) sign-in card.
-            Read-only for now — we DETECT the Codex CLI's auth.json; the in-app
-            OAuth loopback flow is a later slice. Grounding (pointing) prefers a
-            valid sub over the metered key automatically. */}
+        {/* ChatGPT-subscription sign-in card. Existing Codex CLI auth is detected,
+            and users without it can connect through the system-browser PKCE flow. */}
         <Card className="gap-3 rounded-lg py-3.5 shadow-none">
           <CardHeader className="px-3.5">
             <CardTitle className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground">
@@ -198,7 +206,7 @@ export function SettingsView({
                       variant="outline"
                       className="rounded-full border-amber-400/40 bg-amber-400/10 font-medium text-amber-300"
                     >
-                      chatgpt session expired — reopen the codex cli
+                      chatgpt session expired — reconnect below
                     </Badge>
                   )}
                 </div>
@@ -206,12 +214,28 @@ export function SettingsView({
                   clicky uses your chatgpt plan for pointing &amp; agents. voice still needs an
                   openai api key.
                 </p>
+                <div className="flex min-h-7 items-center gap-2.5 border-t pt-2.5">
+                  <Label htmlFor="prefer-api-grounding" className="flex-1 text-xs font-normal text-muted-foreground">
+                    use api key for pointing
+                  </Label>
+                  <Switch
+                    id="prefer-api-grounding"
+                    checked={settings.preferApiKeyGrounding}
+                    onCheckedChange={(checked) => patch({ preferApiKeyGrounding: checked })}
+                  />
+                </div>
               </>
             ) : (
               <p className="text-xs leading-relaxed text-muted-foreground">
-                sign in to ChatGPT via the Codex CLI to use your plan for pointing
+                connect chatgpt to use your plan for pointing and background agents.
               </p>
             )}
+            {!settings.codexValid ? (
+              <Button type="button" size="sm" className="self-start rounded-full" disabled={signingIn} onClick={() => void signIn()}>
+                {signingIn ? 'opening browser…' : 'connect chatgpt'}
+              </Button>
+            ) : null}
+            {signInMessage ? <p className="text-[11px] leading-relaxed text-muted-foreground/80">{signInMessage}</p> : null}
           </CardContent>
         </Card>
 
@@ -310,7 +334,7 @@ export function SettingsView({
 
         <div className="flex items-center gap-2.5 rounded-lg border border-dashed px-3.5 py-2.5 text-xs text-muted-foreground">
           <span>🪄</span>
-          <span>agent mode — coming soon ✨</span>
+          <span>agent mode is ready — say “clicky, agent…” to send off research.</span>
         </div>
       </div>
     </ScrollArea>

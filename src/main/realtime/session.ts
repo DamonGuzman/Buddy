@@ -274,6 +274,16 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     this.createResponse();
   }
 
+  /** Inject trusted app context and ask the voice model to speak it naturally. */
+  async injectSystemAndRespond(text: string): Promise<void> {
+    await this.connect();
+    this.send({
+      type: 'conversation.item.create',
+      item: { type: 'message', role: 'system', content: [{ type: 'input_text', text }] },
+    });
+    this.createResponse();
+  }
+
   /** Send a function_call_output back for a tool call. */
   sendToolOutput(callId: string, output: object): void {
     this.send({

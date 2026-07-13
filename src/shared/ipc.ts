@@ -10,6 +10,7 @@
  */
 
 import type {
+  AgentSummary,
   AssistantState,
   AudioDeviceError,
   AudioOutputDelta,
@@ -85,6 +86,10 @@ export interface MainToPanelEvents {
   // M11 addition (orchestrator-approved): runtime flags for the panel —
   // hookAlive (hero hint adapts) + CLICKY_* dev flags (header dev chip).
   'panel:runtime': RuntimeFlags;
+  // M18 addition (integration-approved): agent-mode mirror — the FULL
+  // renderer-safe agent list, pushed on every state change (full-list upsert;
+  // the panel replaces its list wholesale). Never carries screenshot bytes.
+  'panel:agents': AgentSummary[];
 }
 
 // ===========================================================================
@@ -136,9 +141,20 @@ export interface InvokeChannels {
   // M17 addition (integration-approved): panel bootstrap for the Codex
   // sign-in snapshot (push updates ride on 'panel:codex-signin').
   'codex:signin-state': { args: []; result: CodexSignInState };
+  /** Start system-browser ChatGPT sign-in through the local PKCE callback. */
+  'codex:sign-in': { args: []; result: { ok: true } | { ok: false; error: string } };
   // M15 addition (orchestrator-approved): overlay bootstrap for hover config
   // (belt-and-braces vs the did-finish-load push; handled in windows/overlay.ts).
   'overlay:get-hover-config': { args: []; result: OverlayHoverConfig };
+  // M18 additions (integration-approved): agent mode (docs/AGENT-MODE.md §6.2).
+  /** Panel bootstrap: current agent list (push updates ride on 'panel:agents'). */
+  'agents:list': { args: []; result: AgentSummary[] };
+  /** Stop one agent (Card "stop" affordance). */
+  'agents:cancel': { args: [id: string]; result: void };
+  /** Stop every running agent (agents-header "stop all"). */
+  'agents:cancel-all': { args: []; result: void };
+  /** The user viewed this agent's Card — clear its unseen badge. */
+  'agents:mark-seen': { args: [id: string]; result: void };
 }
 
 // ===========================================================================
@@ -197,16 +213,26 @@ export interface PanelApi {
   onRuntime(cb: (flags: RuntimeFlags) => void): Unsubscribe;
   // M17 addition (integration-approved): Codex sign-in state push.
   onCodexSignin(cb: (state: CodexSignInState) => void): Unsubscribe;
+  // M18 addition (integration-approved): agent list push (full-list upsert).
+  onAgents(cb: (agents: AgentSummary[]) => void): Unsubscribe;
 
   getSettings(): Promise<Settings>;
   // M11 addition (orchestrator-approved): runtime flags bootstrap.
   getRuntime(): Promise<RuntimeFlags>;
   // M17 addition (integration-approved): Codex sign-in state bootstrap.
   getCodexSigninState(): Promise<CodexSignInState>;
+  signInToCodex(): Promise<{ ok: true } | { ok: false; error: string }>;
   setSettings(patch: SettingsPatch): Promise<Settings>;
   askText(text: string): Promise<void>;
   listMics(): Promise<MicDevice[]>;
   selectMic(deviceId: string): Promise<void>;
+
+  // M18 additions (integration-approved): agent mode (docs/AGENT-MODE.md §6.2).
+  /** Agent list bootstrap (push updates ride on 'panel:agents'). */
+  listAgents(): Promise<AgentSummary[]>;
+  cancelAgent(id: string): Promise<void>;
+  cancelAllAgents(): Promise<void>;
+  markAgentSeen(id: string): Promise<void>;
 
   /** Stream a mic PCM16 chunk to main (fire-and-forget). */
   sendAudioChunk(chunk: ArrayBuffer): void;

@@ -34,7 +34,8 @@ and is always signposted by a visible indicator.
 - **Mock Realtime server** (local WS, speaks the same protocol subset) + **debug harness** for QA.
 
 **Out (stub or defer):**
-- Agent mode ("Clicky, agent") — show a friendly "coming soon" voice line + panel note.
+- Agent mode ("Clicky, agent") — main-process, read-only research agents with hosted web search,
+  guarded web fetch, persisted panel results, cancellation, and voice handoff/return.
 - Cloudflare Worker / ephemeral-token proxy (MVP is local-key, single user).
 - Integrations (Notion/Gmail/Calendar/Linear), wake word, ElevenLabs, macOS build (keep platform
   code isolated so macOS can come later), auto-update, installer polish.

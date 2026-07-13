@@ -34,14 +34,23 @@ const api: PanelApi = {
   onRuntime: (cb) => subscribe('panel:runtime', cb),
   // M17 addition (integration-approved): Codex sign-in state push.
   onCodexSignin: (cb) => subscribe('panel:codex-signin', cb),
+  // M18 addition (integration-approved): agent list push (full-list upsert).
+  onAgents: (cb) => subscribe('panel:agents', cb),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),
   getRuntime: () => ipcRenderer.invoke('panel:get-runtime'),
   getCodexSigninState: () => ipcRenderer.invoke('codex:signin-state'),
+  signInToCodex: () => ipcRenderer.invoke('codex:sign-in'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
   askText: (text) => ipcRenderer.invoke('panel:ask-text', text),
   listMics: () => ipcRenderer.invoke('mic:list'),
   selectMic: (deviceId) => ipcRenderer.invoke('mic:select', deviceId),
+
+  // M18 additions (integration-approved): agent mode (docs/AGENT-MODE.md §6.2).
+  listAgents: () => ipcRenderer.invoke('agents:list'),
+  cancelAgent: (id) => ipcRenderer.invoke('agents:cancel', id),
+  cancelAllAgents: () => ipcRenderer.invoke('agents:cancel-all'),
+  markAgentSeen: (id) => ipcRenderer.invoke('agents:mark-seen', id),
 
   sendAudioChunk: (chunk) => ipcRenderer.send('audio:chunk', chunk),
 
