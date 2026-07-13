@@ -408,3 +408,106 @@ full-model rates (upper bound; the mini rows are cheaper), plus gpt-5.2 REST
 353 scored model responses (338 valid): 7 conditions x 24 + mini 2x24 +
 gpt-5.2 2x12 + real 3x5, plus 15 lost to the mid-study quota outage and one
 wedged session (both re-run).
+
+## 11. gpt-5.6 sol / terra / luna via the Codex SUBSCRIPTION pool (M13.1)
+
+Resolves the §8.2 open item ("subscription-pool routed; pricing/limits TBD"):
+the paid API key is out of credit, so production grounding must run on the
+user's **ChatGPT Codex subscription** (Pro plan) — a separate quota pool.
+This re-runs the exact §8.2 comparison over that transport to confirm the
+models still ground pixel-exact there and to pick the **cheapest model that
+holds 100% in-element on every target, including the small/hard ones**.
+
+- **Harness**: `sub-harness.mjs` — plain Node `fetch`, no deps. POSTs the
+  Codex Responses endpoint `https://chatgpt.com/backend-api/codex/responses`
+  with the CLI's own bearer + `ChatGPT-Account-Id` (read fresh from
+  `%USERPROFILE%\.codex\auth.json`, never printed/logged/committed), SSE
+  streamed. Same bare 2048x1152 plain images, same strict-JSON pixel-coord
+  prompt, same scorer as `rest-sanity.mjs` — directly comparable to §8.2.
+- **Set**: 29 targets = 24 synthetic (layouts A+B) + 5 real-desktop. The
+  small/hard subset (min extent ≤44px, n=9): the 16px square, 24px dot ×2
+  layouts, plus real Start-icon (44), Review (58×26), New-task (h24),
+  Open-in (h26). Effort `low`.
+
+### 11.1 Three-model comparison (subscription, effort low, n=29)
+
+| model | in-element (all) | in-element (small, n=9) | median px | p90 px | max px | p50 latency | out tok | reasoning tok (med / total) | cost proxy (out+rsn, total) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **gpt-5.6-sol** | **100%** | **100%** | 1.0 | 3.2 | **6.4** | 1.70s | ~18 | 0 / **18** | **575** |
+| gpt-5.6-terra | 100% | 100% | 1.0 | 2.0 | 6.4 | 2.01s | ~19 | 0 / 377 | 1313 |
+| gpt-5.6-luna | 100% | 100% | 1.0 | 4.1 | **30** | 1.60s | ~18 | 0 / 446 | 1438 |
+
+Input ≈ 2863 tok/call for all three (the Codex Responses endpoint bills ~166
+tok more per call than the chat-completions path's 2697 — endpoint framing
+overhead; still <$0.01-equivalent and identical across models). No refusals,
+no invalid outputs, no failed calls: 87/87 valid.
+
+### 11.2 The pick: **gpt-5.6-sol at effort low**
+
+Cheapest model that holds 100% in-element on every target incl. small ones.
+
+- **All three are 100% in-element** (overall and on the small subset) — the
+  API-key result from §8.2 reproduces cleanly on the subscription pool.
+- **sol is the cheapest draw by ~2.4×**: its per-call reasoning is
+  effectively zero (18 reasoning tokens across all 29 calls vs terra 377 /
+  luna 446), so cost proxy = 575 vs 1313 / 1438. On a subscription the draw
+  is plan-quota units ≈ reasoning+output tokens + wall-clock; sol wins on
+  tokens and ties on latency (p50 1.70s; luna 1.60s, terra 2.01s).
+- **sol also has the tightest worst case**: max error 6.4px vs luna's 30px.
+  luna's single 30px miss is the real-desktop tray **clock** (w=90, so still
+  in-element by 15px, but it is the one marginal point in the whole set — on
+  a narrower target of that difficulty luna would fall out of element). sol
+  and terra never exceed 6.4px anywhere. terra matches sol on accuracy but
+  spends 20× the reasoning for no gain.
+- **Effort did NOT need escalation**: all three already hit 100% in-element
+  at `low`, so per the plan no `medium` re-run on missed targets was required
+  (there were no misses). `low` is confirmed correct here too, matching §8.2.
+
+### 11.3 Request-shape discoveries (beyond the provided recipe)
+
+- The provided body shape worked first-try and unchanged: `input` as a message
+  list with `input_text` + `input_image` (data-URI JPEG), `reasoning.effort`
+  honored, `stream:true store:false`. `input_image` is the correct content
+  type (probe returned exact coords). Usage arrives on the `response.completed`
+  event as Responses-API shape: `input_tokens`, `output_tokens`,
+  `output_tokens_details.reasoning_tokens`.
+- **Reasoning-token behaviour differs from the API path.** On chat-completions
+  (§8.2) sol/terra/luna showed 0-44 reasoning at `low`; on the subscription
+  Responses endpoint the *same* `effort:low` still emits reasoning on the
+  harder targets — luna up to 78 tok on small icons, terra up to 43, while
+  **sol stays at ~0** (max 18 across the whole run). This is the decisive
+  cost separator and is only visible via this transport.
+- **Quota telemetry**: responses carry `x-codex-primary-used-percent` (plus
+  `-secondary-` and window-minutes) headers. Primary window here is
+  **10080 min = the 7-day weekly Pro cap**; captured into each result JSON's
+  `quota` field.
+
+### 11.4 Plan-quota consumed & token safety
+
+- The whole verification (probe + 87 scored calls) moved
+  `x-codex-primary-used-percent` from **6% → 7%** — ~1% of the weekly Pro
+  window for ~88 calls. Nowhere near the 50% stop; grounding at production
+  volume is negligible against this pool.
+- **Token never leaked**: `auth.json` is read fresh in-process; the access
+  token exists only as an `Authorization` header value and is never printed,
+  logged, or written to any result/summary/doc. Pre-commit `grep` over
+  `results/` for JWT/`Bearer`/token material came back clean (the harness
+  source matches only on the identifier strings `access_token`/`Bearer ${…}`
+  in code, not on any secret value).
+
+### 11.5 Reproduce
+
+```sh
+cd eval/experiments/coord-study
+node sub-harness.mjs --probe                                   # shape/auth check (1 call)
+node sub-harness.mjs --model gpt-5.6-sol   --effort low --layouts A,B
+node sub-harness.mjs --model gpt-5.6-sol   --effort low --real 1
+node sub-harness.mjs --model gpt-5.6-terra --effort low --layouts A,B
+node sub-harness.mjs --model gpt-5.6-terra --effort low --real 1
+node sub-harness.mjs --model gpt-5.6-luna  --effort low --layouts A,B
+node sub-harness.mjs --model gpt-5.6-luna  --effort low --real 1
+node sub-analyze.mjs                                           # -> results/sub-summary.json
+```
+
+Auth: `%USERPROFILE%\.codex\auth.json` (Codex CLI subscription tokens); read
+fresh, auto-refreshed only if JWT `exp` < 5 min, never logged or committed.
