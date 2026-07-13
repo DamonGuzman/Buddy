@@ -36,8 +36,12 @@ import { clampToDisplay, mapModelPoint } from './coords';
 import type { MappedPoint } from './coords';
 import { GroundingService } from './grounding/snapper';
 import { RestGrounder } from './grounding/rest-grounder';
+import type { CodexUsedPercent, GroundSource } from './grounding/rest-grounder';
 import { dipToPhysicalViaMeta, physicalToDipViaMeta } from './grounding/convert';
 import type { Pt } from './grounding/convert';
+import { getCodexAuthProvider } from './auth/codex-auth';
+import { resolveGroundingAuth } from './auth/auth-source';
+import type { CodexProvider } from './auth/auth-source';
 import { classifyError, describeKind } from './errors';
 import type { ErrorKind, ErrorParams, ErrorPresentation } from './errors';
 import { getSessionInstructions, getToolDefinitions } from './persona';
@@ -104,6 +108,29 @@ export interface ConversationDeps {
   settings: SettingsStore;
   overlays: OverlayManager;
   panel: PanelManager;
+  /**
+   * M13-core seam: the Codex ChatGPT-subscription auth provider. Optional —
+   * defaults to the process-wide `getCodexAuthProvider()` (reads
+   * `~/.codex/auth.json`). Injected in unit tests for determinism.
+   */
+  codexAuth?: CodexProvider;
+}
+
+/**
+ * M13-core: grounding-auth attribution for the debug surface. `backend` names
+ * which transport actually ran ('codex' = ChatGPT sub, 'apiKey' = metered key,
+ * 'none' = neither / skipped); `quotaExhausted` is the FAIL-CLOSED signal (the
+ * Codex plan quota was hit and we did NOT spend the metered key for that call).
+ *
+ * INTEGRATOR: promote these onto the shared PointerCommand + DebugState so the
+ * eval harness and the panel can read them (field names spelled out in the
+ * return notes / docs/COORD-STUDY §11).
+ */
+export interface GroundingAttribution {
+  backend: GroundSource;
+  source: 'uia' | 'rest' | 'raw';
+  quotaExhausted: boolean;
+  usedPercent: CodexUsedPercent | null;
 }
 
 /** Debug-surface snapshot merged into DebugState by index.ts. */
@@ -113,6 +140,12 @@ export interface ConversationDebugInfo {
   pointerHistory: PointerCommand[];
   audio: { chunksIn: number; chunksOut: number };
   captureIndicatorActive: boolean;
+  /**
+   * M13-core: grounding-auth attribution for the last pointer (which transport
+   * ran, and whether the Codex plan quota was hit → fail-closed). Null until a
+   * grounding call has been attempted.
+   */
+  lastGrounding: GroundingAttribution | null;
 }
 
 export class Conversation {
@@ -144,6 +177,15 @@ export class Conversation {
   private restGrounder: RestGrounder | null = null;
   /** CLICKY_NO_REST_GROUND=1 disables the REST fallback (eval A/B attribution). */
   private readonly restGroundDisabled = process.env['CLICKY_NO_REST_GROUND'] === '1';
+  // M13-core: ChatGPT-subscription grounding (COORD-STUDY §11). The resolver
+  // prefers the sub over the metered key when signed in + valid. Resolved
+  // lazily (only when a grounding call runs) so tests that never ground don't
+  // construct the real provider (which reads ~/.codex/auth.json).
+  private readonly injectedCodexAuth: CodexProvider | null;
+  /** CLICKY_NO_CODEX_SUB=1 forces the metered API key (eval A/B). */
+  private readonly codexDisabled = process.env['CLICKY_NO_CODEX_SUB'] === '1';
+  /** M13-core: attribution of the most recent grounding call. */
+  private lastGrounding: GroundingAttribution | null = null;
   /** Serializes pointer dispatches so multi-point turns stay ordered. */
   private pointerChain: Promise<void> = Promise.resolve();
 
@@ -216,6 +258,9 @@ export class Conversation {
     this.settings = deps.settings;
     this.overlays = deps.overlays;
     this.panel = deps.panel;
+    // M13-core: hold any injected Codex provider; otherwise the process-wide
+    // one is resolved lazily at grounding time (codexProvider()).
+    this.injectedCodexAuth = deps.codexAuth ?? null;
     const snapshot = this.settings.get();
     this.sessionModel = snapshot.model;
     this.sessionVoice = snapshot.voice;
@@ -247,6 +292,15 @@ export class Conversation {
     return this.restGrounder;
   }
 
+  /**
+   * M13-core: the Codex ChatGPT-subscription provider — an injected fake in
+   * tests, else the process-wide singleton (constructed on first use so tests
+   * that never ground don't read ~/.codex/auth.json).
+   */
+  private codexProvider(): CodexProvider {
+    return this.injectedCodexAuth ?? getCodexAuthProvider();
+  }
+
   // ---------------------------------------------------------------------
   // Public surface (called from index.ts wiring + debug routes)
   // ---------------------------------------------------------------------
@@ -270,6 +324,7 @@ export class Conversation {
       pointerHistory: [...this.pointerHistory],
       audio: { chunksIn: this.chunksIn, chunksOut: this.chunksOut },
       captureIndicatorActive: this.captureIndicatorActive,
+      lastGrounding: this.lastGrounding,
     };
   }
 
@@ -1177,30 +1232,73 @@ export class Conversation {
     // the raw model point stands, unchanged from today.
     let restMs: number | undefined;
     let restUsed = false;
+    let groundingBackend: GroundSource = 'none';
+    let quotaExhausted = false;
+    let usedPercent: CodexUsedPercent | null = null;
     if (
       groundingSource !== 'uia' &&
       !this.restGroundDisabled &&
       args.label !== undefined &&
       args.label.length > 0
     ) {
-      restUsed = true;
-      const t0 = Date.now();
-      const grounded = await this.getRestGrounder().groundWithModel({
-        jpegBase64: capture.jpegBase64,
-        imageW: meta.imageW,
-        imageH: meta.imageH,
-        label: args.label,
+      // M13-core: resolve the grounding transport — the ChatGPT sub
+      // (gpt-5.6-sol) when signed in + valid, else the metered API key
+      // (gpt-5.4-mini). Pure/injectable resolver (auth/auth-source.ts).
+      const auth = resolveGroundingAuth({
+        getApiKey: () => this.settings.getApiKey(),
+        codex: this.codexProvider(),
+        preferApiKey: this.codexDisabled,
       });
-      restMs = Date.now() - t0;
-      if (grounded !== null && !this.closed && token === this.turnToken) {
-        const regrounded = mapModelPoint(
-          { x: grounded.x, y: grounded.y, ...(args.label !== undefined ? { label: args.label } : {}) },
-          meta,
+      if (auth !== null) {
+        restUsed = true;
+        const t0 = Date.now();
+        const outcome = await this.getRestGrounder().ground(
+          {
+            jpegBase64: capture.jpegBase64,
+            imageW: meta.imageW,
+            imageH: meta.imageH,
+            label: args.label,
+          },
+          auth,
         );
-        local = regrounded.local;
-        groundingSource = 'rest';
+        restMs = Date.now() - t0;
+        groundingBackend = outcome.source;
+        quotaExhausted = outcome.quotaExhausted;
+        usedPercent = outcome.usedPercent;
+        if (outcome.point !== null && !this.closed && token === this.turnToken) {
+          const regrounded = mapModelPoint(
+            {
+              x: outcome.point.x,
+              y: outcome.point.y,
+              ...(args.label !== undefined ? { label: args.label } : {}),
+            },
+            meta,
+          );
+          local = regrounded.local;
+          groundingSource = 'rest';
+        } else if (outcome.quotaExhausted) {
+          // FAIL CLOSED (turing_agents posture): the ChatGPT plan quota is
+          // spent. Do NOT silently fall back to the metered API key for THIS
+          // call — fly the RAW model point and flag it. The user-facing "plan
+          // limit reached" message is the deferred UI slice.
+          // TODO(integration): surface a fail-closed "plan limit reached"
+          // transcript/caption + panel prompt (add ErrorKind
+          // 'codex_plan_limit' to src/main/errors.ts + shared plumbing — see
+          // return notes) instead of just logging.
+          console.warn(
+            '[grounding] chatgpt plan quota reached — flying the raw model point (fail closed)',
+          );
+        }
       }
     }
+    // M13-core: record grounding-auth attribution for the debug surface (kept
+    // even when a later turn supersedes this one — fail-closed telemetry).
+    this.lastGrounding = {
+      backend: groundingBackend,
+      source: groundingSource,
+      quotaExhausted,
+      usedPercent,
+    };
     // A newer turn superseded this one while grounding ran: don't fly the buddy.
     if (this.closed || token !== this.turnToken) return;
     const cmd: PointerCommand = {

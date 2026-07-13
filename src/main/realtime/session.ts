@@ -383,6 +383,14 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
 
     const headers: Record<string, string> = {};
     if (!endpoint.isMock) {
+      // M13-core INVARIANT: the realtime WS is ALWAYS authenticated with the
+      // metered OpenAI *platform* API key — never the ChatGPT-subscription
+      // (Codex) bearer. The subscription only exposes the batch
+      // chatgpt.com/backend-api/codex/responses endpoint (used for grounding);
+      // it CANNOT open a realtime WebSocket, so there is no `chatgptCodex` arm
+      // here by design. The sub/key split lives entirely in the grounding path
+      // (auth/auth-source.ts + grounding/rest-grounder.ts). Do NOT wire the
+      // Codex AuthSource into this session.
       const key = this.options.getApiKey ? this.options.getApiKey() : (this.options.apiKey ?? null);
       if (key === null || key.length === 0) {
         const err = new Error('no API key configured');
