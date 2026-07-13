@@ -25,8 +25,9 @@ process receives the bridge environment variable. Ctrl+C stops the harness.
 - `npm run phone-audio:e2e` drives a real Buddy dev instance through the mock
   Realtime server and proves mic PCM enters Buddy and response PCM reaches the
   simulated phone.
-- `npm run phone-audio:dev` launches the Electron development build instead of
-  the installed app.
+- `npm run dev` (or its `npm run phone-audio:dev` alias) launches the bridge and
+  hot-reloading Electron development build together. The bridge remains running
+  while main-process edits restart Electron and both stop together on Ctrl+C.
 
 ## Removal
 

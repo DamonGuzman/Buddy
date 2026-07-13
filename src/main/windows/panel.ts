@@ -8,8 +8,8 @@
  * `backgroundThrottling: false` keeps AudioWorklets running while hidden.
  *
  * Env flags (dev/testing):
- * - CLICKY_SHOW_PANEL=1  → show the panel on launch and don't hide on blur
- *                          (useful for screenshots / visual QA).
+ * - CLICKY_SHOW_PANEL=1  → show the panel on launch (it still hides on blur).
+ * - CLICKY_KEEP_PANEL_OPEN=1 → don't hide on blur (visual QA only).
  * - CLICKY_TEST_CAPTURE=1 → after load, send a capture start/stop cycle to the
  *                          hidden renderer and mirror its console to stdout
  *                          (proves hidden-window mic capture end-to-end).
@@ -29,6 +29,7 @@ import { CrashLoopGuard, lockdownNavigation, recoverOnRenderProcessGone } from '
 const MARGIN = 12;
 
 const SHOW_ON_LAUNCH = process.env['CLICKY_SHOW_PANEL'] === '1';
+const KEEP_PANEL_OPEN = process.env['CLICKY_KEEP_PANEL_OPEN'] === '1';
 const TEST_CAPTURE = process.env['CLICKY_TEST_CAPTURE'] === '1';
 
 /** Delay before the first-run auto-show (lets the tray/overlays settle). */
@@ -242,7 +243,7 @@ export class PanelManager {
     win.webContents.on('did-finish-load', () => this.rendererReadyCb?.());
 
     win.on('blur', () => {
-      if (SHOW_ON_LAUNCH) return; // visual QA mode: keep the panel up
+      if (KEEP_PANEL_OPEN) return; // explicit visual QA mode: keep the panel up
       if (!win.isDestroyed()) win.hide();
     });
     win.on('closed', () => {

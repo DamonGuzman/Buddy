@@ -78,11 +78,24 @@ After first-run setup, verify the whole loop end to end:
 
 ```powershell
 npm install
-npm run dev        # electron-vite dev mode
+npm run dev        # hot reload with a separate, persistent development profile
 npm run build      # typecheck + production build
 npm test           # vitest unit tests (coords, protocol, hotkey FSM, settings, playback, ...)
 npm run dist       # package NSIS installer + portable exe (unsigned)
 ```
+
+`npm run dev` is the everyday development version; no installer rebuild is needed. Renderer edits
+hot-reload in place, while main-process and preload edits automatically restart the development
+app. It uses `%APPDATA%\Buddy Dev` so an installed Buddy does not block it through Electron's
+single-instance lock, and it keeps the panel visible while you work. The development profile has
+its own settings, but automatically imports `OPENAI_API_KEY` from the local user environment when
+available. Electron encrypts it into the dev profile using the current Windows DPAPI context, and
+the plaintext is then removed from the app process. Quit the installed Buddy from its tray icon
+before testing `Ctrl` + left `Alt`, otherwise both running copies can receive the global hotkey. The
+same command starts the iPhone audio bridge, waits for it to become healthy, and connects the
+development app to it; the printed setup URL is the page to open on the phone. The bridge stays up
+across Electron restarts and exits with the dev command. Use `npm run dev:raw` only when you
+deliberately want Electron's default profile behavior without the managed iPhone bridge.
 
 No API key needed for development — a local mock speaks the Realtime protocol subset:
 

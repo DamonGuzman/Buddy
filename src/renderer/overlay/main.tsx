@@ -15,19 +15,39 @@ import { clicky } from './clicky';
 import { FlightController, REST_ROT, SETTLE_ROT } from './flight';
 import type { Vec } from './flight';
 import {
+  AUX_PAD,
   AWARE_RADIUS,
   DRAG_THRESHOLD,
   HOVER_RADIUS,
   HoverMachine,
   REGION_PAD,
+  dist,
   eyeOffset,
   hintText,
+  insideRect,
   restFromFrac,
   restToFrac,
   snapRest,
 } from './hover';
 import type { HoverEffects, HoverZone } from './hover';
-import type { AssistantState, OverlayHoverConfig, PointerPoint } from '../../shared/types';
+import { AgentCluster } from './AgentHelpers';
+import {
+  CARD_HIDE_DELAY_MS,
+  CARD_SHOW_DELAY_MS,
+  HELPER_HIT_RADIUS,
+  OVERFLOW_KEY,
+  helperSlots,
+  nextHelperTransition,
+  selectHelpers,
+} from './agents-ui';
+import type { HelperView } from './agents-ui';
+import type {
+  AgentSummary,
+  AssistantState,
+  OverlayHoverConfig,
+  PointerPoint,
+  Rect,
+} from '../../shared/types';
 import './overlay.css';
 
 // ---------------------------------------------------------------------------
@@ -161,6 +181,16 @@ function App(): React.JSX.Element {
   const [interactive, setInteractive] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [hoverCfg, setHoverCfg] = useState<OverlayHoverConfig | null>(null);
+  // M19 agent-helper state.
+  const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [helperHover, setHelperHover] = useState<string | null>(null);
+  const [cluster, setCluster] = useState<{ anchor: Vec; dir: 1 | -1; vdir: 1 | -1 } | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  /** Measured card bounds, window-local DIP (grows the interactive region). */
+  const cardRectRef = useRef<Rect | null>(null);
+  /** Bridge: lets the card-measure effect resync the hover machine's aux. */
+  const auxResyncRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     /**
@@ -427,6 +457,170 @@ function App(): React.JSX.Element {
     let lastEyeCss = '';
     const FAR_GATE_SQ = (AWARE_RADIUS + 40) ** 2;
 
+    // ---------------------------------------------------- M19 agent helpers --
+    let agentsNow: AgentSummary[] = [];
+    let helperView: HelperView = { shown: [], overflow: [] };
+    /** Absolute sprite/pebble centers (window-local DIP), parallel to keys. */
+    let helperTargets: Vec[] = [];
+    /** Agent id (or OVERFLOW_KEY) per slot. */
+    let helperKeys: string[] = [];
+    let hoveredHelper: string | null = null;
+    let helperTimer: ReturnType<typeof setTimeout> | null = null;
+    let helperPending: string | null = null;
+    /** One-shot timer for the next celebrate->depart->gone phase boundary. */
+    let helperSweepTimer: ReturnType<typeof setTimeout> | null = null;
+
+    /** (Re)arm a recompute at the next finished-helper phase boundary. */
+    function scheduleHelperSweep(delayOverrideMs?: number): void {
+      if (helperSweepTimer !== null) {
+        clearTimeout(helperSweepTimer);
+        helperSweepTimer = null;
+      }
+      const now = Date.now();
+      const next =
+        delayOverrideMs !== undefined
+          ? now + delayOverrideMs
+          : nextHelperTransition(agentsNow, now, hoveredHelper ?? undefined);
+      if (next === null) return;
+      helperSweepTimer = setTimeout(
+        () => {
+          helperSweepTimer = null;
+          recomputeHelpers();
+        },
+        Math.max(60, next - now + 30),
+      );
+    }
+
+    /** Cluster anchor = the buddy REST spot; content extends toward the roomy
+     *  side of the screen (same edge thresholds as updatePlacement). */
+    function clusterGeom(): { anchor: Vec; dir: 1 | -1; vdir: 1 | -1 } {
+      const anchor = restPos();
+      return {
+        anchor,
+        dir: anchor.x < 420 ? 1 : -1,
+        vdir: anchor.y < 180 ? 1 : -1,
+      };
+    }
+
+    /** Push the current sprite/card geometry into the hover machine. */
+    function syncAux(): void {
+      const aux =
+        helperTargets.length > 0
+          ? {
+              targets: helperTargets,
+              targetRadius: HELPER_HIT_RADIUS,
+              rect: hoveredHelper !== null ? cardRectRef.current : null,
+            }
+          : null;
+      applyHoverEffects(hover.setAux(aux, Date.now()));
+    }
+
+    function commitHelperHover(key: string | null): void {
+      if (helperTimer !== null) {
+        clearTimeout(helperTimer);
+        helperTimer = null;
+      }
+      helperPending = null;
+      if (key === hoveredHelper) return;
+      hoveredHelper = key;
+      setHelperHover(key);
+      syncAux();
+      // A hover release may unfreeze an overdue departure (the hovered helper
+      // is exempt from the linger clock) — sweep again shortly.
+      if (key === null) scheduleHelperSweep(250);
+      else scheduleHelperSweep();
+    }
+
+    /** Re-derive visible helpers + slot geometry (agents / anchor changed). */
+    function recomputeHelpers(): void {
+      const now = Date.now();
+      setNowTick(now);
+      helperView = selectHelpers(agentsNow, now, hoveredHelper ?? undefined);
+      const count = helperView.shown.length + (helperView.overflow.length > 0 ? 1 : 0);
+      if (count === 0) {
+        helperTargets = [];
+        helperKeys = [];
+        setCluster(null);
+        commitHelperHover(null);
+        syncAux();
+        scheduleHelperSweep();
+        return;
+      }
+      const geom = clusterGeom();
+      const slots = helperSlots(count, geom.dir, geom.vdir);
+      helperKeys = [
+        ...helperView.shown.map((a) => a.id),
+        ...(helperView.overflow.length > 0 ? [OVERFLOW_KEY] : []),
+      ];
+      helperTargets = slots.map((s) => ({ x: geom.anchor.x + s.x, y: geom.anchor.y + s.y }));
+      setCluster(geom);
+      // A hovered helper that vanished entirely (seen / expired) drops its card.
+      if (hoveredHelper !== null && !helperKeys.includes(hoveredHelper)) {
+        const stillListed =
+          hoveredHelper !== OVERFLOW_KEY &&
+          [...helperView.shown, ...helperView.overflow].some((a) => a.id === hoveredHelper);
+        if (!stillListed) commitHelperHover(null);
+      }
+      syncAux();
+      updateHelperHover();
+      scheduleHelperSweep();
+    }
+
+    /** Cursor -> hovered helper, with show/hide grace timers (anti-flicker +
+     *  time to travel from a sprite into its card). */
+    function updateHelperHover(): void {
+      let want: string | null = null;
+      if (lastCursor !== null && helperTargets.length > 0 && (hoverEnabled || interactiveNow)) {
+        let bestD = Infinity;
+        for (let i = 0; i < helperTargets.length; i++) {
+          const t = helperTargets[i];
+          if (!t) continue;
+          const d = dist(lastCursor, t);
+          if (d <= HELPER_HIT_RADIUS && d < bestD) {
+            bestD = d;
+            want = helperKeys[i] ?? null;
+          }
+        }
+        // Not on a sprite, but still inside the open card: keep it open.
+        if (want === null && hoveredHelper !== null && cardRectRef.current !== null) {
+          const r = cardRectRef.current;
+          const padded = {
+            x: r.x - AUX_PAD,
+            y: r.y - AUX_PAD,
+            width: r.width + AUX_PAD * 2,
+            height: r.height + AUX_PAD * 2,
+          };
+          if (insideRect(lastCursor, padded)) want = hoveredHelper;
+        }
+      }
+      if (want === hoveredHelper) {
+        if (helperTimer !== null) {
+          clearTimeout(helperTimer);
+          helperTimer = null;
+          helperPending = null;
+        }
+        return;
+      }
+      // Switching directly between helpers: no delay.
+      if (want !== null && hoveredHelper !== null) {
+        commitHelperHover(want);
+        return;
+      }
+      if (helperPending === want && helperTimer !== null) return;
+      if (helperTimer !== null) clearTimeout(helperTimer);
+      helperPending = want;
+      helperTimer = setTimeout(
+        () => {
+          helperTimer = null;
+          const key = helperPending;
+          helperPending = null;
+          commitHelperHover(key);
+        },
+        want === null ? CARD_HIDE_DELAY_MS : CARD_SHOW_DELAY_MS,
+      );
+    }
+    // ------------------------------------------------ end M19 agent helpers --
+
     function sendStatus(): void {
       clicky.sendHover({
         kind: 'status',
@@ -505,6 +699,7 @@ function App(): React.JSX.Element {
 
     function processHover(): void {
       applyHoverEffects(hover.update(lastCursor, buddyPos, Date.now()));
+      updateHelperHover(); // M19: sprite/card hover rides the same cursor feed
     }
 
     function syncHoverEnabled(): void {
@@ -512,6 +707,7 @@ function App(): React.JSX.Element {
       if (enabled === hoverEnabled) return;
       hoverEnabled = enabled;
       if (!enabled && drag !== null) drag = null; // drop a drag mid-flight/PTT
+      if (!enabled) commitHelperHover(null); // M19: card must not linger
       applyHoverEffects(hover.setEnabled(enabled, Date.now()));
     }
 
@@ -643,6 +839,7 @@ function App(): React.JSX.Element {
       const first = cfgRef.current === null;
       cfgRef.current = cfg;
       setHoverCfg(cfg);
+      recomputeHelpers(); // M19: the cluster is anchored at the rest spot
       if (currentMode !== 'rest' || hover.isDragging) return;
       const target = restPos();
       const cur = flight.currentPose.pos;
@@ -672,11 +869,32 @@ function App(): React.JSX.Element {
     sendStatus(); // initial snapshot (buddy rest position) for debug/QA
     // ------------------------------------------------------- end M15 hover --
 
+    // ------------------------------------------- M19 agent helpers wiring --
+    const offAgents = clicky.onAgents((list) => {
+      agentsNow = list;
+      setAgents(list);
+      recomputeHelpers();
+    });
+    // Bootstrap for late-created overlays (display hotplug) — push wins races.
+    void clicky
+      .getAgents()
+      .then((list) => {
+        if (agentsNow.length === 0 && list.length > 0) {
+          agentsNow = list;
+          setAgents(list);
+          recomputeHelpers();
+        }
+      })
+      .catch(() => {});
+    auxResyncRef.current = syncAux;
+    // --------------------------------------- end M19 agent helpers wiring --
+
     const onResize = (): void => {
       if (currentMode === 'rest') {
         flight.jumpTo(restPos(), REST_ROT);
         updatePlacement(restPos());
       }
+      recomputeHelpers(); // M19: re-anchor the cluster
     };
     window.addEventListener('resize', onResize);
 
@@ -695,6 +913,11 @@ function App(): React.JSX.Element {
       if (hoverRaf !== 0) cancelAnimationFrame(hoverRaf);
       if (hoverDeadline !== null) clearTimeout(hoverDeadline);
       if (hintFadeTimer !== null) clearTimeout(hintFadeTimer);
+      // M19 agent-helper teardown.
+      offAgents();
+      if (helperSweepTimer !== null) clearTimeout(helperSweepTimer);
+      if (helperTimer !== null) clearTimeout(helperTimer);
+      auxResyncRef.current = null;
       window.removeEventListener('resize', onResize);
       clearTimers();
       if (captionTimer !== null) clearTimeout(captionTimer);
@@ -703,6 +926,27 @@ function App(): React.JSX.Element {
       flight.cancel();
     };
   }, []);
+
+  // M19: measure the open agent card so the hover machine's merged region
+  // (and main's exit poll) covers it exactly. Runs after every render that
+  // could move/resize the card.
+  useEffect(() => {
+    const el = cardRef.current;
+    if (el) {
+      const b = el.getBoundingClientRect();
+      cardRectRef.current = { x: b.left, y: b.top, width: b.width, height: b.height };
+    } else {
+      cardRectRef.current = null;
+    }
+    auxResyncRef.current?.();
+  }, [helperHover, agents, cluster]);
+
+  // M19: tick the card's elapsed phrase while one is open.
+  useEffect(() => {
+    if (helperHover === null) return;
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [helperHover]);
 
   // M15: state-aware hover hint copy (null = suppressed: non-idle states,
   // captions in progress — an error caption is never replaced).
@@ -716,6 +960,7 @@ function App(): React.JSX.Element {
           now: Date.now(),
           captionShowing: caption !== null,
           interactive,
+          agentHover: helperHover !== null, // M19: the card IS the hint
         })
       : null;
 
@@ -769,6 +1014,21 @@ function App(): React.JSX.Element {
           </div>
         )}
       </div>
+      {cluster !== null && (
+        <AgentCluster
+          view={selectHelpers(agents, nowTick, helperHover ?? undefined)}
+          anchor={cluster.anchor}
+          dir={cluster.dir}
+          vdir={cluster.vdir}
+          visible={buddyVisible && mode === 'rest' && !dragging}
+          interactive={interactive}
+          hoveredKey={helperHover}
+          now={nowTick}
+          cardRef={cardRef}
+          onAgentClick={(id) => clicky.sendAgentClick(id)}
+          onAgentCancel={(id) => clicky.sendAgentCancel(id)}
+        />
+      )}
       {pulses.map((p) => (
         <div
           key={p.id}

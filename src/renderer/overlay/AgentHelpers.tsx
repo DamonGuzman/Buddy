@@ -17,6 +17,7 @@ import {
   AGENT_CARD_W,
   OVERFLOW_KEY,
   elapsedPhrase,
+  helperPhase,
   helperSlots,
   helperStatus,
   helperTint,
@@ -83,6 +84,7 @@ export function AgentCluster({
           slot={slots[i] ?? { x: 0, y: 0 }}
           index={i}
           hovered={hoveredKey === agent.id}
+          departing={helperPhase(agent, now, hoveredKey ?? undefined) === 'departing'}
           onClick={onAgentClick}
         />
       ))}
@@ -125,16 +127,20 @@ function HelperSprite({
   slot,
   index,
   hovered,
+  departing,
   onClick,
 }: {
   agent: AgentSummary;
   slot: Vec;
   index: number;
   hovered: boolean;
+  /** Last leg of the linger: glide back into the buddy and shrink away. */
+  departing: boolean;
   onClick: (id: string) => void;
 }): React.JSX.Element {
   // Birth animation: mount at the buddy center, then glide to the slot on the
   // next frame (CSS transitions on the outer translate + inner pop-scale).
+  // Departure is the reverse — back to the buddy center, scaled away.
   const [arrived, setArrived] = useState(false);
   useEffect(() => {
     const raf = requestAnimationFrame(() => setArrived(true));
@@ -142,25 +148,39 @@ function HelperSprite({
   }, []);
   const tint = helperTint(agent.id);
   const kind = helperStatus(agent).kind;
-  const pos = arrived ? slot : { x: 0, y: 0 };
+  const pos = arrived && !departing ? slot : { x: 0, y: 0 };
   return (
     <div
       className="helper"
       data-status={agent.status}
       data-arrived={arrived ? '' : undefined}
+      data-departing={departing ? '' : undefined}
       data-hovered={hovered ? '' : undefined}
       style={{ transform: `translate3d(${pos.x}px, ${pos.y}px, 0)` }}
       onClick={() => onClick(agent.id)}
     >
       <div
         className="helper-bob"
-        style={{ animationDelay: `${(index % 3) * -1.05}s`, ['--helper-glow' as never]: tint.glow }}
+        style={
+          {
+            animationDelay: `${(index % 3) * -1.05}s`,
+            '--helper-glow': tint.glow,
+          } as React.CSSProperties
+        }
       >
         <HelperSvg id={agent.id} tint={tint} />
       </div>
       {(kind === 'done' || kind === 'trouble') && (
         <span className="helper-badge" data-kind={kind}>
           {kind === 'done' ? '✓' : '!'}
+        </span>
+      )}
+      {agent.status === 'done' && (
+        <span className="helper-burst" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+          <i />
         </span>
       )}
     </div>

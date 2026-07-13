@@ -48,6 +48,11 @@ export interface MainToOverlayEvents {
   'overlay:hover-config': OverlayHoverConfig;
   /** This overlay window's click-through state flipped (dwell-to-interact). */
   'overlay:interactive': { interactive: boolean };
+  // M19 addition (integration-approved): agent helpers on the overlay — the
+  // same renderer-safe list the panel gets (full-list upsert, broadcast on
+  // every agent state change; NEVER carries screenshot bytes). Every overlay
+  // receives it; only the buddy-hosting overlay renders the helper sprites.
+  'overlay:agents': AgentSummary[];
 }
 
 // ===========================================================================
@@ -90,6 +95,10 @@ export interface MainToPanelEvents {
   // renderer-safe agent list, pushed on every state change (full-list upsert;
   // the panel replaces its list wholesale). Never carries screenshot bytes.
   'panel:agents': AgentSummary[];
+  // M19 addition (integration-approved): switch the panel to the agents view
+  // (an overlay helper sprite / agent card was clicked; main shows the panel
+  // and sends this so the click lands on the right view).
+  'panel:show-agents': null;
 }
 
 // ===========================================================================
@@ -116,6 +125,11 @@ export interface RendererSendEvents {
   'overlay:buddy-click': null;
   /** Drag-reposition finished: persist this rest fraction for this overlay. */
   'overlay:buddy-move': { xFrac: number; yFrac: number };
+  // M19 additions (integration-approved): agent helpers on the overlay.
+  /** A helper sprite / agent card was clicked -> open the panel agents view. */
+  'overlay:agent-click': { id: string };
+  /** The agent card's stop affordance was clicked -> cancel that agent. */
+  'overlay:agent-cancel': { id: string };
 }
 
 // ===========================================================================
@@ -196,6 +210,15 @@ export interface OverlayApi {
   sendBuddyClick(): void;
   /** Drag finished: persist the new rest fraction for this overlay. */
   sendBuddyMove(rest: { xFrac: number; yFrac: number }): void;
+
+  // M19 additions (integration-approved): agent helpers on the overlay.
+  onAgents(cb: (agents: AgentSummary[]) => void): Unsubscribe;
+  /** Agent list bootstrap (push updates ride on 'overlay:agents'). */
+  getAgents(): Promise<AgentSummary[]>;
+  /** A helper sprite / agent card was clicked (main opens the agents view). */
+  sendAgentClick(id: string): void;
+  /** The agent card's stop affordance was clicked. */
+  sendAgentCancel(id: string): void;
 }
 
 /** Exposed to the panel renderer as `window.clicky`. */
@@ -215,6 +238,9 @@ export interface PanelApi {
   onCodexSignin(cb: (state: CodexSignInState) => void): Unsubscribe;
   // M18 addition (integration-approved): agent list push (full-list upsert).
   onAgents(cb: (agents: AgentSummary[]) => void): Unsubscribe;
+  // M19 addition (integration-approved): switch to the agents view (an
+  // overlay helper sprite / agent card was clicked).
+  onShowAgents(cb: () => void): Unsubscribe;
 
   getSettings(): Promise<Settings>;
   // M11 addition (orchestrator-approved): runtime flags bootstrap.

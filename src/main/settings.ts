@@ -194,12 +194,69 @@ export class SettingsStore {
 
   // -------------------------------------------------------------------------
 
+  /** Import the dev launcher's local key after Electron app.ready. */
+  importApiKeyFromEnvironment(): boolean {
+    try {
+      const imported = this.prepareApiKeyFromEnvironment();
+      if (imported) this.persist();
+      return imported;
+    } catch (err) {
+      console.error(
+        '[settings] failed to import OPENAI_API_KEY:',
+        err instanceof Error ? err.message : 'unknown error',
+      );
+      return false;
+    }
+  }
+
   private encrypt(plain: string): string {
     if (!safeStorage.isEncryptionAvailable()) {
       // Extremely rare on Windows (DPAPI); refuse to store plaintext.
       throw new Error('safeStorage encryption unavailable; cannot store API key');
     }
     return safeStorage.encryptString(plain).toString('base64');
+  }
+
+  /**
+   * Development launcher seam: import OPENAI_API_KEY through Electron so the
+   * value is encrypted by the CURRENT Windows DPAPI context. Copying a
+   * safeStorage blob between app profiles is not reliable. The launcher opts
+   * in explicitly; normal installed-app startup never reads this environment
+   * variable. The plaintext is removed from this process after import.
+   */
+  private prepareApiKeyFromEnvironment(): boolean {
+    if (process.env['CLICKY_IMPORT_API_KEY_FROM_ENV'] !== '1') return false;
+    const apiKey = process.env['OPENAI_API_KEY']?.trim() ?? '';
+    if (apiKey === '') return false;
+
+    try {
+      if (this.file.apiKeyEncrypted !== null) {
+        try {
+          const current = safeStorage.decryptString(
+            Buffer.from(this.file.apiKeyEncrypted, 'base64'),
+          );
+          if (current === apiKey) {
+            const needsPersist = this.file.keyUnreadable === true;
+            this.file.keyUnreadable = false;
+            return needsPersist;
+          }
+        } catch {
+          // The stale blob is intentionally replaced below.
+        }
+      }
+
+      const encrypted = this.encrypt(apiKey);
+      const roundTrip = safeStorage.decryptString(Buffer.from(encrypted, 'base64'));
+      if (roundTrip !== apiKey) {
+        throw new Error('safeStorage API key round-trip verification failed');
+      }
+      this.file.apiKeyEncrypted = encrypted;
+      this.file.keyUnreadable = false;
+      console.log('[settings] imported OPENAI_API_KEY into encrypted local settings');
+      return true;
+    } finally {
+      delete process.env['OPENAI_API_KEY'];
+    }
   }
 
   private load(): SettingsFile {

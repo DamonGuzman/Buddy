@@ -1899,6 +1899,11 @@ export class Conversation {
       this.pendingAgentContinuations.delete(continuation.summary.id);
       this.agents?.markSpoken(continuation.summary.id);
     }).catch((error: unknown) => {
+      // One attempt only: the error->idle recovery re-runs the drain, so a
+      // still-queued continuation whose turn failed (no API key, connect
+      // refused) would retry — and fail — forever. Drop it; the panel/tray
+      // agent card remains the delivery path (`spoken` stays false).
+      this.pendingAgentContinuations.delete(continuation.summary.id);
       if (this.agentContinuationInFlight?.summary.id === continuation.summary.id) {
         this.agentContinuationInFlight = null;
       }
@@ -1913,6 +1918,9 @@ export class Conversation {
       preferApiKey: false,
     });
     if (auth === null || auth.kind !== 'chatgptCodex') {
+      // No Codex sub to run the text turn on — drop the continuation instead
+      // of leaving it queued to be re-picked on every idle transition.
+      this.pendingAgentContinuations.delete(continuation.summary.id);
       this.agentContinuationInFlight = null;
       return;
     }
@@ -1935,6 +1943,9 @@ export class Conversation {
       this.agentContinuationInFlight = null;
       this.drainAgentContinuations();
     }).catch((error: unknown) => {
+      // Same one-attempt rule as the voice path: never re-queue a failed
+      // automated turn.
+      this.pendingAgentContinuations.delete(continuation.summary.id);
       if (this.agentContinuationInFlight?.summary.id === continuation.summary.id) {
         this.agentContinuationInFlight = null;
       }

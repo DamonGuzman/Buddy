@@ -10,11 +10,13 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  AUX_PAD,
   AWARE_RADIUS,
   DWELL_MS,
   HINT_DELAY_MS,
   HOVER_RADIUS,
   HoverMachine,
+  REGION_CAP,
   REGION_PAD,
   REST_MARGIN_X,
   REST_MARGIN_Y_BOTTOM,
@@ -22,14 +24,16 @@ import {
   defaultRest,
   eyeOffset,
   hintText,
+  insideAux,
   insideRect,
+  mergedRegion,
   paddedRegion,
   restFromFrac,
   restToFrac,
   snapRest,
   zoneFor,
 } from '../src/renderer/overlay/hover';
-import type { Vec } from '../src/renderer/overlay/hover';
+import type { AuxHoverGeometry, Vec } from '../src/renderer/overlay/hover';
 
 const BUDDY: Vec = { x: 500, y: 500 };
 const FAR: Vec = { x: 900, y: 900 };
@@ -275,6 +279,124 @@ describe('HoverMachine: interactive release (SAFETY-CRITICAL)', () => {
     expect(fx.requestInteractive).toBe(false);
     fx = m.tick(BUDDY, t + 100 + DWELL_MS);
     expect(fx.requestInteractive).toBe(true);
+  });
+});
+
+describe('M19 aux geometry: insideAux / mergedRegion', () => {
+  // A realistic helper layout around a buddy at (500, 500): arc up-left +
+  // a card extending left.
+  const AUX: AuxHoverGeometry = {
+    targets: [
+      { x: 500, y: 452 },
+      { x: 470, y: 462 },
+      { x: 456, y: 488 },
+    ],
+    targetRadius: 18,
+    rect: { x: 500 - 70 - 248, y: 330, width: 248, height: 156 },
+  };
+
+  it('hits sprites within targetRadius and the padded card rect', () => {
+    expect(insideAux({ x: 500, y: 452 }, AUX)).toBe(true);
+    expect(insideAux({ x: 500, y: 452 - 18 }, AUX)).toBe(true);
+    expect(insideAux({ x: 500, y: 452 - 40 }, AUX)).toBe(false);
+    // Inside the card, and within its AUX_PAD ring.
+    expect(insideAux({ x: 300, y: 400 }, AUX)).toBe(true);
+    expect(insideAux({ x: 182 - AUX_PAD + 1, y: 400 }, AUX)).toBe(true);
+    expect(insideAux({ x: 182 - AUX_PAD - 2, y: 400 }, AUX)).toBe(false);
+    expect(insideAux({ x: 300, y: 400 }, null)).toBe(false);
+  });
+
+  it('mergedRegion covers the buddy footprint, sprites and card — under the cap', () => {
+    const r = mergedRegion(BUDDY, AUX);
+    expect(insideRect(BUDDY, r)).toBe(true);
+    for (const t of AUX.targets) expect(insideRect(t, r)).toBe(true);
+    expect(insideRect({ x: 182, y: 330 }, r)).toBe(true); // card top-left
+    // Must satisfy main's isFiniteRect cap (windows/overlay.ts): <= 400.
+    expect(r.width).toBeLessThanOrEqual(REGION_CAP);
+    expect(r.height).toBeLessThanOrEqual(REGION_CAP);
+    // No aux -> plain padded region.
+    expect(mergedRegion(BUDDY, null)).toEqual(paddedRegion(BUDDY));
+  });
+
+  it('an oversized union is clamped by trimming the side away from the buddy', () => {
+    const wide = mergedRegion(BUDDY, {
+      targets: [],
+      targetRadius: 18,
+      rect: { x: 0, y: 480, width: 460, height: 40 },
+    });
+    expect(wide.width).toBeLessThanOrEqual(REGION_CAP);
+    const base = paddedRegion(BUDDY);
+    expect(insideRect({ x: base.x, y: 500 }, wide)).toBe(true);
+    expect(insideRect({ x: base.x + base.width, y: 500 }, wide)).toBe(true);
+  });
+});
+
+describe('M19 HoverMachine: aux hover (helper sprites + card)', () => {
+  const SPRITE: Vec = { x: 500, y: 452 }; // outside the buddy footprint
+  const AUX: AuxHoverGeometry = { targets: [SPRITE], targetRadius: 18, rect: null };
+
+  it('a sprite counts as the hover zone and dwell-arms with the merged region', () => {
+    const m = new HoverMachine();
+    m.setAux(AUX, 900);
+    let fx = m.update(SPRITE, BUDDY, 1000);
+    expect(fx.zone).toBe('hover'); // zoneFor alone would say 'aware'
+    fx = m.tick(BUDDY, 1000 + DWELL_MS);
+    expect(fx.requestInteractive).toBe(true);
+    expect(insideRect(SPRITE, fx.region)).toBe(true);
+    expect(insideRect(BUDDY, fx.region)).toBe(true);
+  });
+
+  it('releases the instant the cursor leaves the merged region (safety)', () => {
+    const m = new HoverMachine();
+    m.setAux(AUX, 900);
+    m.update(SPRITE, BUDDY, 1000);
+    m.tick(BUDDY, 1000 + DWELL_MS);
+    expect(m.isInteractive).toBe(true);
+    const fx = m.update({ x: 500, y: 452 - 60 }, BUDDY, 1000 + DWELL_MS + 16);
+    expect(fx.releaseInteractive).toBe(true);
+    expect(m.isInteractive).toBe(false);
+  });
+
+  it('an aux change while interactive emits ONE region refresh', () => {
+    const m = new HoverMachine();
+    m.setAux(AUX, 900);
+    m.update(SPRITE, BUDDY, 1000);
+    m.tick(BUDDY, 1000 + DWELL_MS);
+    // Card opened: region must refresh so main's exit poll covers it.
+    const card = { x: 200, y: 330, width: 248, height: 150 };
+    let fx = m.setAux({ ...AUX, rect: card }, 1000 + DWELL_MS + 20);
+    expect(fx.requestInteractive).toBe(true);
+    expect(insideRect({ x: 210, y: 340 }, fx.region)).toBe(true);
+    // Next plain step: no further refresh spam.
+    fx = m.update(SPRITE, BUDDY, 1000 + DWELL_MS + 40);
+    expect(fx.requestInteractive).toBe(false);
+    expect(fx.releaseInteractive).toBe(false);
+  });
+
+  it('shrinking aux away from under the cursor releases on that call', () => {
+    const m = new HoverMachine();
+    m.setAux(AUX, 900);
+    m.update(SPRITE, BUDDY, 1000);
+    m.tick(BUDDY, 1000 + DWELL_MS);
+    expect(m.isInteractive).toBe(true);
+    // All helpers vanished (results seen) while the cursor sat on a sprite.
+    const fx = m.setAux(null, 1000 + DWELL_MS + 20);
+    expect(fx.releaseInteractive).toBe(true);
+    expect(m.isInteractive).toBe(false);
+  });
+
+  it('suppresses the hint while hovering an agent helper', () => {
+    expect(
+      hintText({
+        state: 'idle',
+        hotkeyLabel: 'Ctrl+Alt (left alt)',
+        lastSpokeAt: null,
+        now: 1_000_000,
+        captionShowing: false,
+        interactive: false,
+        agentHover: true,
+      }),
+    ).toBeNull();
   });
 });
 

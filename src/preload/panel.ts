@@ -36,6 +36,8 @@ const api: PanelApi = {
   onCodexSignin: (cb) => subscribe('panel:codex-signin', cb),
   // M18 addition (integration-approved): agent list push (full-list upsert).
   onAgents: (cb) => subscribe('panel:agents', cb),
+  // M19 addition (integration-approved): overlay helper click -> agents view.
+  onShowAgents: (cb) => subscribe('panel:show-agents', () => cb()),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),
   getRuntime: () => ipcRenderer.invoke('panel:get-runtime'),

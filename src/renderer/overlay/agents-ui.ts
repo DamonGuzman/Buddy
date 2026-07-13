@@ -24,8 +24,14 @@ export const HELPER_ARC_RADIUS = 48;
 export const HELPER_ARC_STEP_DEG = 38;
 /** At most this many individual sprites; extras fold into the "+N" pebble. */
 export const MAX_HELPER_SPRITES = 3;
-/** Finished-but-unviewed helpers linger on the overlay this long, max. */
-export const FINISHED_LINGER_MS = 10 * 60_000;
+/**
+ * Finished helpers celebrate, then leave on their own — total time on screen
+ * after finishing. They exist to help the buddy, not to be managed by the
+ * user; the panel stays the permanent record.
+ */
+export const FINISHED_LINGER_MS = 10_000;
+/** Tail of the linger window spent shrinking back into the buddy. */
+export const HELPER_DEPART_MS = 650;
 /** Agent card width (must keep the merged hover region under main's cap). */
 export const AGENT_CARD_W = 248;
 /** Horizontal gap between the buddy center and the card's near edge. */
@@ -53,24 +59,64 @@ function isActive(agent: AgentSummary): boolean {
 }
 
 /**
- * Agents worth showing beside the buddy: everything active, plus finished
- * runs the user hasn't viewed yet (they fade after FINISHED_LINGER_MS so a
- * never-opened panel can't accumulate sprites forever). Cancelled runs never
- * show — the user asked for them to go away.
+ * Where a helper is in its on-screen life:
+ * - 'active'    queued/running — stays as long as the agent works
+ * - 'settled'   finished — celebrating / available to hover
+ * - 'departing' last HELPER_DEPART_MS of the linger — shrinking back home
+ * - 'gone'      not shown (expired, viewed in the panel, or cancelled)
+ *
+ * `keepId` freezes that helper at 'settled' — the one being hovered must
+ * never vanish under the cursor.
  */
-export function selectHelpers(agents: AgentSummary[], now: number): HelperView {
+export type HelperPhase = 'active' | 'settled' | 'departing' | 'gone';
+
+export function helperPhase(agent: AgentSummary, now: number, keepId?: string): HelperPhase {
+  if (isActive(agent)) return 'active';
+  if (agent.status === 'cancelled') return 'gone';
+  if (!agent.unseen) return 'gone';
+  if (agent.id === keepId) return 'settled';
+  const t = now - (agent.finishedAt ?? agent.createdAt);
+  if (t >= FINISHED_LINGER_MS) return 'gone';
+  if (t >= FINISHED_LINGER_MS - HELPER_DEPART_MS) return 'departing';
+  return 'settled';
+}
+
+/**
+ * Agents worth showing beside the buddy: everything active, plus recently
+ * finished runs still in their celebrate-and-leave window. Cancelled runs
+ * never show — the user asked for them to go away.
+ */
+export function selectHelpers(agents: AgentSummary[], now: number, keepId?: string): HelperView {
   const active = agents.filter(isActive).sort((a, b) => a.createdAt - b.createdAt);
   const finished = agents
-    .filter(
-      (a) =>
-        !isActive(a) &&
-        a.status !== 'cancelled' &&
-        a.unseen &&
-        now - (a.finishedAt ?? a.createdAt) < FINISHED_LINGER_MS,
-    )
+    .filter((a) => !isActive(a) && helperPhase(a, now, keepId) !== 'gone')
     .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0));
   const all = [...active, ...finished];
   return { shown: all.slice(0, MAX_HELPER_SPRITES), overflow: all.slice(MAX_HELPER_SPRITES) };
+}
+
+/**
+ * Soonest FUTURE phase boundary (settled->departing or departing->gone)
+ * among finished helpers, or null when nothing is scheduled to change.
+ * Drives the renderer's next recompute timer — no polling.
+ */
+export function nextHelperTransition(
+  agents: AgentSummary[],
+  now: number,
+  keepId?: string,
+): number | null {
+  let next: number | null = null;
+  for (const a of agents) {
+    if (isActive(a) || a.status === 'cancelled' || !a.unseen || a.id === keepId) continue;
+    const finished = a.finishedAt ?? a.createdAt;
+    for (const boundary of [
+      finished + FINISHED_LINGER_MS - HELPER_DEPART_MS,
+      finished + FINISHED_LINGER_MS,
+    ]) {
+      if (boundary > now && (next === null || boundary < next)) next = boundary;
+    }
+  }
+  return next;
 }
 
 /**
@@ -83,9 +129,11 @@ export function helperSlots(count: number, dir: 1 | -1, vdir: 1 | -1): Vec[] {
   const slots: Vec[] = [];
   for (let i = 0; i < count; i++) {
     const a = (i * HELPER_ARC_STEP_DEG * Math.PI) / 180;
+    // Round the magnitude BEFORE applying the mirror signs so mirrored
+    // layouts are exact reflections; `+ 0` normalizes -0.
     slots.push({
-      x: Math.round(dir * HELPER_ARC_RADIUS * Math.sin(a)),
-      y: Math.round(vdir * -HELPER_ARC_RADIUS * Math.cos(a)),
+      x: dir * Math.round(HELPER_ARC_RADIUS * Math.sin(a)) + 0,
+      y: vdir * Math.round(HELPER_ARC_RADIUS * Math.cos(a)) + 0,
     });
   }
   return slots;

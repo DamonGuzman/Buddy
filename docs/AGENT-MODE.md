@@ -572,6 +572,42 @@ If the user says "buddy, agent …" while disconnected, the persona (§1.2, disc
 says it needs the sign-in and offers to help by hand — and main pops the panel to the Agents tab's
 gated empty state (reusing `showPanelOnce`-style discoverability).
 
+### 5.5 Overlay helper sprites (M19 — the non-technical face of agents)
+
+The panel list is the full record; the **overlay** is where a non-technical user actually *sees*
+agents. Each visible agent is a tiny pastel "helper buddy" (22px triangle with eyes, stable
+per-agent tint) that pops out of the mascot and settles into a small arc anchored at the buddy's
+REST spot (the arc mirrors toward the roomy side of the screen). Implementation:
+`src/renderer/overlay/agents-ui.ts` (pure view-model, unit-tested), `AgentHelpers.tsx`
+(components), wiring in `main.tsx`.
+
+- **Which agents show:** everything active, plus just-finished runs during a short
+  celebrate-and-leave window (cancelled runs never show). At most 3 sprites; extras fold into a
+  "+N" pebble so seven agents never eat more than ~100px of screen.
+- **Status without jargon:** running = gentle bob (phase-shifted); done = one happy hop + green ✓
+  badge + a sparkle burst; failed/timed-out = desaturated + amber "!"; queued = dimmed.
+- **Self-dismissing:** helpers exist to help the buddy, not to be managed. A finished helper
+  celebrates, lingers ~10s (`FINISHED_LINGER_MS`), then shrinks back INTO the buddy (reverse of
+  its birth glide, `HELPER_DEPART_MS` tail) and is gone — no click required; the panel keeps the
+  record and the header Bot badge still counts unseen results. The hovered helper is exempt
+  (`helperPhase` keepId) so a card never vanishes under the cursor; phase boundaries drive
+  one-shot recompute timers (`nextHelperTransition`), no polling.
+- **Hover → agent card:** the overlay already receives mousemove while click-through (M15
+  forwarding), so hovering a sprite (140ms) opens a warm card — the task in quotes, a friendly
+  activity line derived from the last step ('reading rtings.com…'), "working for 2 minutes ·
+  checked 3 places on the web", and a click cta. Hovering the pebble lists the folded helpers.
+  The M15 hint bubble is suppressed while a card shows.
+- **Clicks ride the M15 dwell flip:** the hover machine's interactive region grows to a merged
+  bounding box (buddy footprint + sprites + measured card rect, clamped under main's 400×400
+  region cap) via `HoverMachine.setAux`; the safety property (instant click-through restore on
+  region exit) extends to the merged region. Clicking a sprite/card sends
+  `overlay:agent-click` → main shows the panel + `panel:show-agents` (the Agents view marks
+  results seen, which fades the sprites); a card "stop" affordance sends `overlay:agent-cancel`.
+- **IPC (integration-approved M19):** `overlay:agents` mirrors the same renderer-safe
+  `AgentSummary[]` the panel gets (broadcast to all overlays; only the buddy-hosting overlay
+  renders), `overlay:agent-click` / `overlay:agent-cancel` sends, `panel:show-agents` push, and
+  overlay-preload `getAgents()` bootstrap (reuses the `agents:list` invoke).
+
 ---
 
 ## 6. Integration points + build plan

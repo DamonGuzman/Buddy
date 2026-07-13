@@ -459,6 +459,62 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
     await vi.waitFor(() => expect(markSpoken).toHaveBeenCalledWith('agent_voice_1'));
   });
 
+  it('gives up delivering a voice continuation after the first failed turn (no API key)', async () => {
+    // Regression: with no API key the automated voice turn fails, the error
+    // state auto-recovers to idle, and the still-queued continuation used to
+    // retry (and fail) forever — the log filled with endless
+    // "[conversation] turn failed: no API key configured" lines.
+    const savedMockUrl = process.env['CLICKY_MOCK_URL'];
+    delete process.env['CLICKY_MOCK_URL']; // real endpoint -> connect needs a key
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const failures = () =>
+      errorSpy.mock.calls.filter((args) => String(args[0]).includes('turn failed')).length;
+    // setImmediate is NOT faked, so awaiting it drains all pending microtasks
+    // (the rejected connect settling, the queueMicrotask'd drain).
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
+    try {
+      const markSpoken = vi.fn();
+      const agents = {
+        isReady: () => true,
+        spawn: () => ({ ok: true as const, agentId: 'unused' }),
+        markSpoken,
+      };
+      const c = make(
+        makeDeps({ pointers: [], signedIn: false, apiKey: null, fake: null, agents }),
+      );
+
+      c.deliverAgentResult({
+        id: 'agent_nokey_1',
+        task: 'finish the background check',
+        status: 'done',
+        summary: 'the background check passed',
+        maxSteps: 12,
+        steps: [],
+        sources: [],
+        createdAt: Date.now(),
+        finishedAt: Date.now(),
+        unseen: true,
+        spoken: false,
+      });
+      await flush();
+      expect(failures()).toBe(1);
+      expect(c.assistantState()).toBe('error');
+
+      // Error auto-recovery returns to idle and re-runs the continuation
+      // drain — the failed continuation must be gone, not retried.
+      await vi.advanceTimersByTimeAsync(5_000);
+      await flush();
+      expect(c.assistantState()).toBe('idle');
+      expect(failures()).toBe(1);
+      expect(markSpoken).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      errorSpy.mockRestore();
+      if (savedMockUrl !== undefined) process.env['CLICKY_MOCK_URL'] = savedMockUrl;
+    }
+  });
+
   it('text point_at: UIA-snaps but SKIPS REST grounding (text-accurate)', async () => {
     ctl.snap = async () => ({
       ...ctl.noMatch,

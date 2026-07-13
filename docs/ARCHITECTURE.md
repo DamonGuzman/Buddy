@@ -97,7 +97,8 @@ src/
     debug-server.ts  CLICKY_DEBUG=1 → 127.0.0.1:8199 HTTP: simulate hotkey, inject text turn,
                      read state, trigger pointer, dump last capture metadata
   renderer/
-    overlay/         buddy canvas/DOM, bezier animation, caption bubble, indicators
+    overlay/         buddy canvas/DOM, bezier animation, caption bubble, indicators,
+                     agent helper sprites + hover card (M19, docs/AGENT-MODE.md §5.5)
     panel/           React panel UI (status, transcript, text input, settings)
   preload/           contextBridge APIs for each renderer
 tools/

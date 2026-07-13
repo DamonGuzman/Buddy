@@ -77,11 +77,16 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function main(): Promise<void> {
+  // The dev launcher imports OPENAI_API_KEY through Electron safeStorage.
+  // Windows DPAPI is only reliable after Electron has reached app.ready.
+  if (process.env['CLICKY_IMPORT_API_KEY_FROM_ENV'] === '1') await app.whenReady();
+
   // Known limitation: mic devices are enumerated by the panel renderer
   // locally; this main-side cache is never populated (mic:list returns []).
   const micDevices: MicDevice[] = [];
 
   const settings = new SettingsStore();
+  settings.importApiKeyFromEnvironment();
   const overlays = new OverlayManager();
   const panel = new PanelManager();
   const hotkey = new HotkeyManager();
@@ -97,7 +102,11 @@ async function main(): Promise<void> {
     backend: agentBackend,
     isReady: () => agentMock || codexAgentBackend.isReady(),
     persistencePath: join(app.getPath('userData'), 'agents.json'),
-    onAgentsChanged: (list) => panel.send('panel:agents', list),
+    // M19: the overlays mirror the same renderer-safe list (helper sprites).
+    onAgentsChanged: (list) => {
+      panel.send('panel:agents', list);
+      overlays.broadcast('overlay:agents', list);
+    },
     onFinished: (summary) => conversation.deliverAgentResult(summary),
     notify: (title, body) => {
       try { tray?.displayBalloon({ title, content: body }); } catch { /* unavailable on some systems */ }
@@ -224,6 +233,17 @@ async function main(): Promise<void> {
   });
   ipcMain.on('audio:playback-ring', (_event, ring: ArrayBuffer) => {
     conversation.handlePlaybackRing(ring);
+  });
+  // M19: overlay agent helpers — a sprite/card click opens the panel on the
+  // agents view (viewing marks results seen there); stop cancels one agent.
+  ipcMain.on('overlay:agent-click', (_event, payload: { id: string }) => {
+    if (!payload || typeof payload.id !== 'string') return;
+    panel.show();
+    panel.send('panel:show-agents', null);
+  });
+  ipcMain.on('overlay:agent-cancel', (_event, payload: { id: string }) => {
+    if (!payload || typeof payload.id !== 'string') return;
+    agents.cancel(payload.id);
   });
 
   // ---------------------------------------------------------------------

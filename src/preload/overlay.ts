@@ -42,6 +42,11 @@ const api: OverlayApi = {
   sendHover: (evt) => ipcRenderer.send('overlay:hover', evt),
   sendBuddyClick: () => ipcRenderer.send('overlay:buddy-click', null),
   sendBuddyMove: (rest) => ipcRenderer.send('overlay:buddy-move', rest),
+  // M19 additions (integration-approved): agent helpers on the overlay.
+  onAgents: (cb) => subscribe('overlay:agents', cb),
+  getAgents: () => ipcRenderer.invoke('agents:list'),
+  sendAgentClick: (id) => ipcRenderer.send('overlay:agent-click', { id }),
+  sendAgentCancel: (id) => ipcRenderer.send('overlay:agent-cancel', { id }),
 };
 
 contextBridge.exposeInMainWorld('clicky', api);

@@ -102,6 +102,9 @@ export function App(): React.JSX.Element {
       clicky.onSettings(setSettings),
       clicky.onRuntime(setRuntime),
       clicky.onAgents(setAgents),
+      // M19: an overlay helper sprite / agent card was clicked — land on the
+      // agents view (main has already shown the panel).
+      clicky.onShowAgents(() => setView('agents')),
       // M17: merge the Codex sign-in snapshot into settings (the "ChatGPT"
       // settings card reads it) — lower latency than waiting for the next
       // panel:settings, and reflects the CLI's auth.json rotating live.

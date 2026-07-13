@@ -56,6 +56,44 @@ describe('SettingsStore: api key round trip', () => {
     expect(store.getApiKey()).toBe('sk-test-123');
     expect(store.get().apiKeyUnreadable).toBe(false);
   });
+
+  it('re-encrypts an environment key into the active Electron DPAPI context', () => {
+    const path = freshPath();
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: 3,
+        apiKeyEncrypted: Buffer.from('enc:stale-key', 'utf8').toString('base64'),
+        keyUnreadable: true,
+      }),
+      'utf8',
+    );
+    const previousImport = process.env['CLICKY_IMPORT_API_KEY_FROM_ENV'];
+    const previousKey = process.env['OPENAI_API_KEY'];
+    process.env['CLICKY_IMPORT_API_KEY_FROM_ENV'] = '1';
+    process.env['OPENAI_API_KEY'] = 'sk-local-environment-key';
+
+    try {
+      const store = new SettingsStore(path);
+      expect(store.importApiKeyFromEnvironment()).toBe(true);
+      expect(store.getApiKey()).toBe('sk-local-environment-key');
+      expect(store.get().apiKeyUnreadable).toBe(false);
+      expect(process.env['OPENAI_API_KEY']).toBeUndefined();
+      const persisted = JSON.parse(readFileSync(path, 'utf8')) as {
+        apiKeyEncrypted: string;
+        keyUnreadable: boolean;
+      };
+      expect(Buffer.from(persisted.apiKeyEncrypted, 'base64').toString('utf8')).toBe(
+        'enc:sk-local-environment-key',
+      );
+      expect(persisted.keyUnreadable).toBe(false);
+    } finally {
+      if (previousImport === undefined) delete process.env['CLICKY_IMPORT_API_KEY_FROM_ENV'];
+      else process.env['CLICKY_IMPORT_API_KEY_FROM_ENV'] = previousImport;
+      if (previousKey === undefined) delete process.env['OPENAI_API_KEY'];
+      else process.env['OPENAI_API_KEY'] = previousKey;
+    }
+  });
 });
 
 describe('SettingsStore: DPAPI decrypt failure (M11 api_key_unreadable)', () => {
