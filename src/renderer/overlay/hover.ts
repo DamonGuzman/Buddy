@@ -91,6 +91,82 @@ export function insideRect(p: Vec, r: Rect): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// M19 agent helpers: auxiliary hover geometry (helper sprites + agent card)
+// ---------------------------------------------------------------------------
+
+/** Padding beyond aux targets / the card for the interactive region. */
+export const AUX_PAD = 10;
+/**
+ * Main rejects dwell regions larger than 400x400 (windows/overlay.ts
+ * isFiniteRect) — merged regions are clamped just under that.
+ */
+export const REGION_CAP = 398;
+
+/**
+ * Hoverable geometry beyond the buddy footprint: the agent helper sprites
+ * (small circles) and, while one is hovered, the open agent card (a rect).
+ * All coordinates window-local DIP, like the buddy.
+ */
+export interface AuxHoverGeometry {
+  /** Helper-sprite / overflow-pebble centers. */
+  targets: Vec[];
+  /** Hover radius around each target. */
+  targetRadius: number;
+  /** Bounds of the open agent card, or null when no card is showing. */
+  rect: Rect | null;
+}
+
+function padRect(r: Rect, pad: number): Rect {
+  return { x: r.x - pad, y: r.y - pad, width: r.width + pad * 2, height: r.height + pad * 2 };
+}
+
+function unionRects(a: Rect, b: Rect): Rect {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return {
+    x,
+    y,
+    width: Math.max(a.x + a.width, b.x + b.width) - x,
+    height: Math.max(a.y + a.height, b.y + b.height) - y,
+  };
+}
+
+/** Is the cursor on any aux target (sprite) or inside the padded card rect? */
+export function insideAux(cursor: Vec, aux: AuxHoverGeometry | null): boolean {
+  if (aux === null) return false;
+  if (aux.rect !== null && insideRect(cursor, padRect(aux.rect, AUX_PAD))) return true;
+  return aux.targets.some((t) => dist(cursor, t) <= aux.targetRadius);
+}
+
+/**
+ * Interactive region covering the padded buddy footprint plus the aux
+ * geometry. Clamped to REGION_CAP per axis by trimming the edge FARTHEST
+ * from the buddy — the buddy footprint itself always stays inside (the
+ * clamp must never strand the buddy outside its own region).
+ */
+export function mergedRegion(buddy: Vec, aux: AuxHoverGeometry | null): Rect {
+  const base = paddedRegion(buddy);
+  if (aux === null) return base;
+  let region = base;
+  const half = aux.targetRadius + AUX_PAD;
+  for (const t of aux.targets) {
+    region = unionRects(region, { x: t.x - half, y: t.y - half, width: half * 2, height: half * 2 });
+  }
+  if (aux.rect !== null) region = unionRects(region, padRect(aux.rect, AUX_PAD));
+  // Per-axis cap: keep the base (buddy) span, trim the far side.
+  let { x, y, width, height } = region;
+  if (width > REGION_CAP) {
+    x = Math.max(x, Math.min(base.x, x + width - REGION_CAP));
+    width = REGION_CAP;
+  }
+  if (height > REGION_CAP) {
+    y = Math.max(y, Math.min(base.y, y + height - REGION_CAP));
+    height = REGION_CAP;
+  }
+  return { x, y, width, height };
+}
+
+// ---------------------------------------------------------------------------
 // Rest position: defaults, drag snapping, fraction persistence
 // ---------------------------------------------------------------------------
 
@@ -155,6 +231,8 @@ export interface HintTextInput {
   captionShowing: boolean;
   /** Dwell armed: the overlay is currently interactive (click would work). */
   interactive: boolean;
+  /** M19: the cursor is on an agent helper / its card — the card IS the hint. */
+  agentHover?: boolean;
 }
 
 /**
@@ -162,6 +240,7 @@ export interface HintTextInput {
  * speaking must not be distracted from; an error caption is never replaced).
  */
 export function hintText(input: HintTextInput): { text: string; sub?: string } | null {
+  if (input.agentHover === true) return null;
   if (input.captionShowing) return null;
   if (input.state !== 'idle') return null;
   const hk = input.hotkeyLabel.toLowerCase();
@@ -213,6 +292,10 @@ export class HoverMachine {
   private enabled = true;
   private cursor: Vec | null = null;
   private buddy: Vec = { x: 0, y: 0 };
+  /** M19: agent-helper geometry (sprites + open card), null when no agents. */
+  private aux: AuxHoverGeometry | null = null;
+  /** Aux changed since the last step: emit one region refresh if interactive. */
+  private auxDirty = false;
 
   get isInteractive(): boolean {
     return this.interactive;
@@ -263,10 +346,26 @@ export class HoverMachine {
     return this.step(now);
   }
 
+  /**
+   * M19: update the agent-helper hover geometry (sprite centers + open card
+   * rect). Hovering any of it counts as the 'hover' zone, and the interactive
+   * region grows to cover it (mergedRegion). While interactive, a geometry
+   * change emits one requestInteractive so main refreshes its exit-poll
+   * region. Shrinking geometry that leaves the cursor outside releases on
+   * this very call (the safety property extends to the merged region).
+   */
+  setAux(aux: AuxHoverGeometry | null, now: number): HoverEffects {
+    this.aux = aux;
+    this.auxDirty = true;
+    return this.step(now);
+  }
+
   // -------------------------------------------------------------------------
 
   private step(now: number): HoverEffects {
-    const region = paddedRegion(this.buddy);
+    const region = mergedRegion(this.buddy, this.aux);
+    const auxDirty = this.auxDirty;
+    this.auxDirty = false;
     let requestInteractive = false;
     let releaseInteractive = false;
 
@@ -295,7 +394,8 @@ export class HoverMachine {
       };
     }
 
-    const zone = zoneFor(this.cursor, this.buddy);
+    // M19: the helper sprites / open card count as the hover zone too.
+    const zone = insideAux(this.cursor, this.aux) ? 'hover' : zoneFor(this.cursor, this.buddy);
 
     if (this.interactive) {
       const stillInside = this.dragging || insideRect(this.cursor, region);
@@ -315,13 +415,14 @@ export class HoverMachine {
           nextDeadline: null,
         };
       }
-      // Interactive and inside: hint stays, region refreshes while dragging.
+      // Interactive and inside: hint stays, region refreshes while dragging
+      // (keepalive) or when the aux geometry changed (card opened/closed).
       this.zone = 'hover';
       this.hintShown = true;
       return {
         zone: 'hover',
         hintVisible: true,
-        requestInteractive: this.dragging, // region refresh keepalive
+        requestInteractive: this.dragging || auxDirty,
         releaseInteractive: false,
         region,
         nextDeadline: null,
