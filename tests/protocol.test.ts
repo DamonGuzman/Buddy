@@ -11,7 +11,13 @@ import type {
   SessionUpdateEvent,
 } from '../src/main/realtime/protocol';
 import { parseServerEvent, validatePointAtArgs } from '../src/main/realtime/protocol';
-import { getSessionInstructions, getToolDefinitions, POINT_AT_TOOL } from '../src/main/persona';
+import {
+  getSessionInstructions,
+  getTextInstructions,
+  getTextToolDefinitions,
+  getToolDefinitions,
+  POINT_AT_TOOL,
+} from '../src/main/persona';
 import type { CaptureMeta } from '../src/shared/types';
 
 const roundTrip = <T>(evt: T): T => JSON.parse(JSON.stringify(evt)) as T;
@@ -235,10 +241,42 @@ describe('persona tool definition', () => {
 
   it('instructions carry the persona contract', () => {
     const instructions = getSessionInstructions();
-    expect(instructions).toContain('clicky');
+    expect(instructions).toContain('buddy');
     expect(instructions).toContain('point_at');
     expect(instructions).toContain('chatgpt sign-in');
+    expect(instructions).toContain('<system_reminder>');
+    expect(instructions).toContain('<agent_result>');
     expect(getToolDefinitions().map((t) => t.name)).toEqual(['point_at']);
-    expect(getToolDefinitions(true).map((t) => t.name)).toEqual(['point_at', 'spawn_agent']);
+    expect(getToolDefinitions(true).map((t) => t.name)).toEqual([
+      'point_at',
+      'spawn_agent',
+      'check_agents',
+    ]);
+    expect(getToolDefinitions(true, true).map((t) => t.name)).toEqual([
+      'point_at',
+      'spawn_agent',
+      'check_agents',
+      'use_computer',
+    ]);
+    const computerTool = getToolDefinitions(true, true).find((tool) => tool.name === 'use_computer');
+    expect(computerTool?.parameters).not.toHaveProperty('properties.x');
+    expect(computerTool?.parameters).not.toHaveProperty('properties.keys');
+    expect(getSessionInstructions(true, true)).toContain('you have no direct click or keyboard tools');
+    expect(getTextToolDefinitions(true).map((t) => t.name)).toEqual([
+      'point_at',
+      'spawn_agent',
+      'check_agents',
+    ]);
+  });
+
+  it('makes buddy the user-facing orchestrator when agents are available', () => {
+    for (const instructions of [getSessionInstructions(true), getTextInstructions(true)]) {
+      expect(instructions).toContain('you are buddy, the warm interaction agent');
+      expect(instructions).toContain('as buddy, your primary role');
+      expect(instructions).toContain('interface between them and your background subagents');
+      expect(instructions).toContain('delegate almost every substantive task');
+      expect(instructions).toContain('do not try to complete that work yourself first');
+      expect(instructions).toContain('evaluate and synthesize its result');
+    }
   });
 });

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#081321" />
+    <title>Buddy phone audio</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <div class="buddy" aria-hidden="true"></div>
+      <p class="eyebrow">throwaway test bridge</p>
+      <h1>buddy phone audio</h1>
+      <p class="lede">Your iPhone becomes Buddy’s microphone and speaker while this page stays open.</p>
+
+      <section class="card" aria-live="polite">
+        <div class="status-row">
+          <span id="dot" class="dot"></span>
+          <div>
+            <strong id="status">ready to connect</strong>
+            <span id="detail">tap once to enable microphone and speaker</span>
+          </div>
+        </div>
+        <div class="meter"><i id="meter"></i></div>
+        <button id="connect" type="button">connect audio</button>
+      </section>
+
+      <section class="card compact">
+        <label for="volume">response volume <output id="volume-value">100%</output></label>
+        <input id="volume" type="range" min="0" max="150" value="100" />
+      </section>
+
+      <p class="hint">Keep Safari open. Hold Ctrl+Alt on the Windows PC, speak, then release. The microphone is gated off between holds.</p>
+      <p id="error" class="error" hidden></p>
+    </main>
+    <script type="module" src="/phone.js"></script>
+  </body>
+</html>

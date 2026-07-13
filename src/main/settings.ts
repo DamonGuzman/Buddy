@@ -24,7 +24,7 @@ const CODEX_SIGNED_OUT: CodexSignInState = {
 
 /** On-disk shape. `apiKeyEncrypted` is a base64 safeStorage blob. */
 interface SettingsFile {
-  version: 2;
+  version: 3;
   apiKeyEncrypted: string | null;
   /**
    * M11: the stored blob failed DPAPI decryption (windows credentials
@@ -36,9 +36,11 @@ interface SettingsFile {
   voice: string;
   captionsEnabled: boolean;
   micDeviceId: string;
+  fullRealtimeMode: boolean;
   // M15 addition (orchestrator-approved): user-defined buddy rest position.
   buddyRest: BuddyRest | null;
   preferApiKeyGrounding: boolean;
+  computerUseEnabled: boolean;
 }
 
 const FILE_NAME = 'settings.json';
@@ -90,6 +92,7 @@ export class SettingsStore {
       voice: this.file.voice,
       captionsEnabled: this.file.captionsEnabled,
       micDeviceId: this.file.micDeviceId,
+      fullRealtimeMode: this.file.fullRealtimeMode,
       hotkeyLabel: DEFAULT_SETTINGS.hotkeyLabel,
       // M15 addition (orchestrator-approved).
       buddyRest: this.file.buddyRest,
@@ -100,6 +103,7 @@ export class SettingsStore {
       codexValid: codex.valid,
       codexPlanType: codex.planType,
       preferApiKeyGrounding: this.file.preferApiKeyGrounding,
+      computerUseEnabled: this.file.computerUseEnabled,
     };
   }
 
@@ -142,9 +146,11 @@ export class SettingsStore {
     this.file.voice = merged.voice;
     this.file.captionsEnabled = merged.captionsEnabled;
     this.file.micDeviceId = merged.micDeviceId;
+    this.file.fullRealtimeMode = merged.fullRealtimeMode;
     // M15 addition (orchestrator-approved).
     this.file.buddyRest = merged.buddyRest;
     this.file.preferApiKeyGrounding = merged.preferApiKeyGrounding;
+    this.file.computerUseEnabled = merged.computerUseEnabled;
     this.persist();
     this.notify();
     return this.get();
@@ -198,23 +204,25 @@ export class SettingsStore {
 
   private load(): SettingsFile {
     const fallback: SettingsFile = {
-      version: 2,
+      version: 3,
       apiKeyEncrypted: null,
       keyUnreadable: false,
       model: DEFAULT_SETTINGS.model,
       voice: DEFAULT_SETTINGS.voice,
       captionsEnabled: DEFAULT_SETTINGS.captionsEnabled,
       micDeviceId: DEFAULT_SETTINGS.micDeviceId,
+      fullRealtimeMode: DEFAULT_SETTINGS.fullRealtimeMode,
       // M15 addition (orchestrator-approved).
       buddyRest: DEFAULT_SETTINGS.buddyRest,
       preferApiKeyGrounding: DEFAULT_SETTINGS.preferApiKeyGrounding,
+      computerUseEnabled: DEFAULT_SETTINGS.computerUseEnabled,
     };
     try {
       if (!existsSync(this.path)) return fallback;
       const parsed = JSON.parse(readFileSync(this.path, 'utf8')) as Partial<SettingsFile>;
-      this.needsMigration = parsed.version !== 2;
+      this.needsMigration = parsed.version !== 3;
       return {
-        version: 2,
+        version: 3,
         apiKeyEncrypted: typeof parsed.apiKeyEncrypted === 'string' ? parsed.apiKeyEncrypted : null,
         keyUnreadable: parsed.keyUnreadable === true,
         // M8.6: validate against the full model list — a stored 'mini' choice
@@ -228,12 +236,20 @@ export class SettingsStore {
             ? parsed.captionsEnabled
             : fallback.captionsEnabled,
         micDeviceId: typeof parsed.micDeviceId === 'string' ? parsed.micDeviceId : fallback.micDeviceId,
+        fullRealtimeMode:
+          typeof parsed.fullRealtimeMode === 'boolean'
+            ? parsed.fullRealtimeMode
+            : fallback.fullRealtimeMode,
         // M15 addition (orchestrator-approved): validate the persisted rest.
         buddyRest: parseBuddyRest(parsed.buddyRest),
         preferApiKeyGrounding:
           typeof parsed.preferApiKeyGrounding === 'boolean'
             ? parsed.preferApiKeyGrounding
             : fallback.preferApiKeyGrounding,
+        computerUseEnabled:
+          typeof parsed.computerUseEnabled === 'boolean'
+            ? parsed.computerUseEnabled
+            : fallback.computerUseEnabled,
       };
     } catch (err) {
       console.error('[settings] failed to load, using defaults:', err);

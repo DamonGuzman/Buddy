@@ -338,6 +338,7 @@ export class OverlayManager {
     const rest = settings?.buddyRest ?? null;
     return {
       hotkeyLabel: settings?.hotkeyLabel ?? 'Ctrl+Alt (left alt)',
+      fullRealtimeMode: settings?.fullRealtimeMode ?? false,
       rest:
         rest && rest.screenIndex === screenIndex && screenIndex === this.restScreenIndex()
           ? { xFrac: rest.xFrac, yFrac: rest.yFrac }

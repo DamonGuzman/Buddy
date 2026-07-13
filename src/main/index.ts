@@ -16,7 +16,7 @@
 
 import { app, ipcMain, powerMonitor, shell } from 'electron';
 import type { Tray } from 'electron';
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { captureAllDisplays } from './capture';
 import { getCodexAuthProvider } from './auth/codex-auth';
@@ -33,6 +33,7 @@ import { SettingsStore } from './settings';
 import { createTray } from './tray';
 import { OverlayManager } from './windows/overlay';
 import { PanelManager } from './windows/panel';
+import { PhoneAudioBridgeClient } from './phone-audio-bridge';
 import { ENV_DEBUG } from '../shared/constants';
 import type { InvokeArgs, InvokeChannel, InvokeResult } from '../shared/ipc';
 import type {
@@ -48,6 +49,15 @@ import type {
 // lock. MUST run before requestSingleInstanceLock below.
 if (process.env['CLICKY_USER_DATA']) {
   app.setPath('userData', process.env['CLICKY_USER_DATA']);
+} else {
+  // Preserve settings and sign-in state for users upgrading from the legacy
+  // heyclicky package name. Fresh installs use Electron's new Buddy path.
+  const legacyUserData = join(app.getPath('appData'), 'heyclicky');
+  const currentSettings = join(app.getPath('userData'), 'settings.json');
+  const legacySettings = join(legacyUserData, 'settings.json');
+  if (!existsSync(currentSettings) && existsSync(legacySettings)) {
+    app.setPath('userData', legacyUserData);
+  }
 }
 
 // M8.5 (orchestrator-approved): fake-mic audio injection for the audio eval
@@ -81,6 +91,8 @@ async function main(): Promise<void> {
   const agentMock = process.env['CLICKY_AGENT_MOCK'] === '1';
   const agentBackend: AgentBackend = agentMock ? new MockAgentBackend() : codexAgentBackend;
   let conversation!: Conversation;
+  const phoneAudioUrl = process.env['CLICKY_PHONE_AUDIO_URL']?.trim() ?? '';
+  const phoneAudio = phoneAudioUrl ? new PhoneAudioBridgeClient(phoneAudioUrl) : null;
   const agents = new AgentManager({
     backend: agentBackend,
     isReady: () => agentMock || codexAgentBackend.isReady(),
@@ -91,7 +103,16 @@ async function main(): Promise<void> {
       try { tray?.displayBalloon({ title, content: body }); } catch { /* unavailable on some systems */ }
     },
   });
-  conversation = new Conversation({ settings, overlays, panel, codexAuth, agents });
+  conversation = new Conversation({
+    settings,
+    overlays,
+    panel,
+    codexAuth,
+    agents,
+    ...(phoneAudio !== null ? { phoneAudio } : {}),
+  });
+  phoneAudio?.on('audio', (chunk) => conversation.handleAudioChunk(chunk));
+  phoneAudio?.start();
 
   // ---------------------------------------------------------------------
   // M11: last-resort crash handling. An uncaught main-process exception used
@@ -111,7 +132,7 @@ async function main(): Promise<void> {
       /* the crash logger must never crash */
     }
     try {
-      tray?.setToolTip('clicky tripped over something — a restart will fix it');
+      tray?.setToolTip('buddy tripped over something — a restart will fix it');
     } catch {
       /* tray may be gone during shutdown */
     }
@@ -211,15 +232,26 @@ async function main(): Promise<void> {
   settings.onChange((snapshot) => {
     panel.send('panel:settings', snapshot);
     conversation.onSettingsChanged(snapshot);
+    tray?.setToolTip(
+      snapshot.fullRealtimeMode
+        ? 'buddy - press Ctrl + left Alt to start or stop realtime'
+        : 'buddy - hold Ctrl + left Alt and talk',
+    );
   });
 
-  hotkey.on('hold-start', () => conversation.holdStart());
-  hotkey.on('hold-end', () => conversation.holdEnd());
+  hotkey.on('hold-start', () => {
+    if (settings.get().fullRealtimeMode) void conversation.toggleFullRealtime();
+    else conversation.holdStart();
+  });
+  hotkey.on('hold-end', () => {
+    if (!settings.get().fullRealtimeMode) conversation.holdEnd();
+  });
   // F1 fix (C1): forced release (max-hold watchdog / lock / suspend) cancels
   // the hold — mic released, held audio cleared, NO turn committed.
   // M11 (hold_too_long): the 30s watchdog cancel additionally TELLS the user
   // (it used to be silent — the answer just never came).
   hotkey.on('hold-cancel', (reason) => {
+    if (settings.get().fullRealtimeMode) return;
     conversation.cancelHold();
     if (reason === 'watchdog') conversation.reportError('hold_too_long');
   });
@@ -228,7 +260,7 @@ async function main(): Promise<void> {
   // Boot
   // ---------------------------------------------------------------------
   await app.whenReady();
-  app.setAppUserModelId('ai.fastyr.clicky');
+  app.setAppUserModelId('ai.fastyr.buddy');
 
   overlays.start();
 
@@ -242,12 +274,15 @@ async function main(): Promise<void> {
     onOpenPanel: () => panel.show(),
     onQuit: () => app.quit(),
   });
+  if (settings.get().fullRealtimeMode) {
+    tray.setToolTip('buddy - press Ctrl + left Alt to start or stop realtime');
+  }
 
   hotkey.on('error', () => {
     // hotkey_dead: transcript entry + one-time panel auto-show (catalog
     // policy) + a tray tooltip that points at the typing fallback.
     conversation.reportError('hotkey_dead');
-    tray?.setToolTip('clicky — hotkey unavailable, click to type');
+    tray?.setToolTip('buddy — hotkey unavailable, click to type');
     pushRuntime(); // the panel hero hint adapts to hookAlive === false
   });
 
@@ -258,11 +293,11 @@ async function main(): Promise<void> {
   panel.onFatal(() => {
     const dead = describeKind('renderer_dead');
     try {
-      tray?.displayBalloon({ title: 'clicky', content: dead.message });
+      tray?.displayBalloon({ title: 'buddy', content: dead.message });
     } catch {
       /* balloons can be unavailable; the tooltip below still lands */
     }
-    tray?.setToolTip(`clicky — ${dead.message}`);
+    tray?.setToolTip(`buddy — ${dead.message}`);
   });
 
   // M11: every panel renderer load (boot + crash-recreate) gets the current
@@ -296,8 +331,14 @@ async function main(): Promise<void> {
   // screen swallow keyups — force-cancel any live hold and reset modifier
   // state so the mic can never stay hot on a locked machine. On resume, the
   // realtime socket may be half-open; reset it so the next turn reconnects.
-  powerMonitor.on('lock-screen', () => hotkey.forceCancel());
-  powerMonitor.on('suspend', () => hotkey.forceCancel());
+  powerMonitor.on('lock-screen', () => {
+    hotkey.forceCancel();
+    conversation.deactivateFullRealtime();
+  });
+  powerMonitor.on('suspend', () => {
+    hotkey.forceCancel();
+    conversation.deactivateFullRealtime();
+  });
   powerMonitor.on('resume', () => conversation.onSystemResume());
 
   app.on('second-instance', () => panel.show());
@@ -373,6 +414,7 @@ async function main(): Promise<void> {
     codexOAuth.stop();
     hotkey.stop();
     conversation.close();
+    phoneAudio?.close();
     agents.dispose();
     overlays.destroy();
     panel.destroy();

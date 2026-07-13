@@ -1,15 +1,16 @@
-# Clicky for Windows
+# Buddy for Windows
 
-Clicky is a voice assistant that can *see your screen and point at things*. It lives in your
-system tray. **Hold `Ctrl` + left `Alt` and talk** — while you hold, Clicky screenshots your
+Buddy is a voice assistant that can *see your screen and point at
+things*. It lives in your system tray. **Hold `Ctrl` + left `Alt` and talk** — while you hold,
+Buddy screenshots your
 monitors and streams your voice to a realtime speech-to-speech model (OpenAI Realtime API).
 Release, and it answers out loud while a friendly blue buddy flies across a transparent overlay
 to physically point at the buttons, fields, and menus it's describing. Pointing is grounded in
 layers, never the model's raw pixel guess alone: the buddy first snaps onto the real on-screen
-element matching what Clicky said via the Windows accessibility tree (UIA), and when nothing
+element matching what Buddy said via the Windows accessibility tree (UIA), and when nothing
 there matches (unnamed glyph buttons, canvas UI) a fast vision-model grounding call
 (gpt-5.4-mini, ~10px median) re-locates the target in the same screenshot. No chat window to manage:
-ask "where do I turn on dark mode?" and Clicky tells you — and points. There's also a small
+ask "where do I turn on dark mode?" and Buddy tells you — and points. There's also a small
 control panel (tray icon) with a live transcript and a typed-question fallback for when you
 can't talk.
 
@@ -25,36 +26,40 @@ can't talk.
 Grab either artifact from a release (both are 64-bit, unsigned for this MVP — SmartScreen will
 warn; choose "More info → Run anyway"):
 
-- **Installer** — `Clicky Setup <version>.exe`: one-click per-user install, Start-menu entry.
-- **Portable** — `Clicky <version>.exe`: single file, run from anywhere, nothing to install.
+- **Installer** — `Buddy Setup <version>.exe`: one-click per-user install, Start-menu entry.
+- **Portable** — `Buddy <version>.exe`: single file, run from anywhere, nothing to install.
 
 ## First run
 
-1. Launch Clicky. A tray icon appears, and the control panel opens by itself on first run.
+1. Launch Buddy. A tray icon appears, and the control panel opens by itself on first run.
 2. Open settings (gear in the panel) and paste your OpenAI API key. It is encrypted on your
    machine before it's stored and never shown again.
 3. **Hold `Ctrl` + left `Alt` and talk** ("what am I looking at?"). Keep holding while you
-   speak; release to send. Clicky answers in voice and points at what it mentions.
-4. Somewhere quiet? Type a question in the panel instead — same pipeline, spoken answer +
+   speak; release to send. Buddy answers in voice and points at what it mentions.
+4. For a hands-free back-and-forth, enable **full realtime mode** in settings. Press the hotkey
+   once to activate and once more to deactivate; silence ends each turn automatically, and Buddy
+   takes a fresh screenshot for every speech turn.
+5. Somewhere quiet? Type a question in the panel instead — same pipeline, spoken answer +
    captions.
 
 The hotkey is fixed at `Ctrl` + **left** `Alt` for the MVP. The right `Alt` key (AltGr on
 international layouts) never triggers it, so typing accented characters is safe.
 
-**Model choice:** Clicky defaults to `gpt-realtime-2.1` — measurably the most accurate at
+**Model choice:** Buddy defaults to `gpt-realtime-2.1` — measurably the most accurate at
 pointing (docs/EVAL.md §8). You can switch to `gpt-realtime-2.1-mini` in settings for
 faster/cheaper replies, but expect noticeably less accurate pointing; screen reading and
 conversation quality stay comparable.
 
 ## Privacy model
 
-- **Capture only while you hold the hotkey** (or when you explicitly send a typed question).
-  There is no continuous recording or screen-watching — ever.
-- Capture is **always signposted**: a visible indicator shows whenever Clicky is looking/listening.
+- **Capture only on an explicit action**: hotkey press/hold, full-realtime activation, or a typed
+  question. Full realtime captures once at activation; it does not continuously watch the screen.
+- Capture is **always signposted**: a visible indicator shows whenever Buddy is looking/listening.
 - Your API key is stored **encrypted locally** (Windows DPAPI via Electron `safeStorage`) and
   never leaves the main process.
 - No servers of ours: audio and screenshots go **directly from your machine to OpenAI**, and
-  nowhere else. Uninstalling removes the app; your data dir (`%APPDATA%/Clicky`) is kept unless
+  nowhere else. Uninstalling removes the app; the compatibility data dir (`%APPDATA%/heyclicky`)
+  is kept unless
   you delete it.
 
 ## Live smoke test (with your key)
@@ -65,7 +70,7 @@ After first-run setup, verify the whole loop end to end:
    release → spoken answer + the buddy flies to the address bar.
 2. Ask *"show me two things I could click here"* → two pointer flights in sequence.
 3. Start a long answer, then press the hotkey mid-speech → playback stops instantly (barge-in)
-   and Clicky listens to the new question.
+   and Buddy listens to the new question.
 4. Type a question in the panel → same answer flow, with captions if enabled.
 5. Multi-monitor: ask about something on your other display → the buddy shows up there.
 
@@ -104,7 +109,8 @@ Read `docs/ARCHITECTURE.md` first (scope, module ownership, IPC/coordinate contr
 
 ## Known MVP limitations
 
-- **Agent mode is a stub** — "Clicky, agent ..." gets a friendly "coming soon", it does not act.
+- **Background work is read-only** — say "Buddy, agent ..." to delegate research; agents cannot
+  modify files, send messages, make purchases, or control other applications.
 - **Fixed hotkey** (`Ctrl` + left `Alt`) — not remappable yet.
 - **Single voice pipeline** — mic capture and playback live in the (hidden) panel renderer; if
   that renderer is killed, voice drops until it auto-recovers.

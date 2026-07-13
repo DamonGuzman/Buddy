@@ -28,7 +28,7 @@ export function AgentsView({ agents, connected, onOpenSettings }: AgentsViewProp
             <div className="space-y-1.5">
               <p className="text-sm font-medium">agent mode needs your chatgpt sign-in</p>
               <p className="text-xs leading-relaxed text-muted-foreground">
-                it runs on your chatgpt plan, not your api key. connect it, then say “clicky, agent…”
+                it runs on your chatgpt plan, not your api key. connect it, then say “buddy, agent…”
               </p>
             </div>
             <Button size="sm" className="mt-1 rounded-full" onClick={onOpenSettings}>open settings</Button>
@@ -53,7 +53,7 @@ export function AgentsView({ agents, connected, onOpenSettings }: AgentsViewProp
       </div>
       {agents.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-8 text-center text-xs leading-relaxed text-muted-foreground">
-          no agents yet — say “clicky, agent” followed by a research task and one will head off in the background.
+          no agents yet — say “buddy, agent” followed by a research task and one will head off in the background.
         </div>
       ) : (
         <ScrollArea className="min-h-0 flex-1">
@@ -88,7 +88,9 @@ function AgentCard({ agent }: { agent: AgentSummary }): React.JSX.Element {
           <StatusBadge status={agent.status} />
         </div>
         <p className="text-[11px] text-muted-foreground">
-          {active ? `step ${agent.step ?? 1}/${agent.maxSteps}` : agent.status.replace('_', ' ')} · {elapsed}
+          {active
+            ? `step ${agent.step ?? 1}${agent.maxSteps === null ? '' : `/${agent.maxSteps}`}`
+            : agent.status.replace('_', ' ')} · {elapsed}
           {agent.sources?.length ? ` · ${agent.sources.length} sources` : ''}
         </p>
       </CardHeader>

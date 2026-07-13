@@ -21,7 +21,6 @@
 import type { AgentStatus, AgentStep, AgentSummary, CaptureMeta } from '../../shared/types';
 
 // --- constants ---
-export const AGENT_MAX_STEPS = 12;            // tool rounds per run
 export const AGENT_MAX_CONCURRENT = 3;
 export const AGENT_STEP_LOG_CAP = 30;
 export const AGENT_RUN_WALL_CLOCK_MS = 4 * 60_000;

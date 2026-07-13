@@ -42,7 +42,7 @@ export class AgentManager {
       this.persist();
       this.push();
       this.deps.onFinished(clone(summary));
-      this.deps.notify?.('clicky finished', summary.task);
+      this.deps.notify?.('buddy finished', summary.task);
     });
     return { ok: true, agentId: brief.id };
   }

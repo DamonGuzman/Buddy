@@ -154,6 +154,12 @@ describe('hintText', () => {
     expect(hintText(base)).toEqual({ text: 'hold ctrl+alt (left alt) and talk to me' });
   });
 
+  it('uses toggle copy in full realtime mode', () => {
+    expect(hintText({ ...base, fullRealtimeMode: true })).toEqual({
+      text: 'press ctrl+alt (left alt) to start realtime mode',
+    });
+  });
+
   it('recent-response variant inside 2 minutes, default after', () => {
     expect(hintText({ ...base, lastSpokeAt: base.now - 60_000 })?.text).toMatch(/^want more\?/);
     expect(hintText({ ...base, lastSpokeAt: base.now - 121_000 })?.text).toMatch(/^hold /);

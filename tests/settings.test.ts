@@ -14,6 +14,8 @@ describe('settings schema', () => {
     expect(DEFAULT_SETTINGS.model).toBe('gpt-realtime-2.1');
     expect(DEFAULT_SETTINGS.captionsEnabled).toBe(true);
     expect(DEFAULT_SETTINGS.micDeviceId).toBe('');
+    expect(DEFAULT_SETTINGS.fullRealtimeMode).toBe(false);
+    expect(DEFAULT_SETTINGS.computerUseEnabled).toBe(false);
     // F1 (AltGr): only LEFT Alt participates, and the label says so.
     expect(DEFAULT_SETTINGS.hotkeyLabel).toBe('Ctrl+Alt (left alt)');
   });
@@ -30,6 +32,8 @@ describe('settings schema', () => {
       voice: 'cedar',
       captionsEnabled: false,
       micDeviceId: 'mic-42',
+      fullRealtimeMode: true,
+      computerUseEnabled: true,
     };
     const next = applySettingsPatch(DEFAULT_SETTINGS, patch);
     expect(next).toEqual({
@@ -39,6 +43,7 @@ describe('settings schema', () => {
       voice: 'cedar',
       captionsEnabled: false,
       micDeviceId: 'mic-42',
+      fullRealtimeMode: true,
       hotkeyLabel: 'Ctrl+Alt (left alt)',
       // M15 addition (orchestrator-approved): buddyRest rides along untouched.
       buddyRest: null,
@@ -48,6 +53,7 @@ describe('settings schema', () => {
       codexValid: false,
       codexPlanType: '',
       preferApiKeyGrounding: false,
+      computerUseEnabled: true,
     });
     // the renderer-safe view must never contain the key itself
     expect(JSON.stringify(next)).not.toContain('sk-secret');

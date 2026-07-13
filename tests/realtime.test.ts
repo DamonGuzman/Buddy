@@ -129,12 +129,71 @@ describe('RealtimeSession against the mock server', () => {
       tools: Array<{ name: string }>;
     };
     expect(update.type).toBe('realtime');
-    expect(update.instructions).toContain('clicky');
+    expect(update.instructions).toContain('buddy');
     expect(update.output_modalities).toEqual(['audio']);
     expect(update.audio.input.turn_detection).toBeNull();
     expect(update.audio.input.format).toEqual({ type: 'audio/pcm', rate: 24000 });
     expect(update.audio.output.voice).toBe('marin');
     expect(update.tools.map((t) => t.name)).toEqual(['point_at']);
+  });
+
+  it('commits server-VAD audio, then adds fresh screen context before responding', async () => {
+    const session = makeSession({ turnDetection: 'server_vad' });
+    const speechStarts = collect<{ itemId: string }>(session, 'speech-started');
+    const speechStops = collect<{ itemId: string }>(session, 'speech-stopped');
+    const audioCommits = collect<{ itemId: string }>(session, 'audio-committed');
+    let requested = 0;
+    session.on('response-requested', () => (requested += 1));
+
+    await session.connect();
+    await vi.waitFor(() => {
+      const update = server.sessionUpdates.at(-1)?.session as {
+        audio?: { input?: { turn_detection?: Record<string, unknown> | null } };
+      };
+      expect(update.audio?.input?.turn_detection).toMatchObject({
+        type: 'server_vad',
+        create_response: false,
+        interrupt_response: true,
+      });
+    });
+
+    const before = server.clientEvents.length;
+    const socket = [...server.wss.clients].at(-1);
+    expect(socket).toBeDefined();
+    socket!.send(JSON.stringify({
+      type: 'input_audio_buffer.speech_started',
+      item_id: 'vad_user_1',
+      audio_start_ms: 0,
+    }));
+    socket!.send(JSON.stringify({
+      type: 'input_audio_buffer.speech_stopped',
+      item_id: 'vad_user_1',
+      audio_end_ms: 800,
+    }));
+    socket!.send(JSON.stringify({
+      type: 'input_audio_buffer.committed',
+      item_id: 'vad_user_1',
+      previous_item_id: null,
+    }));
+
+    await vi.waitFor(() => expect(audioCommits).toEqual([{ itemId: 'vad_user_1' }]));
+    const donePromise = waitFor<{ responseId: string; status: string }>(session, 'response-done');
+    await session.respondToVadTurn([IMAGE]);
+    const done = await donePromise;
+    expect(done.status).toBe('completed');
+    expect(speechStarts).toEqual([{ itemId: 'vad_user_1' }]);
+    expect(speechStops).toEqual([{ itemId: 'vad_user_1' }]);
+    expect(requested).toBe(1);
+
+    const events = server.clientEvents.slice(before) as Array<Record<string, unknown>>;
+    const contextIndex = events.findIndex((event) => event['type'] === 'conversation.item.create');
+    const responseIndex = events.findIndex((event) => event['type'] === 'response.create');
+    expect(contextIndex).toBeGreaterThanOrEqual(0);
+    expect(responseIndex).toBeGreaterThan(contextIndex);
+    const context = events[contextIndex] as {
+      item?: { content?: Array<{ type?: string; image_url?: string }> };
+    };
+    expect(context.item?.content?.some((part) => part.type === 'input_image')).toBe(true);
   });
 
   it('text turn: transcript deltas accumulate to the full text, audio arrives as ArrayBuffers', async () => {
@@ -171,6 +230,127 @@ describe('RealtimeSession against the mock server', () => {
     expect(totalBytes).toBe(mock.synthesizeMelodyPcm16().length);
     expect(audioDone).toHaveLength(1); // audio-done precedes response-done
     expect(audioDone[0]!.itemId).toBe(audio[0]!.itemId);
+  });
+
+  it('automated continuation is a user-role turn that wakes a response', async () => {
+    const session = makeSession();
+    const before = server.clientEvents.length;
+
+    await session.injectUserAndRespond(
+      '<system_reminder>review the completed background work</system_reminder>',
+    );
+    await waitFor(session, 'response-done');
+
+    const events = server.clientEvents.slice(before) as Array<Record<string, unknown>>;
+    const created = events.find((event) => event['type'] === 'conversation.item.create') as {
+      item?: { type?: string; role?: string; content?: Array<{ type?: string; text?: string }> };
+    } | undefined;
+    expect(created?.item).toMatchObject({ type: 'message', role: 'user' });
+    expect(created?.item?.content?.[0]?.text).toContain('<system_reminder>');
+    expect(events.some((event) => event['type'] === 'response.create')).toBe(true);
+  });
+
+  it('admits only one direct inference when two starts race on the same connect', async () => {
+    const session = makeSession();
+    const before = server.clientEvents.length;
+
+    const userTurn = session.askText('the foreground question');
+    const automatedTurn = session.injectUserAndRespond(
+      '<system_reminder>a background agent completed</system_reminder>',
+    );
+
+    await userTurn;
+    await expect(automatedTurn).rejects.toThrow('a realtime response is already active');
+    await waitFor(session, 'response-done');
+
+    const creates = server.clientEvents
+      .slice(before)
+      .filter((event) => event.type === 'response.create');
+    expect(creates).toHaveLength(1);
+  });
+
+  it('drops late audio events from a cancelled response after its replacement starts', async () => {
+    const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+    await once(wss, 'listening');
+    const { port } = wss.address() as { port: number };
+    let responseCreates = 0;
+
+    wss.on('connection', (socket) => {
+      socket.send(JSON.stringify({ type: 'session.created', session: { id: 'session_late' } }));
+      socket.on('message', (raw) => {
+        const event = JSON.parse(raw.toString()) as { type?: string };
+        if (event.type !== 'response.create') return;
+        responseCreates += 1;
+        if (responseCreates === 1) {
+          socket.send(JSON.stringify({
+            type: 'response.created',
+            response: { id: 'resp_old', status: 'in_progress' },
+          }));
+          socket.send(JSON.stringify({
+            type: 'response.output_audio.delta',
+            response_id: 'resp_old',
+            item_id: 'old_initial',
+            delta: Buffer.from([1, 0]).toString('base64'),
+          }));
+          return;
+        }
+        socket.send(JSON.stringify({
+          type: 'response.created',
+          response: { id: 'resp_new', status: 'in_progress' },
+        }));
+        // Deliberately violate clean cancellation: stale audio arrives after
+        // the new response is active. Clicky must never forward this chunk.
+        socket.send(JSON.stringify({
+          type: 'response.output_audio.delta',
+          response_id: 'resp_old',
+          item_id: 'old_late',
+          delta: Buffer.from([2, 0]).toString('base64'),
+        }));
+        socket.send(JSON.stringify({
+          type: 'response.output_audio.delta',
+          response_id: 'resp_new',
+          item_id: 'new_audio',
+          delta: Buffer.from([3, 0]).toString('base64'),
+        }));
+        socket.send(JSON.stringify({
+          type: 'response.done',
+          response: { id: 'resp_old', status: 'cancelled' },
+        }));
+        socket.send(JSON.stringify({
+          type: 'response.output_audio.done',
+          response_id: 'resp_new',
+          item_id: 'new_audio',
+        }));
+        socket.send(JSON.stringify({
+          type: 'response.done',
+          response: { id: 'resp_new', status: 'completed' },
+        }));
+      });
+    });
+
+    const session = new RealtimeSession({
+      model: 'gpt-realtime-2.1-mini',
+      voice: 'marin',
+      instructions: getSessionInstructions(),
+      urlOverride: `ws://127.0.0.1:${port}`,
+    });
+    session.on('error', () => {});
+    const audio = collect<{ itemId: string; chunk: ArrayBuffer }>(session, 'audio-delta');
+    try {
+      await session.askText('first');
+      await vi.waitFor(() => expect(audio.map((item) => item.itemId)).toContain('old_initial'));
+      session.cancelResponse();
+      await session.askText('second');
+      await waitFor<{ responseId: string }>(
+        session,
+        'response-done',
+        (done) => done.responseId === 'resp_new',
+      );
+      expect(audio.map((item) => item.itemId)).toEqual(['old_initial', 'new_audio']);
+    } finally {
+      session.close();
+      await new Promise<void>((resolve) => wss.close(() => resolve()));
+    }
   });
 
   it('voice turn: pre-connect appends are queued; commit yields user transcript + canned response', async () => {

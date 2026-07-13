@@ -711,6 +711,7 @@ function App(): React.JSX.Element {
       ? hintText({
           state: assistantState,
           hotkeyLabel: hoverCfg?.hotkeyLabel ?? 'Ctrl+Alt (left alt)',
+          fullRealtimeMode: hoverCfg?.fullRealtimeMode ?? false,
           lastSpokeAt: lastSpokeAtRef.current,
           now: Date.now(),
           captionShowing: caption !== null,

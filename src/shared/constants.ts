@@ -67,4 +67,4 @@ export const CAPTURE_JPEG_QUALITY = 80;
 export const PANEL_WIDTH = 380;
 export const PANEL_HEIGHT = 520;
 
-export const APP_NAME = 'Clicky';
+export const APP_NAME = 'Buddy';

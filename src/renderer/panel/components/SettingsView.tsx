@@ -129,7 +129,7 @@ export function SettingsView({
                 </>
               ) : (
                 <span className="text-xs text-muted-foreground">
-                  no key yet — clicky can&rsquo;t talk without one
+                  no key yet — buddy can&rsquo;t talk without one
                 </span>
               )}
             </div>
@@ -211,7 +211,7 @@ export function SettingsView({
                   )}
                 </div>
                 <p className="text-[11px] leading-relaxed text-muted-foreground/80">
-                  clicky uses your chatgpt plan for pointing &amp; agents. voice still needs an
+                  buddy uses your chatgpt plan for pointing &amp; agents. voice still needs an
                   openai api key.
                 </p>
                 <div className="flex min-h-7 items-center gap-2.5 border-t pt-2.5">
@@ -222,6 +222,22 @@ export function SettingsView({
                     id="prefer-api-grounding"
                     checked={settings.preferApiKeyGrounding}
                     onCheckedChange={(checked) => patch({ preferApiKeyGrounding: checked })}
+                  />
+                </div>
+                <div className="flex min-h-7 items-center gap-2.5 border-t pt-2.5">
+                  <div className="flex flex-1 flex-col gap-0.5">
+                    <Label htmlFor="computer-use" className="text-xs font-normal text-muted-foreground">
+                      let sol click &amp; type
+                    </Label>
+                    <span className="text-[10px] leading-relaxed text-muted-foreground/70">
+                      realtime can only delegate; sol chooses every action in chatgpt fast mode.
+                    </span>
+                  </div>
+                  <Switch
+                    id="computer-use"
+                    checked={settings.computerUseEnabled}
+                    disabled={!settings.codexValid}
+                    onCheckedChange={(checked) => patch({ computerUseEnabled: checked })}
                   />
                 </div>
               </>
@@ -320,21 +336,40 @@ export function SettingsView({
                 below.
               </p>
             ) : null}
+            <div className="flex min-h-7 items-center gap-2.5 border-t pt-2.5">
+              <Label
+                htmlFor="full-realtime-mode"
+                className="flex-1 text-xs font-normal text-muted-foreground"
+              >
+                full realtime mode
+              </Label>
+              <Switch
+                id="full-realtime-mode"
+                checked={settings.fullRealtimeMode}
+                onCheckedChange={(checked) => patch({ fullRealtimeMode: checked })}
+              />
+            </div>
+            <p className="text-[11px] leading-relaxed text-muted-foreground/80">
+              keeps the mic open and uses voice activity detection for a natural back-and-forth.
+              a fresh screen capture is attached to every speech turn.
+            </p>
             <div className="flex min-h-7 items-center gap-2.5">
               <Label className="flex-1 text-xs font-normal text-muted-foreground">
-                push to talk
+                {settings.fullRealtimeMode ? 'start / stop realtime' : 'push to talk'}
               </Label>
               <Kbd className="border border-b-2 px-2 text-foreground">{settings.hotkeyLabel}</Kbd>
             </div>
             <p className="text-[11px] leading-relaxed text-muted-foreground/80">
-              hold both keys and talk; let go to send. fixed for now.
+              {settings.fullRealtimeMode
+                ? 'press once to activate; press again to deactivate. fixed for now.'
+                : 'hold both keys and talk; let go to send. fixed for now.'}
             </p>
           </CardContent>
         </Card>
 
         <div className="flex items-center gap-2.5 rounded-lg border border-dashed px-3.5 py-2.5 text-xs text-muted-foreground">
           <span>🪄</span>
-          <span>agent mode is ready — say “clicky, agent…” to send off research.</span>
+          <span>agent mode is ready — say “buddy, agent…” to send off research.</span>
         </div>
       </div>
     </ScrollArea>

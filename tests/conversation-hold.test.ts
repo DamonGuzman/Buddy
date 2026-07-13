@@ -13,6 +13,10 @@
 import { createRequire } from 'node:module';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+const captureAllDisplaysMock = vi.hoisted(() =>
+  vi.fn<() => Promise<Array<Record<string, unknown>>>>(() => Promise.resolve([])),
+);
+
 vi.mock('electron', () => ({
   app: {
     getPath: () => 'unused-in-tests',
@@ -28,7 +32,7 @@ vi.mock('electron', () => ({
 }));
 
 vi.mock('../src/main/capture', () => ({
-  captureAllDisplays: () => Promise.resolve([]),
+  captureAllDisplays: captureAllDisplaysMock,
 }));
 
 vi.mock('../src/main/windows/panel', () => ({
@@ -45,7 +49,11 @@ type MockServer = Awaited<ReturnType<typeof mock.createMockServer>>;
 
 // ---------------------------------------------------------------------------
 
-function fakeDeps() {
+function fakeDeps(phoneAudio?: {
+  capture: (command: 'start' | 'stop') => void;
+  playback: (command: 'stop' | 'flush') => void;
+  sendAudio: (chunk: ArrayBuffer) => void;
+}, fullRealtimeMode = false) {
   const settings = {
     get: () => ({
       apiKeyPresent: false,
@@ -53,6 +61,7 @@ function fakeDeps() {
       voice: 'marin',
       captionsEnabled: false,
       micDeviceId: '',
+      fullRealtimeMode,
       hotkeyLabel: 'Ctrl+Alt',
     }),
     getApiKey: () => null,
@@ -64,6 +73,7 @@ function fakeDeps() {
     settings: settings as never,
     overlays: overlays as never,
     panel: panel as never,
+    ...(phoneAudio ? { phoneAudio } : {}),
   };
 }
 
@@ -94,6 +104,8 @@ describe('Conversation: quick barge-in tap commit guard (M9)', () => {
     for (const c of conversations.splice(0)) c.close();
     nowOffset = 0;
     server.clientEvents.length = 0;
+    captureAllDisplaysMock.mockReset();
+    captureAllDisplaysMock.mockResolvedValue([]);
   });
 
   function makeConversation() {
@@ -139,5 +151,131 @@ describe('Conversation: quick barge-in tap commit guard (M9)', () => {
     // The mock answers and the turn settles back to idle (no error state).
     await vi.waitFor(() => expect(conversation.assistantState()).toBe('idle'), { timeout: 10_000 });
     expect(conversation.turnTimingsHistory().length).toBeGreaterThan(0);
+  });
+
+  it('routes capture and response PCM through the disposable phone transport', async () => {
+    const capture = vi.fn();
+    const playback = vi.fn();
+    const sendAudio = vi.fn();
+    const conversation = new Conversation(fakeDeps({ capture, playback, sendAudio }));
+    conversations.push(conversation);
+
+    conversation.holdStart();
+    expect(capture).toHaveBeenCalledWith('start');
+    for (let i = 0; i < 6; i++) conversation.handleAudioChunk(chunkOfMs(60));
+    nowOffset = 400;
+    conversation.holdEnd();
+    expect(capture).toHaveBeenCalledWith('stop');
+
+    await vi.waitFor(() => expect(sendAudio).toHaveBeenCalled(), { timeout: 10_000 });
+    expect(sendAudio.mock.calls[0]?.[0]).toBeInstanceOf(ArrayBuffer);
+  });
+
+  it('toggles a server-VAD open-mic session and returns to listening after each turn', async () => {
+    const freshCapture = {
+      jpegBase64: Buffer.from('fresh-realtime-screen').toString('base64'),
+      meta: {
+        screenIndex: 0,
+        displayId: 1,
+        imageW: 1280,
+        imageH: 720,
+        displayBounds: { x: 0, y: 0, width: 1280, height: 720 },
+        scaleFactor: 1,
+        isActive: true,
+      },
+    };
+    captureAllDisplaysMock.mockResolvedValue([freshCapture]);
+    const capture = vi.fn();
+    const playback = vi.fn();
+    const sendAudio = vi.fn();
+    const conversation = new Conversation(
+      fakeDeps({ capture, playback, sendAudio }, true),
+    );
+    conversations.push(conversation);
+
+    await conversation.toggleFullRealtime();
+    expect(capture).toHaveBeenCalledWith('start');
+    expect(captureAllDisplaysMock).not.toHaveBeenCalled();
+    expect(conversation.assistantState()).toBe('listening');
+    conversation.handleAudioChunk(chunkOfMs(60));
+    await vi.waitFor(() => {
+      expect(server.clientEvents.some((event) => event.type === 'input_audio_buffer.append')).toBe(
+        true,
+      );
+    });
+    expect(server.clientEvents.some((event) => event.type === 'input_audio_buffer.commit')).toBe(
+      false,
+    );
+    expect(server.clientEvents.some((event) => event.type === 'response.create')).toBe(false);
+    await vi.waitFor(() => {
+      const update = server.sessionUpdates.at(-1)?.session as {
+        audio?: { input?: { turn_detection?: Record<string, unknown> | null } };
+      };
+      expect(update.audio?.input?.turn_detection).toMatchObject({
+        type: 'server_vad',
+        create_response: false,
+      });
+    });
+
+    const beforeTurns = server.clientEvents.length;
+    const socket = [...server.wss.clients].at(-1);
+    expect(socket).toBeDefined();
+    socket!.send(JSON.stringify({
+      type: 'input_audio_buffer.speech_started',
+      item_id: 'continuous_user_1',
+    }));
+    socket!.send(JSON.stringify({
+      type: 'input_audio_buffer.speech_stopped',
+      item_id: 'continuous_user_1',
+    }));
+    await vi.waitFor(() => expect(conversation.assistantState()).toBe('thinking'));
+    socket!.send(JSON.stringify({
+      type: 'input_audio_buffer.committed',
+      item_id: 'continuous_user_1',
+    }));
+
+    await vi.waitFor(() => {
+      expect(conversation.lastTurnTimings()?.tResponseDone).toBeTypeOf('number');
+      expect(conversation.assistantState()).toBe('listening');
+    });
+    expect(captureAllDisplaysMock).toHaveBeenCalledTimes(1);
+
+    socket!.send(JSON.stringify({
+      type: 'input_audio_buffer.speech_started',
+      item_id: 'continuous_user_2',
+    }));
+    socket!.send(JSON.stringify({
+      type: 'input_audio_buffer.speech_stopped',
+      item_id: 'continuous_user_2',
+    }));
+    socket!.send(JSON.stringify({
+      type: 'input_audio_buffer.committed',
+      item_id: 'continuous_user_2',
+    }));
+    await vi.waitFor(() => {
+      expect(captureAllDisplaysMock).toHaveBeenCalledTimes(2);
+      expect(
+        server.clientEvents.filter((event) => event.type === 'response.create'),
+      ).toHaveLength(2);
+      expect(conversation.assistantState()).toBe('listening');
+    });
+
+    const turnEvents = server.clientEvents.slice(beforeTurns);
+    const contextIndexes = turnEvents
+      .map((event, index) => ({ event, index }))
+      .filter(({ event }) => event.type === 'conversation.item.create')
+      .map(({ index }) => index);
+    const responseIndexes = turnEvents
+      .map((event, index) => ({ event, index }))
+      .filter(({ event }) => event.type === 'response.create')
+      .map(({ index }) => index);
+    expect(contextIndexes).toHaveLength(2);
+    expect(responseIndexes).toHaveLength(2);
+    expect(responseIndexes[0]).toBeGreaterThan(contextIndexes[0]!);
+    expect(responseIndexes[1]).toBeGreaterThan(contextIndexes[1]!);
+
+    await conversation.toggleFullRealtime();
+    expect(capture).toHaveBeenLastCalledWith('stop');
+    expect(conversation.assistantState()).toBe('idle');
   });
 });

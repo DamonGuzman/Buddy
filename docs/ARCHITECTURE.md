@@ -1,27 +1,37 @@
-# Clicky for Windows — MVP Architecture & Scope
+# Buddy for Windows — MVP Architecture & Scope
 
 > The single source of truth for this MVP. All implementation agents read this first.
 > Product research: see `docs/RESEARCH.md` (copied from the original teardown).
 
 ## 1. Product in one paragraph
 
-A Windows tray app. You **hold Ctrl+Alt (left Alt) and talk**. It screenshots your monitors, streams your
-voice + the screenshots to a realtime speech-to-speech model (OpenAI `gpt-realtime` family), speaks
+A Windows tray app. By default you **hold Ctrl+Alt (left Alt) and talk**; an opt-in full realtime
+mode turns the same hotkey into start/stop for an open-mic conversation. It screenshots your monitors,
+streams your voice + the screenshots to a realtime speech-to-speech model (OpenAI `gpt-realtime` family), speaks
 the answer back, and **flies an animated "buddy" pointer** (a friendly blue triangle) across a
 transparent overlay to physically point at the UI element it's describing. No chat window. Warm,
-lowercase, mentor-over-your-shoulder personality. Capture happens **only while the hotkey is held**
-and is always signposted by a visible indicator.
+lowercase, mentor-over-your-shoulder personality. Capture happens **only on an explicit hotkey or
+typed action** and is always signposted by a visible indicator.
 
 ## 2. MVP scope
 
 **In:**
 - Hold-to-talk global hotkey (default **Ctrl+Alt**, both held; release = send). Only the LEFT
   Alt participates — Right Alt is AltGr on international layouts and never triggers.
+- Opt-in full realtime mode: press the hotkey once to connect and keep the mic streaming with
+  server VAD; each detected speech turn gets a fresh multi-monitor capture before its response.
+  Press the hotkey again to stop. Lock/suspend always stops it.
 - Multi-monitor screenshot capture on hotkey press (resized ≤2048px longest edge, JPEG ~80%;
   raised from 1280 in M8.6 for pointing accuracy — see docs/EVAL.md §8).
-- OpenAI Realtime API session over **WebSocket** (PCM16 audio append / manual commit — push-to-talk,
-  no server VAD). Audio out streamed and played as it arrives.
+- OpenAI Realtime API session over **WebSocket** (PCM16 audio append; manual commit for push-to-talk,
+  server VAD with automatic audio commit/interruption and client-created responses in full realtime
+  mode so per-turn screenshots can be attached first). Audio streams as it arrives.
 - `point_at` **tool call** drives the pointer (no regex tag parsing).
+- Opt-in computer use: the realtime voice model has only a `use_computer` delegation tool.
+  Executable click/type/key tools exist exclusively in a separate `gpt-5.6-sol` Responses loop
+  over the user's ChatGPT subscription with `service_tier: priority` (fast mode). Sol inspects a
+  fresh explicit screenshot after every single action; the realtime model never receives direct
+  mouse or keyboard access.
 - Per-monitor transparent click-through always-on-top overlay: buddy triangle, quadratic-bezier
   arc animation to targets, optional caption bubble (the spoken text), listening/thinking indicator.
 - Tray icon + small control panel window: status, live transcript, **text-input fallback** (typed
@@ -34,7 +44,7 @@ and is always signposted by a visible indicator.
 - **Mock Realtime server** (local WS, speaks the same protocol subset) + **debug harness** for QA.
 
 **Out (stub or defer):**
-- Agent mode ("Clicky, agent") — main-process, read-only research agents with hosted web search,
+- Agent mode ("Buddy, agent") — main-process, read-only research agents with hosted web search,
   guarded web fetch, persisted panel results, cancellation, and voice handoff/return.
 - Cloudflare Worker / ephemeral-token proxy (MVP is local-key, single user).
 - Integrations (Notion/Gmail/Calendar/Linear), wake word, ElevenLabs, macOS build (keep platform
@@ -115,7 +125,7 @@ time but its raw coordinates drift scene-dependently. `point_at` is therefore GR
 buddy flies: `src/main/grounding/` keeps a persistent PowerShell daemon (`snapper.ps1`, embedded
 at build time, spawned lazily, restarted on crash, killed on quit) that resolves the top-level
 window under the model's point via Win32 `WindowFromPoint` (mouse hit-test semantics — skips
-Clicky's own click-through overlays; the daemon makes itself Per-Monitor-V2 DPI-aware so user32
+Buddy's own click-through overlays; the daemon makes itself Per-Monitor-V2 DPI-aware so user32
 and UIA agree on physical px) and enumerates nearby named UIA elements (rect-pruned DFS,
 CacheRequest-batched, node/time budgets). Selection is pure TS (`scoring.ts`, unit-tested):
 normalize the spoken label and element Names, fuzzy token similarity with a small proximity
@@ -151,8 +161,9 @@ production code path: docs/EVAL.md §10.
 
 ## 7. Realtime protocol subset (v1 GA WS API)
 
-- `session.update` (instructions, voice, tools, `turn_detection: null`, modalities, in/out audio
-  format `pcm16`).
+- `session.update` (instructions, voice, tools, modalities, in/out audio format `pcm16`):
+  `turn_detection: null` for push-to-talk, or `server_vad` with automatic audio commit/interruption
+  and `create_response: false` for full realtime mode.
 - Turn: `input_audio_buffer.append`* → `input_audio_buffer.commit` +
   `conversation.item.create` (screenshots as `input_image` content parts) → `response.create`.
 - Text fallback: `conversation.item.create` (text + images) → `response.create`.
@@ -164,7 +175,7 @@ production code path: docs/EVAL.md §10.
 ## 7b. Error catalog (M11)
 
 Every user-reachable failure is classified into `src/main/errors.ts` — a pure catalog
-(kind → lowercase clicky copy: what happened + what to do) + `classifyError()` (server error
+(kind → lowercase Buddy copy: what happened + what to do) + `classifyError()` (server error
 codes, HTTP-rejected WS upgrades, network errno strings, handshake timeouts). Consumers:
 `conversation.failTurn`, the conversation's session `error` listener (mid-session events are
 no longer a wordless red flash; mid-hold connect failures are deferred to commit resolution),

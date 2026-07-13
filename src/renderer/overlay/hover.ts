@@ -148,6 +148,7 @@ export function restFromFrac(
 export interface HintTextInput {
   state: AssistantState;
   hotkeyLabel: string;
+  fullRealtimeMode?: boolean;
   /** Epoch ms when the assistant last finished speaking; null = never. */
   lastSpokeAt: number | null;
   now: number;
@@ -166,7 +167,11 @@ export function hintText(input: HintTextInput): { text: string; sub?: string } |
   const hk = input.hotkeyLabel.toLowerCase();
   const recent =
     input.lastSpokeAt !== null && input.now - input.lastSpokeAt < RECENT_RESPONSE_MS;
-  const text = recent ? `want more? hold ${hk} and ask me anything` : `hold ${hk} and talk to me`;
+  const text = input.fullRealtimeMode
+    ? `press ${hk} to start realtime mode`
+    : recent
+      ? `want more? hold ${hk} and ask me anything`
+      : `hold ${hk} and talk to me`;
   return input.interactive ? { text, sub: 'click me to open the panel' } : { text };
 }
 

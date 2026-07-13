@@ -157,6 +157,7 @@ describe('CodexResponsesSession: request shape + text streaming', () => {
     expect(body['stream']).toBe(true);
     expect(body['store']).toBe(false);
     expect(body['reasoning']).toEqual({ effort: 'low' });
+    expect(body['service_tier']).toBe('priority');
     expect(body['tool_choice']).toBe('auto');
     expect(Array.isArray(body['tools'])).toBe(true);
     expect(body['previous_response_id']).toBeUndefined();
@@ -276,6 +277,25 @@ describe('CodexResponsesSession: function calls + tool-output continue', () => {
     const r = await session.continue({});
     expect(fetched).toBe(0);
     expect(r.responseId).toBeNull();
+  });
+
+  it('continueWithTurn() adds tool output followed by a fresh screenshot observation', async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const session = makeSession(async (_url, init) => {
+      bodies.push(JSON.parse(init.body as string) as Record<string, unknown>);
+      return streamResponse(sse([completed(`resp_${bodies.length}`)]));
+    });
+    await session.submit({ text: 'operate' }, {});
+    session.sendToolOutput('call_1', { ok: true });
+    await session.continueWithTurn({
+      context: 'fresh screen',
+      text: 'inspect again',
+      images: [{ jpegBase64: 'ZnJlc2g=' }],
+    });
+    const input = bodies[1]!['input'] as Array<Record<string, unknown>>;
+    expect(input.at(-2)).toMatchObject({ type: 'function_call_output', call_id: 'call_1' });
+    expect(input.at(-1)).toMatchObject({ type: 'message', role: 'user' });
+    expect(JSON.stringify(input.at(-1))).toContain('data:image/jpeg;base64,ZnJlc2g=');
   });
 });
 

@@ -223,7 +223,7 @@ export function App(): React.JSX.Element {
       {view === 'chat' && noKey ? (
         <Card className="mx-4 mt-3 flex-row items-center gap-2.5 rounded-lg border-clicky/30 bg-clicky/10 px-3.5 py-2.5 shadow-none">
           <span className="flex-1 text-xs leading-relaxed">
-            add your openai key to give clicky a voice
+            add your openai key to give buddy a voice
           </span>
           <Button type="button" size="sm" className="h-7 rounded-full px-3 text-xs" onClick={() => setView('settings')}>
             open settings
@@ -247,11 +247,12 @@ export function App(): React.JSX.Element {
             <Transcript
               entries={entries}
               hotkeyLabel={settings?.hotkeyLabel ?? 'Ctrl+Alt (left alt)'}
+              fullRealtimeMode={settings?.fullRealtimeMode ?? false}
               hookAlive={runtime?.hookAlive ?? true}
             />
             <Composer
               disabled={composerDisabled}
-              disabledReason="add your openai key in settings so clicky can connect"
+              disabledReason="add your openai key in settings so buddy can connect"
               busy={assistantState === 'thinking'}
               onSend={(text) => void clicky.askText(text)}
             />

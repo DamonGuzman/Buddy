@@ -21,6 +21,9 @@
  * - sleep/resume: notifySystemResume() terminates a possibly half-open
  *   socket; a per-response watchdog fails responses with no server activity
  *   for ~30s; a WS ping runs while a response is active.
+ * - response isolation: direct response starts are exclusive and server
+ *   events are accepted only for the active response id. Late audio from a
+ *   cancelled response can no longer leak into the next playback epoch.
  */
 
 import { EventEmitter } from 'node:events';
@@ -69,6 +72,12 @@ export interface RealtimeSessionEvents {
   status: [SessionStatus];
   /** Async ASR transcript of the user's committed audio (onUserTranscript). */
   'user-transcript': [{ itemId: string; text: string }];
+  /** Server VAD detected that the user started speaking. */
+  'speech-started': [{ itemId: string }];
+  /** Server VAD detected the end of the user's utterance. */
+  'speech-stopped': [{ itemId: string }];
+  /** Server VAD committed the user's completed audio item to the conversation. */
+  'audio-committed': [{ itemId: string }];
   /**
    * Assistant spoken-transcript update: `text` is the FULL text so far for
    * this item (CaptionUpdate semantics), `done` marks the final update.
@@ -102,6 +111,8 @@ export interface RealtimeSessionOptions {
   getApiKey?: () => string | null;
   /** Tools for session.update (persona.getToolDefinitions()). Default: []. */
   tools?: RealtimeFunctionTool[];
+  /** Manual commit (default) or continuous server-VAD turn detection. */
+  turnDetection?: 'manual' | 'server_vad';
   /** Explicit ws:// endpoint (mock mode). Wins over CLICKY_MOCK_URL. */
   urlOverride?: string;
   /** Keep-warm idle window before a graceful close. Default 5 minutes. */
@@ -157,6 +168,12 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
 
   /** True between response.create and response.done/error. */
   private responseActive = false;
+  /** Server id learned from response.created for the active request. */
+  private activeResponseId: string | null = null;
+  /** Cancelled/superseded response ids whose late stream events are ignored. */
+  private staleResponseIds = new Set<string>();
+  /** Cancels issued before response.created; WebSocket event order identifies them later. */
+  private unidentifiedCancelledResponses = 0;
   /** F1 (M4): a continue was requested mid-response; fire it after done. */
   private continuePending = false;
   private responseWatchdog: NodeJS.Timeout | null = null;
@@ -252,6 +269,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
    */
   async commitAudioAndRespond(images: TurnImage[], contextText: string): Promise<void> {
     await this.connect();
+    this.assertResponseIdle();
     this.send({ type: 'input_audio_buffer.commit' });
     if (images.length > 0 || contextText.length > 0) {
       this.send({
@@ -265,6 +283,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
   /** Text fallback: typed question (+ optional screenshots/context). */
   async askText(text: string, images: TurnImage[] = [], contextText = ''): Promise<void> {
     await this.connect();
+    this.assertResponseIdle();
     const content: UserContentPart[] = this.buildImageContent(images, contextText);
     content.push({ type: 'input_text', text });
     this.send({
@@ -274,14 +293,58 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     this.createResponse();
   }
 
-  /** Inject trusted app context and ask the voice model to speak it naturally. */
-  async injectSystemAndRespond(text: string): Promise<void> {
+  /**
+   * Add screen context without starting a response.
+   */
+  async addContext(images: TurnImage[], contextText = ''): Promise<void> {
     await this.connect();
+    if (images.length === 0 && contextText.length === 0) return;
     this.send({
       type: 'conversation.item.create',
-      item: { type: 'message', role: 'system', content: [{ type: 'input_text', text }] },
+      item: {
+        type: 'message',
+        role: 'user',
+        content: this.buildImageContent(images, contextText),
+      },
+    });
+  }
+
+  /**
+   * Respond to a server-VAD audio item after adding the screenshots captured
+   * for that turn. The caller waits for input_audio_buffer.committed first,
+   * so this context is ordered after the user's audio and before the response.
+   */
+  async respondToVadTurn(images: TurnImage[], contextText = ''): Promise<void> {
+    await this.connect();
+    this.assertResponseIdle();
+    if (images.length > 0 || contextText.length > 0) {
+      this.send({
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: this.buildImageContent(images, contextText),
+        },
+      });
+    }
+    this.createResponse();
+  }
+
+  /**
+   * Inject an automated user-role turn and ask the voice model to respond.
+   * `shouldStart` is checked after connection so a real user turn can preempt
+   * a background completion that was still waiting on the handshake.
+   */
+  async injectUserAndRespond(text: string, shouldStart: () => boolean = () => true): Promise<boolean> {
+    await this.connect();
+    if (!shouldStart()) return false;
+    this.assertResponseIdle();
+    this.send({
+      type: 'conversation.item.create',
+      item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
     });
     this.createResponse();
+    return true;
   }
 
   /** Send a function_call_output back for a tool call. */
@@ -312,9 +375,33 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
   /** Cancel the in-progress response (no-op when disconnected). */
   cancelResponse(): void {
     this.continuePending = false; // a cancelled turn must not auto-continue
-    if (!this.isSocketOpen()) return;
-    this.send({ type: 'response.cancel' });
+    if (!this.responseActive) return;
+    if (this.activeResponseId !== null) {
+      this.staleResponseIds.add(this.activeResponseId);
+    } else {
+      // response.created is ordered after the response.create we already sent,
+      // so the next unidentified created id belongs to this cancelled request.
+      this.unidentifiedCancelledResponses += 1;
+    }
+    if (this.isSocketOpen()) {
+      this.send({
+        type: 'response.cancel',
+        ...(this.activeResponseId !== null ? { response_id: this.activeResponseId } : {}),
+      });
+    }
     this.setResponseActive(false);
+    this.activeResponseId = null;
+  }
+
+  /** Remove model audio the user never heard after a WebSocket VAD interruption. */
+  truncateAudio(itemId: string, audioEndMs: number): void {
+    if (!this.isSocketOpen() || itemId.length === 0) return;
+    this.send({
+      type: 'conversation.item.truncate',
+      item_id: itemId,
+      content_index: 0,
+      audio_end_ms: Math.max(0, Math.round(audioEndMs)),
+    });
   }
 
   /**
@@ -344,11 +431,14 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     this.closedByUser = true;
     this.clearTimers();
     this.setResponseActive(false);
+    this.activeResponseId = null;
     this.continuePending = false;
     this.sendQueue = [];
     // F1 (retention): release per-turn accumulation.
     this.transcripts.clear();
     this.toolArgs.clear();
+    this.staleResponseIds.clear();
+    this.unidentifiedCancelledResponses = 0;
     this.lastTurnCapture = null;
     const ws = this.ws;
     this.ws = null;
@@ -622,6 +712,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     if (!this.responseActive) return;
     console.warn(`[realtime] failing active response: ${reason}`);
     this.setResponseActive(false);
+    this.activeResponseId = null;
     this.continuePending = false;
     this.transcripts.clear();
     this.toolArgs.clear();
@@ -643,7 +734,19 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
           input: {
             format: PCM_FORMAT,
             transcription: { model: 'gpt-4o-mini-transcribe' },
-            turn_detection: null,
+            turn_detection:
+              this.options.turnDetection === 'server_vad'
+                ? {
+                    type: 'server_vad',
+                    threshold: 0.5,
+                    prefix_padding_ms: 300,
+                    silence_duration_ms: 500,
+                    // Let VAD commit the audio, then attach that turn's fresh
+                    // screenshots before the client requests the response.
+                    create_response: false,
+                    interrupt_response: true,
+                  }
+                : null,
           },
           output: { format: PCM_FORMAT, voice: this.options.voice },
         },
@@ -704,10 +807,27 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     return content;
   }
 
+  private assertResponseIdle(): void {
+    if (this.responseActive) {
+      throw new Error('a realtime response is already active');
+    }
+  }
+
   private createResponse(): void {
-    this.send({ type: 'response.create' });
+    this.assertResponseIdle();
+    this.activeResponseId = null;
     this.setResponseActive(true);
+    this.send({ type: 'response.create' });
     this.emit('response-requested'); // F1 (M3): single source of truth
+  }
+
+  /** True only for the current response; cancelled/parallel stream debris is dropped. */
+  private acceptsResponseEvent(responseId: string | undefined): boolean {
+    if (!responseId) return this.responseActive;
+    if (this.staleResponseIds.has(responseId)) return false;
+    if (!this.responseActive) return false;
+    if (this.activeResponseId === null) this.activeResponseId = responseId;
+    return this.activeResponseId === responseId;
   }
 
   /** Serialize + send, queueing while not ready (flushed on session.created). */
@@ -760,10 +880,61 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     switch (evt.type) {
       case 'session.created':
       case 'session.updated':
-      case 'response.created':
       case 'rate_limits.updated':
       case 'response.output_item.added':
         break;
+
+      case 'input_audio_buffer.committed':
+        this.emit('audio-committed', { itemId: evt.item_id });
+        break;
+
+      case 'input_audio_buffer.speech_started': {
+        // With interrupt_response=true the server cancels the active model
+        // response. Mark it stale immediately so late WebSocket audio cannot
+        // leak while the app stops local playback.
+        if (this.options.turnDetection === 'server_vad' && this.responseActive) {
+          if (this.activeResponseId !== null) {
+            this.staleResponseIds.add(this.activeResponseId);
+          } else {
+            this.unidentifiedCancelledResponses += 1;
+          }
+          this.continuePending = false;
+          this.setResponseActive(false);
+          this.activeResponseId = null;
+        }
+        this.emit('speech-started', { itemId: evt.item_id });
+        break;
+      }
+
+      case 'input_audio_buffer.speech_stopped':
+        this.emit('speech-stopped', { itemId: evt.item_id });
+        break;
+
+      case 'response.created': {
+        const responseId = evt.response?.id;
+        if (!responseId) break;
+        if (this.unidentifiedCancelledResponses > 0) {
+          this.unidentifiedCancelledResponses -= 1;
+          this.staleResponseIds.add(responseId);
+          break;
+        }
+        if (!this.responseActive) {
+          this.staleResponseIds.add(responseId);
+          console.warn(`[realtime] ignoring unexpected response ${responseId}`);
+          this.send({ type: 'response.cancel', response_id: responseId });
+          break;
+        }
+        if (this.activeResponseId === null) {
+          this.activeResponseId = responseId;
+        } else if (this.activeResponseId !== responseId) {
+          this.staleResponseIds.add(responseId);
+          console.warn(
+            `[realtime] cancelling parallel response ${responseId}; active is ${this.activeResponseId}`,
+          );
+          this.send({ type: 'response.cancel', response_id: responseId });
+        }
+        break;
+      }
 
       case 'conversation.item.input_audio_transcription.completed':
         this.emit('user-transcript', { itemId: evt.item_id, text: evt.transcript });
@@ -771,6 +942,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
 
       case 'response.output_audio_transcript.delta':
       case 'response.output_text.delta': {
+        if (!this.acceptsResponseEvent(evt.response_id)) break;
         const text = (this.transcripts.get(evt.item_id) ?? '') + evt.delta;
         this.transcripts.set(evt.item_id, text);
         this.emit('assistant-transcript', { itemId: evt.item_id, text, done: false });
@@ -778,6 +950,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       }
 
       case 'response.output_audio_transcript.done': {
+        if (!this.acceptsResponseEvent(evt.response_id)) break;
         const text = evt.transcript ?? this.transcripts.get(evt.item_id) ?? '';
         this.transcripts.set(evt.item_id, text);
         this.emit('assistant-transcript', { itemId: evt.item_id, text, done: true });
@@ -785,6 +958,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       }
 
       case 'response.output_audio.delta': {
+        if (!this.acceptsResponseEvent(evt.response_id)) break;
         const buf = Buffer.from(evt.delta, 'base64');
         const chunk = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
         this.emit('audio-delta', { itemId: evt.item_id, chunk });
@@ -792,23 +966,54 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       }
 
       case 'response.output_audio.done':
+        if (!this.acceptsResponseEvent(evt.response_id)) break;
         this.emit('audio-done', { itemId: evt.item_id });
         break;
 
       case 'response.function_call_arguments.delta': {
+        if (!this.acceptsResponseEvent(evt.response_id)) break;
         this.toolArgs.set(evt.call_id, (this.toolArgs.get(evt.call_id) ?? '') + evt.delta);
         break;
       }
 
       case 'response.function_call_arguments.done':
+        if (!this.acceptsResponseEvent(evt.response_id)) break;
         this.handleToolCallDone(evt.call_id, evt.name, evt.arguments);
         break;
 
       case 'response.done': {
+        const status = evt.response.status ?? 'completed';
+        const responseId = evt.response.id ?? '';
+        if (responseId && this.staleResponseIds.delete(responseId)) {
+          // The app-level response ledger still needs the cancelled request's
+          // completion, but it must not mutate the newer active response.
+          this.emit('response-done', {
+            responseId,
+            status,
+            usage: evt.response.usage,
+          });
+          break;
+        }
+        if (
+          responseId &&
+          this.activeResponseId !== null &&
+          responseId !== this.activeResponseId
+        ) {
+          console.warn(
+            `[realtime] ignoring completion for non-active response ${responseId}; ` +
+              `active is ${this.activeResponseId}`,
+          );
+          this.emit('response-done', {
+            responseId,
+            status,
+            usage: evt.response.usage,
+          });
+          break;
+        }
         this.setResponseActive(false);
+        this.activeResponseId = null;
         this.transcripts.clear();
         this.toolArgs.clear();
-        const status = evt.response.status ?? 'completed';
         const wantContinue = this.continuePending && status === 'completed';
         this.continuePending = false;
         // F1 fix (M4): the deferred tool-output continue fires HERE — and
@@ -816,7 +1021,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
         // never dips to zero in the middle of a multi-response turn (M5).
         if (wantContinue) this.createResponse();
         this.emit('response-done', {
-          responseId: evt.response.id ?? '',
+          responseId,
           status,
           usage: evt.response.usage,
         });

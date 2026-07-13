@@ -55,6 +55,7 @@ export class CodexAgentBackend implements AgentBackend {
           stream: true,
           store: false,
           reasoning: { effort: req.effort },
+          service_tier: 'priority',
         }),
       });
       if (!response.ok) {

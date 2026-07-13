@@ -1,18 +1,18 @@
-# Clicky for Windows — Project Status
+# Buddy for Windows — Project Status
 
-_Last updated: 2026-07-12. Single-source status for the MVP and follow-on work._
+_Last updated: 2026-07-13. Single-source status for the MVP and follow-on work._
 _Companion docs: [ARCHITECTURE](docs/ARCHITECTURE.md) · [EVAL](docs/EVAL.md) · [COORD-STUDY](docs/COORD-STUDY.md) · [AGENT-MODE](docs/AGENT-MODE.md)_
 
 ## TL;DR
 
-Clicky is a Windows tray companion: hold **Ctrl + left-Alt**, talk, and it sees the monitors,
-answers in voice, and flies its buddy pointer to the UI element it describes. Typed questions and
+Buddy is a Windows tray companion: hold **Ctrl + left-Alt**, talk, and Buddy sees the monitors,
+answers in voice, and flies its pointer to the UI element it describes. Typed questions and
 read-only background research agents use the user's ChatGPT plan; realtime voice uses an OpenAI API
 key. The app is built, tested, packaged, upgraded in place, and running on this machine.
 
 **Current source:** `main`, M18 Agent Mode + subscription text path + in-app ChatGPT sign-in.
-**Installed build:** local M18 NSIS build at `%LOCALAPPDATA%\Programs\heyclicky\Clicky.exe`.
-SHA-256: `CC718B2F6A1AE30A7CE47BA7C8233453FE99E8FBBB0D5AD9D2303DEB885449E0`.
+**Installed build:** local M18 compatibility build at `%LOCALAPPDATA%\Programs\heyclicky\Buddy App.exe`.
+SHA-256: `7614732DB20A59E79F698ACB83456E1CB8D08B4DF2FE3966C3580F7B0F9B6EEA`.
 Settings migrated to schema v2; encrypted key, model, voice, captions, mic, and buddy position were
 preserved.
 
@@ -41,10 +41,10 @@ preserved.
 - Live backend correction is implemented: `store:false`, no `previous_response_id`; history is
   replayed client-side. The backend's hosted `web_search` tool is supported and proven live.
 
-### Agent mode — “clicky, agent”
+### Agent mode — “buddy, agent”
 
 - Realtime and typed personas register `spawn_agent` only while ChatGPT is connected.
-- Main-process `AgentManager`: three concurrent runs, 12-round cap, four-minute wall clock, backend
+- Main-process `AgentManager`: three concurrent runs, unlimited tool rounds, four-minute wall clock, backend
   timeouts/retry, cancellation, stop-all, app-quit cleanup, and persisted completed summaries.
 - Read-only tools: hosted web search, SSRF-guarded/redirect-checked web fetch, private scratchpad,
   and re-read of the original handoff screenshot. Fetched content is delimited as untrusted.
@@ -58,7 +58,7 @@ preserved.
 
 ### Verification and release
 
-- `npm test`: **332 passed, 2 intentional live tests skipped**. Vitest files are serialized to
+- `npm test`: **343 passed, 2 intentional live tests skipped**. Vitest files are serialized to
   eliminate local server/UIA daemon contention.
 - `npm run build`: pass (node + web type checks and all Electron renderer/main bundles).
 - `npm run dist`: pass (portable and one-click per-user NSIS artifacts).

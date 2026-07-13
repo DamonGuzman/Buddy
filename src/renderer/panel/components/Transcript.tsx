@@ -10,6 +10,7 @@ const STICK_THRESHOLD_PX = 48;
 interface TranscriptProps {
   entries: TranscriptEntry[];
   hotkeyLabel: string;
+  fullRealtimeMode?: boolean;
   /** M11: false when the global keyboard hook failed — the hero adapts. */
   hookAlive?: boolean;
 }
@@ -21,6 +22,7 @@ interface TranscriptProps {
 export function Transcript({
   entries,
   hotkeyLabel,
+  fullRealtimeMode = false,
   hookAlive = true,
 }: TranscriptProps): React.JSX.Element {
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -48,8 +50,11 @@ export function Transcript({
         {hookAlive ? (
           <>
             <p className="text-[13.5px] leading-relaxed text-muted-foreground">
-              hold <Kbd className="mx-0.5 border border-b-2">{hotkeyLabel}</Kbd> and talk —
-              i&rsquo;ll look at your screen and point things out
+              {fullRealtimeMode ? 'press ' : 'hold '}
+              <Kbd className="mx-0.5 border border-b-2">{hotkeyLabel}</Kbd>
+              {fullRealtimeMode
+                ? ' to start a live conversation; press it again to stop'
+                : ' and talk — i’ll look at your screen and point things out'}
             </p>
             <p className="text-[11.5px] text-muted-foreground/70">
               or type a question below if you&rsquo;re somewhere quiet

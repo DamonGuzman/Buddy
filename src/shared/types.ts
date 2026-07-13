@@ -49,6 +49,8 @@ export interface Settings {
   captionsEnabled: boolean;
   /** Preferred microphone deviceId ('' = system default). */
   micDeviceId: string;
+  /** Opt-in open-mic mode; the hotkey toggles a server-VAD session on/off. */
+  fullRealtimeMode: boolean;
   /** Display string for the hotkey (fixed for MVP). */
   hotkeyLabel: string;
   // M15 addition (orchestrator-approved): user-defined buddy rest position
@@ -68,6 +70,8 @@ export interface Settings {
   codexPlanType: string;
   /** Prefer metered API-key grounding even while ChatGPT is connected. */
   preferApiKeyGrounding: boolean;
+  /** Allow Sol (never the realtime model) to click and type on this device. */
+  computerUseEnabled: boolean;
 }
 
 /**
@@ -80,9 +84,11 @@ export interface SettingsPatch {
   voice?: string;
   captionsEnabled?: boolean;
   micDeviceId?: string;
+  fullRealtimeMode?: boolean;
   // M15 addition (orchestrator-approved): null resets to the default corner.
   buddyRest?: BuddyRest | null;
   preferApiKeyGrounding?: boolean;
+  computerUseEnabled?: boolean;
 }
 
 /** The renderer-safe defaults. */
@@ -97,6 +103,7 @@ export const DEFAULT_SETTINGS: Settings = {
   voice: 'marin',
   captionsEnabled: true,
   micDeviceId: '',
+  fullRealtimeMode: false,
   // F1 fix (orchestrator-approved), AltGr: only LEFT Alt participates in the
   // hotkey (Right Alt = AltGr on international layouts), so say so.
   hotkeyLabel: 'Ctrl+Alt (left alt)',
@@ -108,6 +115,7 @@ export const DEFAULT_SETTINGS: Settings = {
   codexValid: false,
   codexPlanType: '',
   preferApiKeyGrounding: false,
+  computerUseEnabled: false,
 };
 
 /**
@@ -121,10 +129,14 @@ export function applySettingsPatch(current: Settings, patch: SettingsPatch): Set
     // unchanged via this spread.
     ...current,
     preferApiKeyGrounding: patch.preferApiKeyGrounding ?? current.preferApiKeyGrounding,
+    computerUseEnabled: patch.computerUseEnabled ?? current.computerUseEnabled,
     ...(patch.model !== undefined ? { model: patch.model } : {}),
     ...(patch.voice !== undefined ? { voice: patch.voice } : {}),
     ...(patch.captionsEnabled !== undefined ? { captionsEnabled: patch.captionsEnabled } : {}),
     ...(patch.micDeviceId !== undefined ? { micDeviceId: patch.micDeviceId } : {}),
+    ...(patch.fullRealtimeMode !== undefined
+      ? { fullRealtimeMode: patch.fullRealtimeMode }
+      : {}),
     // M11: storing (or clearing) a key always resolves an unreadable blob.
     ...(patch.apiKey !== undefined
       ? { apiKeyPresent: patch.apiKey !== null, apiKeyUnreadable: false }
@@ -178,6 +190,8 @@ export interface BuddyRest {
 export interface OverlayHoverConfig {
   /** Display string for the push-to-talk hotkey (Settings.hotkeyLabel). */
   hotkeyLabel: string;
+  /** Whether the hotkey toggles an open-mic Realtime session. */
+  fullRealtimeMode: boolean;
   /**
    * Rest fraction for THIS overlay when it hosts the buddy at rest;
    * null = default bottom-right corner.
@@ -535,7 +549,8 @@ export interface AgentSummary {
   finishedAt?: number;
   /** Current loop round while running (1-based). */
   step?: number;
-  maxSteps: number;
+  /** Tool-round ceiling, or null when the agent may continue until stopped or timed out. */
+  maxSteps: number | null;
   /** Capped activity log (cap 30, oldest dropped). */
   steps: AgentStep[];
   /** Short recap — also the text voice speaks. */

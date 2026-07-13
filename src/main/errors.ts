@@ -106,7 +106,7 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
   },
   api_key_unreadable: {
     copy:
-      "windows changed its keys and clicky can't unlock your saved api key anymore — " +
+      "windows changed its keys and buddy can't unlock your saved api key anymore — " +
       "paste it again in settings and you're set.",
     surfaces: ['transcript', 'pill'],
     autoShowPanel: true,
@@ -187,7 +187,7 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
   },
   hotkey_dead: {
     copy:
-      "clicky couldn't grab the push-to-talk keys (windows blocked the keyboard hook). " +
+      "buddy couldn't grab the push-to-talk keys (windows blocked the keyboard hook). " +
       'typing down below still works — a restart usually brings the hotkey back.',
     surfaces: ['transcript', 'tray'],
     autoShowPanel: true,
@@ -207,7 +207,7 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
     autoShowPanel: true,
   },
   renderer_dead: {
-    copy: "clicky hit a snag it couldn't fix — a restart will patch things up.",
+    copy: "buddy hit a snag it couldn't fix — a restart will patch things up.",
     surfaces: ['tray'],
     autoShowPanel: false,
   },

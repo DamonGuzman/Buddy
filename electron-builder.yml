@@ -1,6 +1,6 @@
 # electron-builder config — Windows portable + NSIS, unsigned (MVP).
-appId: ai.fastyr.clicky
-productName: Clicky
+appId: ai.fastyr.buddy
+productName: Buddy
 directories:
   output: dist
 files:
@@ -16,7 +16,7 @@ win:
   # buddy icon — regenerate with `npm run icon` (build/make-icon.mjs)
   icon: build/icon.ico
   # Executable editing must stay ON so the icon/version resources get stamped
-  # into Clicky.exe; the build remains unsigned (no certificate configured).
+  # into Buddy.exe; the build remains unsigned (no certificate configured).
   signAndEditExecutable: true
 nsis:
   oneClick: true

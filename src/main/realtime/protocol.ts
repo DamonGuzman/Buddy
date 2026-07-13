@@ -29,6 +29,15 @@ export interface RealtimeFunctionTool {
   parameters: Record<string, unknown>;
 }
 
+export interface ServerVadTurnDetection {
+  type: 'server_vad';
+  threshold?: number;
+  prefix_padding_ms?: number;
+  silence_duration_ms?: number;
+  create_response: boolean;
+  interrupt_response: true;
+}
+
 /** Back-compat alias used by persona.ts. */
 export type ToolDefinition = RealtimeFunctionTool;
 
@@ -43,7 +52,7 @@ export interface RealtimeSessionConfig {
       /** Async input transcription (separate ASR model), enabled for captions. */
       transcription?: { model: string; language?: string } | null;
       /** Push-to-talk: always null — the client commits manually. */
-      turn_detection?: null;
+      turn_detection?: null | ServerVadTurnDetection;
     };
     output?: {
       format?: AudioPcmFormat;
@@ -116,12 +125,21 @@ export interface ResponseCancelEvent {
   response_id?: string;
 }
 
+export interface ConversationItemTruncateEvent {
+  type: 'conversation.item.truncate';
+  event_id?: string;
+  item_id: string;
+  content_index: number;
+  audio_end_ms: number;
+}
+
 export type ClientEvent =
   | SessionUpdateEvent
   | InputAudioBufferAppendEvent
   | InputAudioBufferCommitEvent
   | InputAudioBufferClearEvent
   | ConversationItemCreateEvent
+  | ConversationItemTruncateEvent
   | ResponseCreateEvent
   | ResponseCancelEvent;
 
@@ -181,6 +199,27 @@ export interface InputAudioTranscriptionCompletedEvent {
   content_index?: number;
   transcript: string;
   usage?: unknown;
+}
+
+export interface InputAudioBufferSpeechStartedEvent {
+  type: 'input_audio_buffer.speech_started';
+  event_id?: string;
+  item_id: string;
+  audio_start_ms?: number;
+}
+
+export interface InputAudioBufferSpeechStoppedEvent {
+  type: 'input_audio_buffer.speech_stopped';
+  event_id?: string;
+  item_id: string;
+  audio_end_ms?: number;
+}
+
+export interface InputAudioBufferCommittedEvent {
+  type: 'input_audio_buffer.committed';
+  event_id?: string;
+  item_id: string;
+  previous_item_id?: string | null;
 }
 
 export interface ResponseCreatedEvent {
@@ -305,6 +344,9 @@ export interface RateLimitsUpdatedEvent {
 export type ServerEvent =
   | SessionCreatedEvent
   | SessionUpdatedEvent
+  | InputAudioBufferSpeechStartedEvent
+  | InputAudioBufferSpeechStoppedEvent
+  | InputAudioBufferCommittedEvent
   | InputAudioTranscriptionCompletedEvent
   | ResponseCreatedEvent
   | ResponseOutputItemAddedEvent

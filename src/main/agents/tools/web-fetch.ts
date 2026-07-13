@@ -40,7 +40,7 @@ async function safeFetch(initial: URL, signal: AbortSignal): Promise<Response> {
     const response = await fetch(current, {
       redirect: 'manual',
       signal,
-      headers: { 'User-Agent': 'Clicky/0.1 (+read-only research agent)', Accept: 'text/html,text/plain,application/json' },
+      headers: { 'User-Agent': 'BuddyApp/0.1 (+read-only research agent)', Accept: 'text/html,text/plain,application/json' },
     });
     if (response.status < 300 || response.status >= 400) {
       if (!response.ok) throw new Error(`http ${response.status}`);

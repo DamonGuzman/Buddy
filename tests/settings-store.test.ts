@@ -176,7 +176,7 @@ describe('SettingsStore: codex sign-in fields (M17)', () => {
 });
 
 describe('SettingsStore: corrupt settings.json (M11 settings_reset)', () => {
-  it('migrates a healthy schema-v1 file to v2 without losing preferences', () => {
+  it('migrates a healthy schema-v1 file to v3 without losing preferences', () => {
     const path = freshPath();
     writeFileSync(path, JSON.stringify({
       version: 1,
@@ -190,7 +190,25 @@ describe('SettingsStore: corrupt settings.json (M11 settings_reset)', () => {
     const store = new SettingsStore(path);
     expect(store.get().voice).toBe('cedar');
     expect(store.get().preferApiKeyGrounding).toBe(false);
-    expect(JSON.parse(readFileSync(path, 'utf8')).version).toBe(2);
+    expect(store.get().fullRealtimeMode).toBe(false);
+    expect(store.get().computerUseEnabled).toBe(false);
+    expect(JSON.parse(readFileSync(path, 'utf8')).version).toBe(3);
+  });
+
+  it('persists the full realtime mode toggle', () => {
+    const path = freshPath();
+    const first = new SettingsStore(path);
+    first.set({ fullRealtimeMode: true });
+    const second = new SettingsStore(path);
+    expect(second.get().fullRealtimeMode).toBe(true);
+  });
+
+  it('persists the opt-in computer use toggle', () => {
+    const path = freshPath();
+    const first = new SettingsStore(path);
+    first.set({ computerUseEnabled: true });
+    const second = new SettingsStore(path);
+    expect(second.get().computerUseEnabled).toBe(true);
   });
 
   it('resets to defaults and reports settingsWereReset', () => {

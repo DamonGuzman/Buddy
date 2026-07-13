@@ -28,7 +28,7 @@ export function Composer({
     setText('');
   };
 
-  const sendHint = disabled ? disabledReason : busy ? 'clicky is thinking…' : 'send';
+  const sendHint = disabled ? disabledReason : busy ? 'buddy is thinking…' : 'send';
 
   return (
     <div
@@ -37,13 +37,13 @@ export function Composer({
     >
       {busy && (
         <span className="animate-hint-in pointer-events-none absolute -top-[22px] left-4 rounded-full border bg-background px-2 py-0.5 text-[11px] text-muted-foreground">
-          clicky is thinking…
+          buddy is thinking…
         </span>
       )}
       <Input
         type="text"
         value={text}
-        placeholder="ask clicky anything…"
+        placeholder="ask buddy anything…"
         disabled={disabled}
         className="h-9 rounded-full px-3.5 text-[13px]"
         onChange={(e) => setText(e.target.value)}

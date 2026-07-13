@@ -133,6 +133,8 @@ export interface CodexResponsesSessionOptions {
   model?: string;
   /** Reasoning effort. Default 'low'. */
   reasoningEffort?: 'low' | 'medium' | 'high';
+  /** ChatGPT Codex service tier. `priority` is Codex fast mode (~1.5x). */
+  serviceTier?: 'default' | 'priority';
   /** Optional Responses `include` array. */
   include?: string[];
   /** Per-request budget, ms. Default 60s. */
@@ -152,6 +154,7 @@ export class CodexResponsesSession {
   private readonly toolChoice: unknown;
   private readonly model: string;
   private readonly effort: 'low' | 'medium' | 'high';
+  private readonly serviceTier: 'default' | 'priority';
   private readonly include: string[] | undefined;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
@@ -177,6 +180,7 @@ export class CodexResponsesSession {
     this.toolChoice = options.toolChoice ?? 'auto';
     this.model = options.model ?? DEFAULT_CODEX_MODEL;
     this.effort = options.reasoningEffort ?? 'low';
+    this.serviceTier = options.serviceTier ?? 'priority';
     this.include = options.include;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchImpl = options.fetchImpl ?? fetch;
@@ -255,6 +259,20 @@ export class CodexResponsesSession {
     return result;
   }
 
+  /** Continue a tool round-trip and attach a fresh user/screenshot observation. */
+  async continueWithTurn(
+    turn: CodexUserTurn,
+    cb: CodexResponsesCallbacks = {},
+  ): Promise<CodexTurnResult> {
+    if (this.pendingOutputs.length === 0) return emptyResult();
+    const outputs = this.pendingOutputs;
+    this.pendingOutputs = [];
+    const userItem = this.buildUserItem(turn);
+    const result = await this.runRequest([...this.history, ...outputs, userItem], cb);
+    if (shouldCommit(result)) this.history.push(...outputs, userItem, ...result.outputItems);
+    return result;
+  }
+
   // -------------------------------------------------------------------------
 
   private buildUserItem(turn: CodexUserTurn): unknown {
@@ -283,6 +301,9 @@ export class CodexResponsesSession {
       // Proven live contract: this backend rejects store:true.
       store: false,
       reasoning: { effort: this.effort },
+      // ChatGPT subscription fast mode. This is the same priority tier used
+      // by Codex when its fast-mode toggle is enabled.
+      service_tier: this.serviceTier,
     };
     if (this.include !== undefined) body['include'] = this.include;
     return body;
