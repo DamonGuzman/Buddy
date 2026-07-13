@@ -23,6 +23,7 @@ import {
   REST_MARGIN_Y_TOP,
   defaultRest,
   eyeOffset,
+  hoverInteractionEnabled,
   hintText,
   insideAux,
   insideRect,
@@ -69,6 +70,49 @@ describe('zoneFor / eyeOffset / paddedRegion', () => {
     expect(r).toEqual({ x: 500 - half, y: 500 - half, width: half * 2, height: half * 2 });
     expect(insideRect(BUDDY, r)).toBe(true);
     expect(insideRect({ x: 500 + half + 1, y: 500 }, r)).toBe(false);
+  });
+});
+
+describe('hoverInteractionEnabled', () => {
+  it('blocks a physical push-to-talk hold', () => {
+    expect(
+      hoverInteractionEnabled({
+        visible: true,
+        atRest: true,
+        state: 'listening',
+        fullRealtimeMode: false,
+      }),
+    ).toBe(false);
+  });
+
+  it('allows hover during the persistent full-realtime listening state', () => {
+    expect(
+      hoverInteractionEnabled({
+        visible: true,
+        atRest: true,
+        state: 'listening',
+        fullRealtimeMode: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('still blocks hidden or non-resting Buddy', () => {
+    expect(
+      hoverInteractionEnabled({
+        visible: false,
+        atRest: true,
+        state: 'idle',
+        fullRealtimeMode: false,
+      }),
+    ).toBe(false);
+    expect(
+      hoverInteractionEnabled({
+        visible: true,
+        atRest: false,
+        state: 'idle',
+        fullRealtimeMode: false,
+      }),
+    ).toBe(false);
   });
 });
 

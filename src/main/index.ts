@@ -30,6 +30,7 @@ import { startDebugServer } from './debug-server';
 import { describeKind } from './errors';
 import { HotkeyManager } from './hotkey';
 import { SettingsStore } from './settings';
+import { SessionRecorder } from './session-recorder';
 import { createTray } from './tray';
 import { OverlayManager } from './windows/overlay';
 import { PanelManager } from './windows/panel';
@@ -87,6 +88,23 @@ async function main(): Promise<void> {
 
   const settings = new SettingsStore();
   settings.importApiKeyFromEnvironment();
+  let sessionRecorder: SessionRecorder | null = null;
+  try {
+    sessionRecorder = new SessionRecorder({
+      userDataPath: app.getPath('userData'),
+      appVersion: app.getVersion(),
+      settings: settings.get(),
+      devFlags: Object.keys(process.env)
+        .filter((key) => key.startsWith('CLICKY_') && (process.env[key] ?? '') !== '')
+        .sort(),
+    });
+    console.log(`[session-recorder] storing this run in ${sessionRecorder.directoryPath}`);
+  } catch (err) {
+    console.error(
+      '[session-recorder] could not initialize persistence:',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
   const overlays = new OverlayManager();
   const panel = new PanelManager();
   const hotkey = new HotkeyManager();
@@ -104,6 +122,7 @@ async function main(): Promise<void> {
     persistencePath: join(app.getPath('userData'), 'agents.json'),
     // M19: the overlays mirror the same renderer-safe list (helper sprites).
     onAgentsChanged: (list) => {
+      sessionRecorder?.record('agents_changed', list);
       panel.send('panel:agents', list);
       overlays.broadcast('overlay:agents', list);
     },
@@ -118,6 +137,7 @@ async function main(): Promise<void> {
     panel,
     codexAuth,
     agents,
+    ...(sessionRecorder !== null ? { sessionRecorder } : {}),
     ...(phoneAudio !== null ? { phoneAudio } : {}),
   });
   phoneAudio?.on('audio', (chunk) => conversation.handleAudioChunk(chunk));
@@ -132,6 +152,8 @@ async function main(): Promise<void> {
   const logFatal = (kind: string, err: unknown): void => {
     const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
     console.error(`[fatal] ${kind}:`, detail);
+    sessionRecorder?.record('fatal_error', { kind, error: err });
+    sessionRecorder?.flush();
     try {
       appendFileSync(
         join(app.getPath('userData'), 'clicky.log'),
@@ -352,14 +374,20 @@ async function main(): Promise<void> {
   // state so the mic can never stay hot on a locked machine. On resume, the
   // realtime socket may be half-open; reset it so the next turn reconnects.
   powerMonitor.on('lock-screen', () => {
+    sessionRecorder?.record('system_lock', null);
     hotkey.forceCancel();
     conversation.deactivateFullRealtime();
   });
   powerMonitor.on('suspend', () => {
+    sessionRecorder?.record('system_suspend', null);
+    sessionRecorder?.flush();
     hotkey.forceCancel();
     conversation.deactivateFullRealtime();
   });
-  powerMonitor.on('resume', () => conversation.onSystemResume());
+  powerMonitor.on('resume', () => {
+    sessionRecorder?.record('system_resume', null);
+    conversation.onSystemResume();
+  });
 
   app.on('second-instance', () => panel.show());
 
@@ -436,6 +464,7 @@ async function main(): Promise<void> {
     conversation.close();
     phoneAudio?.close();
     agents.dispose();
+    sessionRecorder?.close('app_quit');
     overlays.destroy();
     panel.destroy();
   });

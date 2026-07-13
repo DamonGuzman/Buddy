@@ -41,6 +41,7 @@ import type {
 import { getSettingsStore } from '../settings';
 import { togglePanel } from './panel';
 import { CrashLoopGuard, lockdownNavigation, recoverOnRenderProcessGone } from './harden';
+import { listeningBlocksHover } from './hover-policy';
 
 /**
  * Module-level handle to the started manager so sibling main modules (e.g.
@@ -107,10 +108,10 @@ export class OverlayManager {
   broadcast<C extends MainToOverlayChannel>(channel: C, payload: MainToOverlayEvents[C]): void {
     // M15: every assistant-state change flows through here (production and
     // debug), so snoop it — the dwell flip must be suppressed while the user
-    // is holding push-to-talk ('listening' is the hold proxy).
+    // is physically holding push-to-talk.
     if (channel === 'overlay:assistant-state') {
       this.lastAssistantState = payload as unknown as AssistantState;
-      if (this.lastAssistantState === 'listening') this.restoreClickThrough();
+      if (this.pushToTalkHoldActive()) this.restoreClickThrough();
     }
     for (const win of this.windows.values()) {
       if (!win.isDestroyed()) win.webContents.send(channel, payload);
@@ -410,13 +411,25 @@ export class OverlayManager {
       return;
     }
     if (evt.kind === 'dwell' && evt.region && isFiniteRect(evt.region)) {
-      // Suppress the interactive flip entirely while the user is holding
-      // push-to-talk ('listening' is the hold proxy), and never flip a
+      // Suppress the interactive flip while the user is physically holding
+      // push-to-talk, and never flip a
       // window that isn't hosting the buddy.
-      if (this.lastAssistantState === 'listening') return;
+      if (this.pushToTalkHoldActive()) return;
       if (this.indexByDisplayId.get(displayId) !== this.buddyHostIndex) return;
       this.makeInteractive(displayId, evt.region);
     }
+  }
+
+  /**
+   * `listening` is a physical hold only in push-to-talk mode. In full
+   * realtime it is the persistent open-mic ready state, so using it alone as
+   * a hold proxy strands a resting Buddy with hover disabled indefinitely.
+   */
+  private pushToTalkHoldActive(): boolean {
+    return listeningBlocksHover(
+      this.lastAssistantState,
+      getSettingsStore()?.get().fullRealtimeMode ?? false,
+    );
   }
 
   /** Flip one overlay interactive; poll the cursor as a fallback exit path. */

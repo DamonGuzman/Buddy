@@ -14,6 +14,8 @@ import { createRoot } from 'react-dom/client';
 import { clicky } from './clicky';
 import { FlightController, REST_ROT, SETTLE_ROT } from './flight';
 import type { Vec } from './flight';
+import { PointerReturnLifecycle } from './pointer-lifecycle';
+import type { BuddyMode } from './pointer-lifecycle';
 import {
   AUX_PAD,
   AWARE_RADIUS,
@@ -23,6 +25,7 @@ import {
   REGION_PAD,
   dist,
   eyeOffset,
+  hoverInteractionEnabled,
   hintText,
   insideRect,
   restFromFrac,
@@ -56,7 +59,7 @@ import './overlay.css';
 
 /** Dwell at each point of a multi-point command. */
 const DWELL_MS = 1200;
-/** After the last point: wait this long (and for idle state) before arcing home. */
+/** Keep the final point visible this long after the current turn settles. */
 const HOME_AFTER_MS = 6000;
 /** Caption bubble lingers this long after done:true, then fades. */
 const CAPTION_LINGER_MS = 4000;
@@ -96,8 +99,6 @@ function isPrimaryOverlay(): boolean {
 // ---------------------------------------------------------------------------
 // View models
 // ---------------------------------------------------------------------------
-
-type BuddyMode = 'rest' | 'flying' | 'pointing';
 
 interface CaptionView {
   itemId: string;
@@ -220,9 +221,9 @@ function App(): React.JSX.Element {
     let visible = isPrimaryOverlay();
     let currentState: AssistantState = 'idle';
     let currentMode: BuddyMode = 'rest';
-    /** When the go-home timer fired while not idle, go home once idle again. */
-    let waitingIdleGen: number | null = null;
+    const pointerReturn = new PointerReturnLifecycle();
     const timers = new Set<ReturnType<typeof setTimeout>>();
+    let homeTimer: ReturnType<typeof setTimeout> | null = null;
     let captionTimer: ReturnType<typeof setTimeout> | null = null;
     let bobTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -261,6 +262,7 @@ function App(): React.JSX.Element {
     };
     const applyMode = (m: BuddyMode): void => {
       currentMode = m;
+      pointerReturn.setMode(m);
       setMode(m);
       syncHoverEnabled(); // M15: hover must never fight the flight engine
     };
@@ -288,11 +290,12 @@ function App(): React.JSX.Element {
     };
 
     const scheduleHome = (myGen: number): void => {
-      after(HOME_AFTER_MS, () => {
+      if (homeTimer !== null) clearTimeout(homeTimer);
+      homeTimer = setTimeout(() => {
+        homeTimer = null;
         if (gen !== myGen) return;
-        if (currentState === 'idle') void goHome(myGen);
-        else waitingIdleGen = myGen;
-      });
+        if (pointerReturn.homeTimerFired(myGen) === 'home') void goHome(myGen);
+      }, HOME_AFTER_MS);
     };
 
     async function goHome(expectedGen?: number): Promise<void> {
@@ -304,7 +307,11 @@ function App(): React.JSX.Element {
       } else {
         myGen = expectedGen;
       }
-      waitingIdleGen = null;
+      if (homeTimer !== null) {
+        clearTimeout(homeTimer);
+        homeTimer = null;
+      }
+      pointerReturn.homeStarted();
       setPulses([]);
       setVisible(true);
       applyMode('flying');
@@ -318,7 +325,11 @@ function App(): React.JSX.Element {
       gen += 1;
       const myGen = gen;
       clearTimers();
-      waitingIdleGen = null;
+      if (homeTimer !== null) {
+        clearTimeout(homeTimer);
+        homeTimer = null;
+      }
+      pointerReturn.beginPoints(myGen);
       if (!visible) {
         // Appearing on this display for the first time: rise from the rest corner.
         flight.jumpTo(restPos(), REST_ROT);
@@ -340,7 +351,10 @@ function App(): React.JSX.Element {
           if (!still) return;
         }
       }
-      scheduleHome(myGen);
+      // response.done can settle the turn while the final pointer flight is
+      // still in progress. Start the dwell only once both signals have
+      // arrived, so it is always six seconds rather than the response length.
+      if (pointerReturn.pointsFinished(myGen) === 'schedule') scheduleHome(myGen);
     }
 
     const applyState = (s: AssistantState): void => {
@@ -349,9 +363,14 @@ function App(): React.JSX.Element {
         lastSpokeAtRef.current = Date.now();
       }
       currentState = s;
+      const pointerAction = pointerReturn.assistantStateChanged(
+        s,
+        gen,
+        cfgRef.current?.fullRealtimeMode ?? false,
+      );
       setAssistantState(s);
       bumpActivity();
-      syncHoverEnabled(); // M15: listening suppresses the interactive flip
+      syncHoverEnabled(); // M15: a physical PTT hold suppresses interaction
       if (s === 'error') {
         setErrorFlash(true);
         after(ERROR_FLASH_MS, () => setErrorFlash(false));
@@ -364,9 +383,8 @@ function App(): React.JSX.Element {
         setCaption((c) => (c && !c.fading ? { ...c, fading: true } : c));
         after(CAPTION_FADE_MS, () => setCaption(null));
       }
-      if (s === 'idle' && waitingIdleGen !== null && waitingIdleGen === gen) {
-        void goHome(gen);
-      }
+      if (pointerAction === 'home') void goHome(gen);
+      else if (pointerAction === 'schedule') scheduleHome(gen);
     };
 
     // --------------------------------------------------------------- init --
@@ -375,6 +393,7 @@ function App(): React.JSX.Element {
     bumpActivity();
     void clicky.getAssistantState().then((s) => {
       currentState = s;
+      pointerReturn.assistantStateChanged(s, gen, cfgRef.current?.fullRealtimeMode ?? false);
       setAssistantState(s);
     });
 
@@ -388,6 +407,10 @@ function App(): React.JSX.Element {
         // hide: fade the buddy out entirely.
         gen += 1;
         clearTimers();
+        if (homeTimer !== null) {
+          clearTimeout(homeTimer);
+          homeTimer = null;
+        }
         flight.cancel();
         setPulses([]);
         setVisible(false);
@@ -703,7 +726,12 @@ function App(): React.JSX.Element {
     }
 
     function syncHoverEnabled(): void {
-      const enabled = visible && currentMode === 'rest' && currentState !== 'listening';
+      const enabled = hoverInteractionEnabled({
+        visible,
+        atRest: currentMode === 'rest',
+        state: currentState,
+        fullRealtimeMode: cfgRef.current?.fullRealtimeMode ?? false,
+      });
       if (enabled === hoverEnabled) return;
       hoverEnabled = enabled;
       if (!enabled && drag !== null) drag = null; // drop a drag mid-flight/PTT
@@ -839,6 +867,17 @@ function App(): React.JSX.Element {
       const first = cfgRef.current === null;
       cfgRef.current = cfg;
       setHoverCfg(cfg);
+      // The config can arrive after the initial assistant-state read. Re-run
+      // the pointer rendezvous so a realtime `listening` state is not left
+      // classified with push-to-talk semantics because of that startup race.
+      const pointerAction = pointerReturn.assistantStateChanged(
+        currentState,
+        gen,
+        cfg.fullRealtimeMode,
+      );
+      if (pointerAction === 'home') void goHome(gen);
+      else if (pointerAction === 'schedule') scheduleHome(gen);
+      syncHoverEnabled();
       recomputeHelpers(); // M19: the cluster is anchored at the rest spot
       if (currentMode !== 'rest' || hover.isDragging) return;
       const target = restPos();
@@ -920,6 +959,7 @@ function App(): React.JSX.Element {
       auxResyncRef.current = null;
       window.removeEventListener('resize', onResize);
       clearTimers();
+      if (homeTimer !== null) clearTimeout(homeTimer);
       if (captionTimer !== null) clearTimeout(captionTimer);
       if (blinkTimer !== null) clearTimeout(blinkTimer);
       if (bobTimer !== null) clearTimeout(bobTimer);

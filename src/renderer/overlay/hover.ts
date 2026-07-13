@@ -47,6 +47,26 @@ export const REST_MARGIN_Y_BOTTOM = 120;
 
 export type HoverZone = 'far' | 'aware' | 'hover';
 
+/**
+ * Whether the renderer may observe/dwell the resting Buddy.
+ *
+ * `listening` means a held hotkey in push-to-talk mode, but it means the
+ * long-lived ready state in full realtime mode. Only the former must block
+ * mouse interaction.
+ */
+export function hoverInteractionEnabled(input: {
+  visible: boolean;
+  atRest: boolean;
+  state: AssistantState;
+  fullRealtimeMode: boolean;
+}): boolean {
+  return (
+    input.visible &&
+    input.atRest &&
+    (input.state !== 'listening' || input.fullRealtimeMode)
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Geometry helpers
 // ---------------------------------------------------------------------------

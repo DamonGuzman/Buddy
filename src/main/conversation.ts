@@ -71,6 +71,7 @@ import type { OverlayManager } from './windows/overlay';
 import { showPanelOnce } from './windows/panel';
 import type { PanelManager } from './windows/panel';
 import type { PhoneAudioTransport } from './phone-audio-bridge';
+import type { SessionRecorder } from './session-recorder';
 import type {
   AssistantState,
   AgentSummary,
@@ -159,6 +160,8 @@ export interface ConversationDeps {
   agents?: AgentManager;
   /** Disposable QA-only phone audio transport; absent in normal Clicky. */
   phoneAudio?: PhoneAudioTransport;
+  /** Durable local journal + turn artifacts; omitted in focused tests. */
+  sessionRecorder?: SessionRecorder;
 }
 
 /** Guard on the tool-output continue loop of a single text turn. */
@@ -196,6 +199,7 @@ export class Conversation {
   private readonly overlays: OverlayManager;
   private readonly panel: PanelManager;
   private readonly phoneAudio: PhoneAudioTransport | null;
+  private readonly recorder: SessionRecorder | null;
 
   private session: RealtimeSession;
   private sessionModel: string;
@@ -340,6 +344,7 @@ export class Conversation {
     this.overlays = deps.overlays;
     this.panel = deps.panel;
     this.phoneAudio = deps.phoneAudio ?? null;
+    this.recorder = deps.sessionRecorder ?? null;
     // M13-core: hold any injected Codex provider; otherwise the process-wide
     // one is resolved lazily at grounding time (codexProvider()).
     this.injectedCodexAuth = deps.codexAuth ?? null;
@@ -510,6 +515,7 @@ export class Conversation {
           : Date.now() - this.bargeWatch.t0;
       this.bargeWatch = null;
     }
+    if (stats.done) this.recorder?.record('playback_stats', stats);
   }
 
   /** 'audio:playback-ring' from the panel renderer (ipcMain wiring). */
@@ -532,12 +538,15 @@ export class Conversation {
     if (this.timingsHistory.length > TIMINGS_HISTORY_LIMIT) {
       this.timingsHistory = this.timingsHistory.slice(-TIMINGS_HISTORY_LIMIT);
     }
+    this.recorder?.record('turn_started', turn);
     return turn;
   }
 
   /** Short/silent hold produced no turn: drop the record entirely. */
   private discardActiveTurn(): void {
     if (!this.activeTurn) return;
+    this.recorder?.record('turn_discarded', this.activeTurn);
+    this.recorder?.flush();
     const idx = this.timingsHistory.indexOf(this.activeTurn);
     if (idx !== -1) this.timingsHistory.splice(idx, 1);
     this.activeTurn = null;
@@ -642,10 +651,12 @@ export class Conversation {
         // M8.5: capture completed (kicked off at hold-start).
         turn.tCaptureDone = Date.now();
         turn.captureMs = turn.tCaptureDone - this.holdStartedAt;
+        this.recorder?.recordCaptures(turn.turnId, results);
         return results;
       })
       .catch((err: unknown) => {
         console.warn('[conversation] capture failed, sending turn without images:', err);
+        this.recorder?.record('capture_failed', { turnId: turn.turnId, error: err });
         return [] as CaptureResult[];
       });
   }
@@ -712,6 +723,10 @@ export class Conversation {
     if (this.holding || this.fullRealtimeActive) {
       if (this.holding) this.chunksThisHold += 1;
       if (this.activeTurn?.kind === 'voice') this.activeTurn.chunksIn += 1; // M8.5
+      // Preserve what the mic actually delivered even when the transport is
+      // unavailable (for example, a missing key). That failure episode is
+      // precisely when a complete local diagnostic artifact is most useful.
+      this.recorder?.appendAudio('input', this.activeTurn?.turnId ?? 'unattributed', chunk);
     }
     if (this.acceptingAudio) {
       this.session.appendAudio(chunk);
@@ -763,6 +778,7 @@ export class Conversation {
       captures = await captureAllDisplays();
     } catch (err) {
       console.warn('[conversation] capture failed, asking without images:', err);
+      this.recorder?.record('capture_failed', { turnId: turn.turnId, error: err });
     } finally {
       this.setCaptureIndicator(false);
     }
@@ -774,6 +790,7 @@ export class Conversation {
     turn.captureMs = turn.tCaptureDone - tAsk;
     this.lastCapture = captures.map((r) => r.meta);
     this.turnCaptures = captures;
+    this.recorder?.recordCaptures(turn.turnId, captures);
 
     // M11 (capture_failed): the turn is going ahead with ZERO screenshots —
     // tell the user (transcript + caption) and tell the MODEL via the factual
@@ -953,6 +970,11 @@ export class Conversation {
     token: number,
   ): void {
     if (this.closed || token !== this.turnToken) return;
+    this.recorder?.record('tool_call', {
+      transport: 'codex',
+      turnId: this.activeTurn?.turnId,
+      call,
+    });
     const session = this.codexTextSession;
     if (session === null) return;
     if (this.activeTurn && this.activeTurn.tFirstToolCall === undefined) {
@@ -1029,12 +1051,17 @@ export class Conversation {
         this.pushTranscript({ ...entry, streaming: false });
       }
     }
-    if (this.activeTurn) this.activeTurn.tResponseDone = Date.now();
+    if (this.activeTurn) {
+      this.activeTurn.tResponseDone = Date.now();
+      this.recorder?.record('turn_finished', this.activeTurn);
+      this.recorder?.flush();
+    }
     if (this.state !== 'error') this.setState('idle');
   }
 
   /** Model, voice, and VAD mode require a fresh session (key does not). */
   onSettingsChanged(next: Settings): void {
+    this.recorder?.recordSettings(next);
     if (
       next.model === this.sessionModel &&
       next.voice === this.sessionVoice &&
@@ -1126,6 +1153,12 @@ export class Conversation {
       this.sendCaptureCommand('stop');
     }
     this.session.close();
+    this.recorder?.record('conversation_closed', {
+      state: this.state,
+      activeTurn: this.activeTurn,
+      transcriptEntriesInMemory: this.entries.length,
+    });
+    this.recorder?.flush();
   }
 
   // ---------------------------------------------------------------------
@@ -1151,6 +1184,7 @@ export class Conversation {
     this.setCaptureIndicator(false);
     this.lastCapture = captures.map((capture) => capture.meta);
     this.turnCaptures = captures;
+    this.recorder?.recordCaptures(this.activeTurn?.turnId ?? `vad_${itemId}`, captures);
 
     let contextText = '';
     if (captures.length === 0) {
@@ -1290,6 +1324,8 @@ export class Conversation {
    * panel auto-show. The single place the policy is enforced.
    */
   private surfaceError(pres: ErrorPresentation): void {
+    this.recorder?.record('error_presented', pres);
+    this.recorder?.flush();
     const now = Date.now();
     const isPill = pres.surfaces.includes('pill');
     // Dedupe: one failure, two paths (server error event + synthesized failed
@@ -1424,7 +1460,10 @@ export class Conversation {
   }
 
   private wireSession(session: RealtimeSession): void {
-    session.on('status', (status) => this.panel.send('panel:session-status', status));
+    session.on('status', (status) => {
+      this.recorder?.record('realtime_status', status);
+      this.panel.send('panel:session-status', status);
+    });
 
     session.on('speech-started', ({ itemId }) => {
       if (!this.fullRealtimeActive) return;
@@ -1452,6 +1491,7 @@ export class Conversation {
       const promise = captureAllDisplays()
         .catch((err: unknown) => {
           console.warn('[conversation] full realtime turn capture failed:', err);
+          this.recorder?.record('capture_failed', { turnId: turn.turnId, error: err });
           return [] as CaptureResult[];
         })
         .then((captures) => {
@@ -1485,6 +1525,10 @@ export class Conversation {
       // F1 (M2): deltas of the response being requested belong to the
       // playback epoch that is current NOW.
       this.deltaEpoch = this.playbackEpoch;
+      this.recorder?.record('response_requested', {
+        turnId: this.activeTurn?.turnId,
+        pendingResponses: this.pendingResponses,
+      });
       if (this.idleTimer !== null) {
         clearTimeout(this.idleTimer);
         this.idleTimer = null;
@@ -1546,6 +1590,12 @@ export class Conversation {
         this.activeTurn.chunksOut += 1;
         this.turnAudioItems.add(itemId);
       }
+      this.recorder?.appendAudio(
+        'output',
+        this.activeTurn?.turnId ?? 'unattributed',
+        chunk,
+        itemId,
+      );
       // F1 (M2): tag the delta with its response's playback epoch.
       if (this.phoneAudio !== null) {
         this.phoneAudio.sendAudio(chunk);
@@ -1559,11 +1609,22 @@ export class Conversation {
       if (this.activeTurn && this.activeTurn.tFirstToolCall === undefined) {
         this.activeTurn.tFirstToolCall = Date.now(); // M8.5
       }
+      this.recorder?.record('tool_call', {
+        transport: 'realtime',
+        turnId: this.activeTurn?.turnId,
+        call,
+      });
       this.handleToolCall(call);
     });
 
     session.on('response-done', ({ status, usage }) => {
       this.pendingResponses = Math.max(0, this.pendingResponses - 1);
+      this.recorder?.record('response_done', {
+        turnId: this.activeTurn?.turnId,
+        status,
+        usage,
+        pendingResponses: this.pendingResponses,
+      });
       // M8.5 live eval: accumulate token usage across the turn's responses.
       if (usage && this.activeTurn) {
         const u = (this.activeTurn.usage ??= {
@@ -1602,7 +1663,11 @@ export class Conversation {
       // outstanding (a tool-call follow-up keeps the buddy speaking).
       if (this.pendingResponses > 0) return;
       // M8.5: the LAST response.done of the turn (after tool continuations).
-      if (this.activeTurn) this.activeTurn.tResponseDone = Date.now();
+      if (this.activeTurn) {
+        this.activeTurn.tResponseDone = Date.now();
+        this.recorder?.record('turn_finished', this.activeTurn);
+        this.recorder?.flush();
+      }
       // F1 (m5): ASR never arrived for this voice turn.
       this.resolveVoicePlaceholder('(voice message)');
       // F1 (retention): the turn settled — release the capture buffers now
@@ -1628,6 +1693,8 @@ export class Conversation {
 
     session.on('error', (err) => {
       console.error('[conversation] session error:', err.message);
+      this.recorder?.record('realtime_error', err);
+      this.recorder?.flush();
       this.epoch += 1;
       if (this.closed) return;
       if (this.fullRealtimeActive) this.deactivateFullRealtime();
@@ -2181,6 +2248,7 @@ export class Conversation {
     if (this.pointerHistory.length > POINTER_HISTORY_LIMIT) {
       this.pointerHistory = this.pointerHistory.slice(-POINTER_HISTORY_LIMIT);
     }
+    this.recorder?.record('pointer_dispatched', { turnId: turn?.turnId, command: cmd });
     if (turn !== null) {
       if (turn.tPointerDispatched === undefined) turn.tPointerDispatched = Date.now();
       if (snap !== undefined && turn.snapMs === undefined) turn.snapMs = snap.snapMs;
@@ -2278,7 +2346,9 @@ export class Conversation {
       this.errorTimer = null;
     }
     if (this.state !== next) {
+      const previous = this.state;
       this.state = next;
+      this.recorder?.record('assistant_state_changed', { previous, next });
       this.overlays.broadcast('overlay:assistant-state', next);
       this.panel.send('panel:assistant-state', next);
     }
@@ -2324,6 +2394,11 @@ export class Conversation {
     } else {
       this.entries[idx] = entry;
     }
+    this.recorder?.record('transcript_upsert', {
+      turnId: this.activeTurn?.turnId,
+      entry,
+    });
+    if (!entry.streaming) this.recorder?.flush();
     this.panel.send('panel:transcript', entry);
   }
 }

@@ -196,6 +196,20 @@ endpoint testing: `tools/mock-realtime/reject-server.js` (HTTP-status upgrade re
 pre-settle quota errors); mock scenarios cover rate-limit / server-error / incomplete / agent-
 mode. Runtime flags (`hookAlive`, CLICKY_* dev flags) reach the panel via `panel:runtime`.
 
+## 7c. Local session history
+
+Every app run is recorded under `<userData>/sessions/YYYY-MM-DD/<timestamp>_<session-id>/` for
+debugging. `events.jsonl` is an append-only, sequenced journal, so completed records survive an
+abrupt exit; `session.json` is an atomically replaced manifest whose `active` status identifies an
+uncleanly-ended run. The journal includes renderer-safe settings, assistant/realtime state,
+transcript upserts, errors, agent snapshots, tool calls, pointer attribution, response usage,
+playback statistics, and complete turn timings. Each explicit turn also retains its JPEG captures
+(with SHA-256 + `CaptureMeta`) and lossless input/output PCM sidecars (24 kHz, mono, signed 16-bit
+little-endian). No continuous capture is added: only the screenshots/audio already collected for an
+explicit Buddy session are persisted. API keys, authorization values, cookies, passwords, tokens,
+and credential-shaped strings are defensively redacted. Persistence is fail-soft and must never
+take down or stall shutdown of the tray app.
+
 ## 8. QA & verification plan
 
 - Unit: vitest on coords/protocol/settings/hotkey FSM.
