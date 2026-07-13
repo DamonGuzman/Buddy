@@ -35,6 +35,10 @@ import { createTray } from './tray';
 import { OverlayManager } from './windows/overlay';
 import { PanelManager } from './windows/panel';
 import { PhoneAudioBridgeClient } from './phone-audio-bridge';
+import {
+  DEFAULT_PHONE_AUDIO_URL,
+  PhoneAudioBridgeSupervisor,
+} from './phone-audio-bridge-supervisor';
 import { ENV_DEBUG } from '../shared/constants';
 import type { InvokeArgs, InvokeChannel, InvokeResult } from '../shared/ipc';
 import type {
@@ -114,8 +118,31 @@ async function main(): Promise<void> {
   const agentMock = process.env['CLICKY_AGENT_MOCK'] === '1';
   const agentBackend: AgentBackend = agentMock ? new MockAgentBackend() : codexAgentBackend;
   let conversation!: Conversation;
-  const phoneAudioUrl = process.env['CLICKY_PHONE_AUDIO_URL']?.trim() ?? '';
-  const phoneAudio = phoneAudioUrl ? new PhoneAudioBridgeClient(phoneAudioUrl) : null;
+  const explicitPhoneAudioUrl = process.env['CLICKY_PHONE_AUDIO_URL']?.trim() ?? '';
+  const phoneBridgeAutostart =
+    process.env['CLICKY_PHONE_AUDIO_AUTOSTART'] === '1' ||
+    (app.isPackaged && process.env['CLICKY_PHONE_AUDIO_AUTOSTART'] !== '0');
+  const phoneAudioUrl = explicitPhoneAudioUrl || DEFAULT_PHONE_AUDIO_URL;
+  const phoneAudio =
+    explicitPhoneAudioUrl || phoneBridgeAutostart
+      ? new PhoneAudioBridgeClient(phoneAudioUrl)
+      : null;
+  const phoneBridgeSupervisor =
+    phoneBridgeAutostart && phoneAudioUrl === DEFAULT_PHONE_AUDIO_URL
+      ? new PhoneAudioBridgeSupervisor({
+          entryPath: app.isPackaged
+            ? join(process.resourcesPath, 'phone-audio-bridge', 'start.mjs')
+            : join(app.getAppPath(), 'tools', 'phone-audio-bridge', 'start.mjs'),
+          executablePath: process.execPath,
+          logPath: join(app.getPath('userData'), 'phone-audio-bridge.log'),
+          onStatus: (status) => {
+            sessionRecorder?.record('phone_audio_bridge_status', status);
+            if (status.state === 'unhealthy' || status.state === 'exited') {
+              sessionRecorder?.flush();
+            }
+          },
+        })
+      : null;
   const agents = new AgentManager({
     backend: agentBackend,
     isReady: () => agentMock || codexAgentBackend.isReady(),
@@ -141,7 +168,15 @@ async function main(): Promise<void> {
     ...(phoneAudio !== null ? { phoneAudio } : {}),
   });
   phoneAudio?.on('audio', (chunk) => conversation.handleAudioChunk(chunk));
+  phoneAudio?.on('connected', () => {
+    sessionRecorder?.record('phone_audio_bridge_client', { state: 'connected' });
+    sessionRecorder?.flush();
+  });
+  phoneAudio?.on('disconnected', () => {
+    sessionRecorder?.record('phone_audio_bridge_client', { state: 'disconnected' });
+  });
   phoneAudio?.start();
+  phoneBridgeSupervisor?.start();
 
   // ---------------------------------------------------------------------
   // M11: last-resort crash handling. An uncaught main-process exception used
@@ -463,6 +498,7 @@ async function main(): Promise<void> {
     hotkey.stop();
     conversation.close();
     phoneAudio?.close();
+    phoneBridgeSupervisor?.close();
     agents.dispose();
     sessionRecorder?.close('app_quit');
     overlays.destroy();
