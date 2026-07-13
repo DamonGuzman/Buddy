@@ -49,6 +49,7 @@ export type ErrorKind =
   | 'mic_unavailable'
   | 'audio_output_failed'
   | 'capture_failed'
+  | 'codex_plan_limit'
   | 'hotkey_dead'
   | 'hold_too_long'
   | 'settings_reset'
@@ -165,6 +166,18 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
       'try once more?',
     surfaces: ['transcript', 'caption'],
     autoShowPanel: false,
+  },
+  // M17 (integration): the ChatGPT-plan grounding quota is spent. We FAIL
+  // CLOSED — the metered api key is NOT spent for that pointer; clicky flies
+  // the raw model point and says so. Actionable (try later / add a key), so it
+  // auto-shows the panel once. Caption too: it happens while the user is
+  // looking at the screen, not the panel.
+  codex_plan_limit: {
+    copy:
+      "you've hit your chatgpt plan limit for now — i'll point from memory. try again " +
+      'later, or add an openai key in settings.',
+    surfaces: ['transcript', 'caption'],
+    autoShowPanel: true,
   },
   hotkey_dead: {
     copy:

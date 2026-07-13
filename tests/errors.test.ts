@@ -31,6 +31,7 @@ const ALL_KINDS: ErrorKind[] = [
   'mic_unavailable',
   'audio_output_failed',
   'capture_failed',
+  'codex_plan_limit',
   'hotkey_dead',
   'hold_too_long',
   'settings_reset',
@@ -64,6 +65,9 @@ describe('error catalog (describeKind)', () => {
         // Fix items 1 and 6 explicitly add these two actionable kinds.
         'hotkey_dead',
         'settings_reset',
+        // M17 (integration): the fail-closed ChatGPT plan-limit prompt is
+        // actionable (try later / add a key), so it auto-shows once.
+        'codex_plan_limit',
       ].sort(),
     );
     for (const kind of ALL_KINDS) {
@@ -87,6 +91,20 @@ describe('error catalog (describeKind)', () => {
     // Informational — never flips the assistant to the error state.
     expect(describeKind('response_incomplete').surfaces).not.toContain('pill');
     expect(describeKind('capture_failed').surfaces).not.toContain('pill');
+  });
+
+  it('maps codex_plan_limit to the fail-closed copy (transcript + caption, auto-show)', () => {
+    const pres = describeKind('codex_plan_limit');
+    expect(pres.kind).toBe('codex_plan_limit');
+    expect(pres.message).toBe(
+      "you've hit your chatgpt plan limit for now — i'll point from memory. try again " +
+        'later, or add an openai key in settings.',
+    );
+    // Happens while the user is looking at the screen, not just the panel.
+    expect(pres.surfaces).toEqual(['transcript', 'caption']);
+    // Fail-closed but NOT the assistant error state — the answer still lands.
+    expect(pres.surfaces).not.toContain('pill');
+    expect(pres.autoShowPanel).toBe(true);
   });
 
   it('interpolates the model into model_unavailable copy', () => {

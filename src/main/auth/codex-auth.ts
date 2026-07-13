@@ -32,6 +32,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CodexTokenStore } from './token-store';
 import type { StoredCodexTokens } from './token-store';
+import type { CodexSignInState } from '../../shared/types';
+
+// M17 (integration): CodexSignInState now lives in the shared contract so the
+// panel/IPC can consume it (shared/types.ts). Re-exported here so existing
+// main-side importers of `./codex-auth` keep working unchanged.
+export type { CodexSignInState } from '../../shared/types';
 
 /** OAuth client id the Codex CLI registers as (public; not a secret). */
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -54,21 +60,6 @@ export interface CodexAuthInfo {
   planType: string;
   /** Unix milliseconds — access-token expiry. */
   expiresAt: number;
-}
-
-/**
- * Renderer-safe sign-in snapshot (NEVER carries a token). This is the exact
- * shape the integrator should surface to the panel (see return notes).
- */
-export interface CodexSignInState {
-  /** A `~/.codex/auth.json` (or cached refresh) yielded a decodable token. */
-  signedIn: boolean;
-  /** The best-available token is still valid (exp > now + 60s). */
-  valid: boolean;
-  /** e.g. 'pro' | 'plus' | 'free' — '' when unknown. */
-  planType: string;
-  /** Unix ms expiry of the best-available token, or null when not signed in. */
-  expiresAt: number | null;
 }
 
 /** Injectable dependencies (unit tests never touch the real filesystem/net). */

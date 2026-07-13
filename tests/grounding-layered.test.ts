@@ -377,4 +377,22 @@ describe('Conversation: layered grounding dispatch (M10)', () => {
     expect(debug.lastGrounding?.usedPercent).toEqual({ primary: 100, secondary: 87 });
     expect(cmd.points[0]!.x).toBeCloseTo(1280, 5);
   });
+
+  it('FAIL CLOSED: surfaces the codex_plan_limit copy to the transcript (once)', async () => {
+    signedInCodex();
+    ctl.restQuota = true;
+    ctl.rest = async () => ({ x: 512, y: 288 });
+    const pointers: PointerCommand[] = [];
+    const conversation = makeConversation(pointers);
+    await askAndAwaitPointer(conversation, pointers);
+
+    const planLimits = conversation
+      .transcript()
+      .filter((e) => e.role === 'system' && e.text.includes('chatgpt plan limit'));
+    expect(planLimits).toHaveLength(1);
+    expect(planLimits[0]!.text).toBe(
+      "you've hit your chatgpt plan limit for now — i'll point from memory. try again " +
+        'later, or add an openai key in settings.',
+    );
+  });
 });

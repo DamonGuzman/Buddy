@@ -56,6 +56,7 @@ import type {
   AssistantState,
   AudioDeviceError,
   CaptureMeta,
+  GroundingAttribution,
   PlaybackCommand,
   PlaybackStatsUpdate,
   PointerCommand,
@@ -116,22 +117,10 @@ export interface ConversationDeps {
   codexAuth?: CodexProvider;
 }
 
-/**
- * M13-core: grounding-auth attribution for the debug surface. `backend` names
- * which transport actually ran ('codex' = ChatGPT sub, 'apiKey' = metered key,
- * 'none' = neither / skipped); `quotaExhausted` is the FAIL-CLOSED signal (the
- * Codex plan quota was hit and we did NOT spend the metered key for that call).
- *
- * INTEGRATOR: promote these onto the shared PointerCommand + DebugState so the
- * eval harness and the panel can read them (field names spelled out in the
- * return notes / docs/COORD-STUDY §11).
- */
-export interface GroundingAttribution {
-  backend: GroundSource;
-  source: 'uia' | 'rest' | 'raw';
-  quotaExhausted: boolean;
-  usedPercent: CodexUsedPercent | null;
-}
+// M17 (integration): `GroundingAttribution` was promoted to the shared
+// contract (src/shared/types.ts) so DebugState + the panel can read it; it is
+// structurally identical to the M13-core local shape (backend: GroundSource,
+// usedPercent: CodexUsedPercent | null). Imported from shared above.
 
 /** Debug-surface snapshot merged into DebugState by index.ts. */
 export interface ConversationDebugInfo {
@@ -186,6 +175,12 @@ export class Conversation {
   private readonly codexDisabled = process.env['CLICKY_NO_CODEX_SUB'] === '1';
   /** M13-core: attribution of the most recent grounding call. */
   private lastGrounding: GroundingAttribution | null = null;
+  /**
+   * M17: the turnToken (episode) for which the `codex_plan_limit` message has
+   * already been surfaced — so a multi-point turn that repeatedly hits the
+   * spent ChatGPT quota says it ONCE, not once per point.
+   */
+  private codexPlanLimitSurfacedToken: number | null = null;
   /** Serializes pointer dispatches so multi-point turns stay ordered. */
   private pointerChain: Promise<void> = Promise.resolve();
 
@@ -1279,15 +1274,17 @@ export class Conversation {
         } else if (outcome.quotaExhausted) {
           // FAIL CLOSED (turing_agents posture): the ChatGPT plan quota is
           // spent. Do NOT silently fall back to the metered API key for THIS
-          // call — fly the RAW model point and flag it. The user-facing "plan
-          // limit reached" message is the deferred UI slice.
-          // TODO(integration): surface a fail-closed "plan limit reached"
-          // transcript/caption + panel prompt (add ErrorKind
-          // 'codex_plan_limit' to src/main/errors.ts + shared plumbing — see
-          // return notes) instead of just logging.
+          // call — fly the RAW model point and flag it.
           console.warn(
             '[grounding] chatgpt plan quota reached — flying the raw model point (fail closed)',
           );
+          // M17 (integration): surface the fail-closed "plan limit reached"
+          // copy (transcript + caption + one-time panel) ONCE per episode
+          // (turn), not once per point in a multi-point turn.
+          if (this.codexPlanLimitSurfacedToken !== token) {
+            this.codexPlanLimitSurfacedToken = token;
+            this.surfaceError(describeKind('codex_plan_limit'));
+          }
         }
       }
     }

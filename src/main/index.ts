@@ -19,6 +19,7 @@ import type { Tray } from 'electron';
 import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { captureAllDisplays } from './capture';
+import { getCodexAuthProvider } from './auth/codex-auth';
 import { Conversation } from './conversation';
 import { startDebugServer } from './debug-server';
 import { describeKind } from './errors';
@@ -108,6 +109,27 @@ async function main(): Promise<void> {
   const runtimeFlags = (): RuntimeFlags => ({ hookAlive: hotkey.status().hookAlive, devFlags });
   const pushRuntime = (): void => panel.send('panel:runtime', runtimeFlags());
 
+  // M17 (integration): push the Codex ChatGPT-subscription sign-in snapshot to
+  // the panel — on ready, and whenever it changes (the CLI's auth.json can
+  // rotate out from under us, so a light 60s poll refreshes it). The codex*
+  // fields also ride on 'panel:settings'; we re-push that on change so the
+  // settings "ChatGPT" card updates without a fresh settings:get().
+  let lastCodexSignin = '';
+  const pushCodexSignin = (force: boolean): void => {
+    let state;
+    try {
+      state = getCodexAuthProvider().codexSignInState();
+    } catch (err) {
+      console.warn('[boot] codex sign-in state unavailable:', err instanceof Error ? err.name : 'unknown');
+      return;
+    }
+    const key = JSON.stringify(state);
+    if (!force && key === lastCodexSignin) return;
+    lastCodexSignin = key;
+    panel.send('panel:codex-signin', state);
+    panel.send('panel:settings', settings.get());
+  };
+
   // ---------------------------------------------------------------------
   // Typed invoke handlers (single registration point for InvokeChannels)
   // ---------------------------------------------------------------------
@@ -128,6 +150,8 @@ async function main(): Promise<void> {
   handle('overlay:get-state', () => conversation.assistantState());
   // M11 addition (orchestrator-approved): runtime flags bootstrap.
   handle('panel:get-runtime', () => runtimeFlags());
+  // M17 addition (integration-approved): Codex sign-in snapshot bootstrap.
+  handle('codex:signin-state', () => getCodexAuthProvider().codexSignInState());
 
   ipcMain.on('audio:chunk', (_event, chunk: ArrayBuffer) => {
     conversation.handleAudioChunk(chunk);
@@ -218,7 +242,23 @@ async function main(): Promise<void> {
     conversation.replayToPanel();
     panel.send('panel:settings', settings.get());
     pushRuntime();
+    // M17: hand the (re)loaded panel the current Codex sign-in snapshot.
+    pushCodexSignin(true);
   });
+
+  // M17 (integration): warm the Codex auth provider at boot so the first
+  // grounding call (and the first panel snapshot) doesn't pay the token-store
+  // / auth.json read latency, and push the initial snapshot. A light 60s poll
+  // catches the CLI's auth.json rotating (sign-in/out/refresh) out from under
+  // us and re-pushes to the panel only when it actually changed.
+  try {
+    getCodexAuthProvider().codexSignInState();
+  } catch (err) {
+    console.warn('[boot] codex warm failed:', err instanceof Error ? err.name : 'unknown');
+  }
+  pushCodexSignin(true);
+  const codexPoll = setInterval(() => pushCodexSignin(false), 60_000);
+  codexPoll.unref?.();
 
   // F1 fix (C1 + sleep/resume): the secure desktop (Ctrl+Alt+Del) and lock
   // screen swallow keyups — force-cancel any live hold and reset modifier
@@ -287,6 +327,7 @@ async function main(): Promise<void> {
     /* keep running in tray */
   });
   app.on('will-quit', () => {
+    clearInterval(codexPoll); // M17: stop the Codex sign-in refresh poll
     hotkey.stop();
     conversation.close();
     overlays.destroy();

@@ -42,6 +42,11 @@ describe('settings schema', () => {
       hotkeyLabel: 'Ctrl+Alt (left alt)',
       // M15 addition (orchestrator-approved): buddyRest rides along untouched.
       buddyRest: null,
+      // M17 (integration): the main-owned codex* sign-in fields ride along
+      // unchanged from the defaults (not patchable from the renderer).
+      codexSignedIn: false,
+      codexValid: false,
+      codexPlanType: '',
     });
     // the renderer-safe view must never contain the key itself
     expect(JSON.stringify(next)).not.toContain('sk-secret');

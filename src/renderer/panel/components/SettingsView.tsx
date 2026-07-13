@@ -171,6 +171,50 @@ export function SettingsView({
           </CardContent>
         </Card>
 
+        {/* M17 (integration): ChatGPT-subscription (Codex CLI) sign-in card.
+            Read-only for now — we DETECT the Codex CLI's auth.json; the in-app
+            OAuth loopback flow is a later slice. Grounding (pointing) prefers a
+            valid sub over the metered key automatically. */}
+        <Card className="gap-3 rounded-lg py-3.5 shadow-none">
+          <CardHeader className="px-3.5">
+            <CardTitle className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground">
+              chatgpt
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2.5 px-3.5">
+            {settings.codexSignedIn ? (
+              <>
+                <div className="flex min-h-7 items-center gap-2">
+                  {settings.codexValid ? (
+                    <Badge
+                      variant="outline"
+                      className="rounded-full border-emerald-400/40 bg-emerald-400/10 font-medium text-emerald-300"
+                    >
+                      signed in to ChatGPT
+                      {settings.codexPlanType ? ` (${settings.codexPlanType})` : ''}
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className="rounded-full border-amber-400/40 bg-amber-400/10 font-medium text-amber-300"
+                    >
+                      chatgpt session expired — reopen the codex cli
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-[11px] leading-relaxed text-muted-foreground/80">
+                  clicky uses your chatgpt plan for pointing &amp; agents. voice still needs an
+                  openai api key.
+                </p>
+              </>
+            ) : (
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                sign in to ChatGPT via the Codex CLI to use your plan for pointing
+              </p>
+            )}
+          </CardContent>
+        </Card>
+
         <Card className="gap-3 rounded-lg py-3.5 shadow-none">
           <CardHeader className="px-3.5">
             <CardTitle className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground">

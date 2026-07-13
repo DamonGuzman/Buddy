@@ -97,6 +97,21 @@ export function App(): React.JSX.Element {
       clicky.onSessionStatus(setSession),
       clicky.onSettings(setSettings),
       clicky.onRuntime(setRuntime),
+      // M17: merge the Codex sign-in snapshot into settings (the "ChatGPT"
+      // settings card reads it) — lower latency than waiting for the next
+      // panel:settings, and reflects the CLI's auth.json rotating live.
+      clicky.onCodexSignin((state) =>
+        setSettings((prev) =>
+          prev === null
+            ? prev
+            : {
+                ...prev,
+                codexSignedIn: state.signedIn,
+                codexValid: state.valid,
+                codexPlanType: state.planType,
+              },
+        ),
+      ),
       clicky.onTranscript(upsertEntry),
       clicky.onAudioOutput((delta) => audioPlayer.enqueue(delta)),
       clicky.onPlayback(({ command }) => audioPlayer.control(command)),

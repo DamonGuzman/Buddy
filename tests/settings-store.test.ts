@@ -121,6 +121,60 @@ describe('SettingsStore: DPAPI decrypt failure (M11 api_key_unreadable)', () => 
   });
 });
 
+describe('SettingsStore: codex sign-in fields (M17)', () => {
+  it('populates codex* from the injected sign-in resolver', () => {
+    const store = new SettingsStore(freshPath(), () => ({
+      signedIn: true,
+      valid: true,
+      planType: 'pro',
+      expiresAt: Date.now() + 3_600_000,
+    }));
+    const s = store.get();
+    expect(s.codexSignedIn).toBe(true);
+    expect(s.codexValid).toBe(true);
+    expect(s.codexPlanType).toBe('pro');
+  });
+
+  it('reflects a signed-out resolver as all-false / empty plan', () => {
+    const store = new SettingsStore(freshPath(), () => ({
+      signedIn: false,
+      valid: false,
+      planType: '',
+      expiresAt: null,
+    }));
+    const s = store.get();
+    expect(s.codexSignedIn).toBe(false);
+    expect(s.codexValid).toBe(false);
+    expect(s.codexPlanType).toBe('');
+  });
+
+  it('reads the resolver FRESH each get (auth.json can rotate under us)', () => {
+    let signedIn = false;
+    const store = new SettingsStore(freshPath(), () => ({
+      signedIn,
+      valid: signedIn,
+      planType: signedIn ? 'plus' : '',
+      expiresAt: signedIn ? Date.now() + 1_000 : null,
+    }));
+    expect(store.get().codexSignedIn).toBe(false);
+    signedIn = true;
+    expect(store.get().codexSignedIn).toBe(true);
+    expect(store.get().codexPlanType).toBe('plus');
+  });
+
+  it('degrades to signed-out when the resolver throws (never sinks get())', () => {
+    const store = new SettingsStore(freshPath(), () => {
+      throw new Error('codex provider blew up');
+    });
+    const s = store.get();
+    expect(s.codexSignedIn).toBe(false);
+    expect(s.codexValid).toBe(false);
+    expect(s.codexPlanType).toBe('');
+    // The rest of the snapshot is unaffected.
+    expect(s.model).toBe('gpt-realtime-2.1');
+  });
+});
+
 describe('SettingsStore: corrupt settings.json (M11 settings_reset)', () => {
   it('resets to defaults and reports settingsWereReset', () => {
     const path = freshPath();

@@ -54,6 +54,18 @@ export interface Settings {
   // M15 addition (orchestrator-approved): user-defined buddy rest position
   // (set by drag-repositioning the buddy). null = default corner on primary.
   buddyRest: BuddyRest | null;
+  // M17 additions (integration-approved): ChatGPT-subscription (Codex CLI)
+  // sign-in snapshot, surfaced READ-ONLY to the panel so the settings view can
+  // show whether clicky can ground through the user's ChatGPT plan. Populated
+  // by main from the Codex auth provider (`~/.codex/auth.json`); these are NOT
+  // patchable from the renderer (no SettingsPatch fields) and NEVER carry a
+  // token — only booleans + the plan label.
+  /** A decodable Codex token is present (signed in via the Codex CLI). */
+  codexSignedIn: boolean;
+  /** The best-available Codex token is still valid (exp > now + 60s). */
+  codexValid: boolean;
+  /** Plan label from the token claim (e.g. 'pro' | 'plus' | 'free'); '' unknown. */
+  codexPlanType: string;
 }
 
 /**
@@ -87,6 +99,11 @@ export const DEFAULT_SETTINGS: Settings = {
   hotkeyLabel: 'Ctrl+Alt (left alt)',
   // M15 addition (orchestrator-approved).
   buddyRest: null,
+  // M17 additions (integration-approved): default to signed-out until main
+  // populates the snapshot from the Codex auth provider.
+  codexSignedIn: false,
+  codexValid: false,
+  codexPlanType: '',
 };
 
 /**
@@ -95,6 +112,9 @@ export const DEFAULT_SETTINGS: Settings = {
  */
 export function applySettingsPatch(current: Settings, patch: SettingsPatch): Settings {
   return {
+    // M17: the codex* sign-in fields are main-owned (populated from the Codex
+    // auth provider, not patchable from the renderer) — they carry through
+    // unchanged via this spread.
     ...current,
     ...(patch.model !== undefined ? { model: patch.model } : {}),
     ...(patch.voice !== undefined ? { voice: patch.voice } : {}),
@@ -107,6 +127,29 @@ export function applySettingsPatch(current: Settings, patch: SettingsPatch): Set
     // M15 addition (orchestrator-approved).
     ...(patch.buddyRest !== undefined ? { buddyRest: patch.buddyRest } : {}),
   };
+}
+
+// ---------------------------------------------------------------------------
+// M17 additions (integration-approved): Codex ChatGPT-subscription auth
+// ---------------------------------------------------------------------------
+
+/**
+ * Renderer-safe sign-in snapshot for the ChatGPT-subscription (Codex CLI)
+ * grounding path. NEVER carries a token — only booleans, the plan label, and
+ * the best-available token's expiry. This is the exact shape main pushes to
+ * the panel over `panel:codex-signin` (and returns from `codex:signin-state`).
+ * The main-side auth module (`src/main/auth/codex-auth.ts`) produces it and
+ * re-exports this type for its own consumers.
+ */
+export interface CodexSignInState {
+  /** A `~/.codex/auth.json` (or cached refresh) yielded a decodable token. */
+  signedIn: boolean;
+  /** The best-available token is still valid (exp > now + 60s). */
+  valid: boolean;
+  /** e.g. 'pro' | 'plus' | 'free' — '' when unknown. */
+  planType: string;
+  /** Unix ms expiry of the best-available token, or null when not signed in. */
+  expiresAt: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +463,45 @@ export interface TurnUsage {
 }
 
 // ---------------------------------------------------------------------------
+// M17 additions (integration-approved): grounding-auth attribution
+// ---------------------------------------------------------------------------
+
+/**
+ * Which grounding TRANSPORT actually ran for a pointer: the ChatGPT
+ * subscription ('codex' = the codex-sub / gpt-5.6-sol path), the metered
+ * platform key ('apiKey' = gpt-5.4-mini), or neither ('none' = UIA snap alone,
+ * skipped, or no auth). Mirrors `GroundSource` in main's rest-grounder — the
+ * renderer-safe copy so `DebugState` can carry it without a main-side import.
+ */
+export type GroundingBackend = 'apiKey' | 'codex' | 'none';
+
+/**
+ * ChatGPT-plan rate-limit telemetry parsed from the `x-codex-*-used-percent`
+ * response headers (renderer-safe copy of main's rest-grounder shape). A field
+ * is null when its header was absent/unparsable.
+ */
+export interface CodexUsedPercent {
+  /** Primary (short) window used %, 0..100. */
+  primary: number | null;
+  /** Secondary (long / weekly) window used %, 0..100. */
+  secondary: number | null;
+}
+
+/**
+ * Grounding-auth attribution for the most recent pointer, surfaced on
+ * `DebugState.lastGrounding`. `backend` names the transport that ran; `source`
+ * is the layer that produced the final point (UIA snap / REST re-ground / raw
+ * model point); `quotaExhausted` is the FAIL-CLOSED signal (the ChatGPT plan
+ * quota was hit and the metered key was NOT spent for that call).
+ */
+export interface GroundingAttribution {
+  backend: GroundingBackend;
+  source: 'uia' | 'rest' | 'raw';
+  quotaExhausted: boolean;
+  usedPercent: CodexUsedPercent | null;
+}
+
+// ---------------------------------------------------------------------------
 // Debug (CLICKY_DEBUG=1 HTTP server state dump)
 // ---------------------------------------------------------------------------
 
@@ -449,4 +531,9 @@ export interface DebugState {
   lastTurnTimings: TurnTimings | null;
   /** Recent turn timings, oldest first (capped at 20). */
   turnTimingsHistory: TurnTimings[];
+  // M17 addition (integration-approved): grounding-auth attribution for the
+  // last pointer — which transport ran (backend 'codex' when the ChatGPT sub
+  // grounded) and whether the plan quota was hit (fail-closed). Null until a
+  // grounding call has been attempted. Merged in via conversation.debugInfo().
+  lastGrounding: GroundingAttribution | null;
 }

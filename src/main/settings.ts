@@ -11,7 +11,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { MODEL_IDS } from '../shared/constants';
 import { DEFAULT_SETTINGS, applySettingsPatch } from '../shared/types';
-import type { BuddyRest, Settings, SettingsPatch } from '../shared/types';
+import type { BuddyRest, CodexSignInState, Settings, SettingsPatch } from '../shared/types';
+import { getCodexAuthProvider } from './auth/codex-auth';
+
+/** M17: signed-out fallback when the Codex auth provider is unavailable. */
+const CODEX_SIGNED_OUT: CodexSignInState = {
+  signedIn: false,
+  valid: false,
+  planType: '',
+  expiresAt: null,
+};
 
 /** On-disk shape. `apiKeyEncrypted` is a base64 safeStorage blob. */
 interface SettingsFile {
@@ -52,9 +61,17 @@ export class SettingsStore {
   private listeners = new Set<(settings: Settings) => void>();
   /** M11: true when a settings.json EXISTED but was corrupt (reset to defaults). */
   private wasReset = false;
+  /**
+   * M17: resolves the renderer-safe Codex sign-in snapshot. Defaults to the
+   * process-wide Codex auth provider (reads `~/.codex/auth.json` fresh);
+   * injectable so unit tests stay hermetic. Any throw degrades to signed-out.
+   */
+  private readonly resolveCodexSignIn: () => CodexSignInState;
 
-  constructor(filePath?: string) {
+  constructor(filePath?: string, codexSignIn?: () => CodexSignInState) {
     this.path = filePath ?? join(app.getPath('userData'), FILE_NAME);
+    this.resolveCodexSignIn =
+      codexSignIn ?? (() => getCodexAuthProvider().codexSignInState());
     this.file = this.load();
     // M15 addition (orchestrator-approved): see getSettingsStore above.
     activeStore = this;
@@ -62,6 +79,7 @@ export class SettingsStore {
 
   /** Renderer-safe snapshot (never the raw key). */
   get(): Settings {
+    const codex = this.codexSignInState();
     return {
       apiKeyPresent: this.file.apiKeyEncrypted !== null,
       apiKeyUnreadable: this.file.keyUnreadable === true,
@@ -72,7 +90,31 @@ export class SettingsStore {
       hotkeyLabel: DEFAULT_SETTINGS.hotkeyLabel,
       // M15 addition (orchestrator-approved).
       buddyRest: this.file.buddyRest,
+      // M17 additions (integration-approved): ChatGPT-subscription sign-in
+      // snapshot from the Codex auth provider (never a token). The token store
+      // is self-contained (codex-tokens.json); no field is persisted here.
+      codexSignedIn: codex.signedIn,
+      codexValid: codex.valid,
+      codexPlanType: codex.planType,
     };
+  }
+
+  /**
+   * M17: the Codex sign-in snapshot, fail-soft. The provider reads the CLI's
+   * auth.json fresh each call and the token store degrades to "no crypto"
+   * outside Electron — but a construction/read error must never sink `get()`,
+   * so anything thrown maps to signed-out.
+   */
+  private codexSignInState(): CodexSignInState {
+    try {
+      return this.resolveCodexSignIn();
+    } catch (err) {
+      console.warn(
+        '[settings] codex sign-in state unavailable:',
+        err instanceof Error ? err.name : 'unknown',
+      );
+      return CODEX_SIGNED_OUT;
+    }
   }
 
   /**

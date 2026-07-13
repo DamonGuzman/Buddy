@@ -15,6 +15,7 @@ import type {
   AudioOutputDelta,
   CaptionUpdate,
   CaptureCommand,
+  CodexSignInState,
   MicDevice,
   OverlayHoverConfig,
   OverlayHoverEvent,
@@ -64,6 +65,11 @@ export interface MainToPanelEvents {
   'panel:assistant-state': AssistantState;
   /** Settings changed (from any source) — renderer-safe view only. */
   'panel:settings': Settings;
+  // M17 addition (integration-approved): the ChatGPT-subscription (Codex CLI)
+  // sign-in snapshot, pushed on ready and whenever it changes (the CLI's
+  // auth.json can rotate under us). NEVER carries a token. The codex* fields
+  // also ride on 'panel:settings'; this is the lower-latency dedicated push.
+  'panel:codex-signin': CodexSignInState;
   /** Model audio output for the panel's playback queue. */
   'audio:output': AudioOutputDelta;
   /**
@@ -127,6 +133,9 @@ export interface InvokeChannels {
   // M11 addition (orchestrator-approved): panel bootstrap for runtime flags
   // (push updates ride on 'panel:runtime').
   'panel:get-runtime': { args: []; result: RuntimeFlags };
+  // M17 addition (integration-approved): panel bootstrap for the Codex
+  // sign-in snapshot (push updates ride on 'panel:codex-signin').
+  'codex:signin-state': { args: []; result: CodexSignInState };
   // M15 addition (orchestrator-approved): overlay bootstrap for hover config
   // (belt-and-braces vs the did-finish-load push; handled in windows/overlay.ts).
   'overlay:get-hover-config': { args: []; result: OverlayHoverConfig };
@@ -186,10 +195,14 @@ export interface PanelApi {
   onCaptureCommand(cb: (payload: { command: CaptureCommand }) => void): Unsubscribe;
   // M11 addition (orchestrator-approved): runtime flags (hookAlive + dev flags).
   onRuntime(cb: (flags: RuntimeFlags) => void): Unsubscribe;
+  // M17 addition (integration-approved): Codex sign-in state push.
+  onCodexSignin(cb: (state: CodexSignInState) => void): Unsubscribe;
 
   getSettings(): Promise<Settings>;
   // M11 addition (orchestrator-approved): runtime flags bootstrap.
   getRuntime(): Promise<RuntimeFlags>;
+  // M17 addition (integration-approved): Codex sign-in state bootstrap.
+  getCodexSigninState(): Promise<CodexSignInState>;
   setSettings(patch: SettingsPatch): Promise<Settings>;
   askText(text: string): Promise<void>;
   listMics(): Promise<MicDevice[]>;
