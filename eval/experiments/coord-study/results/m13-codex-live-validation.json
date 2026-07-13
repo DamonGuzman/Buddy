@@ -1,0 +1,157 @@
+{
+  "module": "src/main/grounding/rest-grounder.ts ground() — chatgptCodex arm",
+  "model": "gpt-5.6-sol",
+  "timestamp": "2026-07-13T00:27:39.064Z",
+  "rows": [
+    {
+      "id": "save",
+      "kind": "synthetic",
+      "err": 0,
+      "hit": true,
+      "ms": 2433,
+      "source": "codex",
+      "primaryPct": 24
+    },
+    {
+      "id": "open",
+      "kind": "synthetic",
+      "err": 0,
+      "hit": true,
+      "ms": 2096,
+      "source": "codex",
+      "primaryPct": 24
+    },
+    {
+      "id": "help",
+      "kind": "synthetic",
+      "err": 1,
+      "hit": true,
+      "ms": 1714,
+      "source": "codex",
+      "primaryPct": 24
+    },
+    {
+      "id": "exit",
+      "kind": "synthetic",
+      "err": 1,
+      "hit": true,
+      "ms": 4660,
+      "source": "codex",
+      "primaryPct": 24
+    },
+    {
+      "id": "start",
+      "kind": "synthetic",
+      "err": 1,
+      "hit": true,
+      "ms": 1647,
+      "source": "codex",
+      "primaryPct": 24
+    },
+    {
+      "id": "cart",
+      "kind": "synthetic",
+      "err": 0,
+      "hit": true,
+      "ms": 2480,
+      "source": "codex",
+      "primaryPct": 24
+    },
+    {
+      "id": "send",
+      "kind": "synthetic",
+      "err": 1,
+      "hit": true,
+      "ms": 1749,
+      "source": "codex",
+      "primaryPct": 24
+    },
+    {
+      "id": "copy",
+      "kind": "synthetic",
+      "err": 1,
+      "hit": true,
+      "ms": 1910,
+      "source": "codex",
+      "primaryPct": 24
+    },
+    {
+      "id": "paste",
+      "kind": "synthetic",
+      "err": 1.4142135623730951,
+      "hit": true,
+      "ms": 2110,
+      "source": "codex",
+      "primaryPct": 24
+    },
+    {
+      "id": "cut",
+      "kind": "synthetic",
+      "err": 1,
+      "hit": true,
+      "ms": 1654,
+      "source": "codex",
+      "primaryPct": 24
+    },
+    {
+      "id": "dot",
+      "kind": "synthetic",
+      "err": 1.4142135623730951,
+      "hit": true,
+      "ms": 1685,
+      "source": "codex",
+      "primaryPct": 24
+    },
+    {
+      "id": "square",
+      "kind": "synthetic",
+      "err": 0,
+      "hit": true,
+      "ms": 2122,
+      "source": "codex",
+      "primaryPct": 24
+    },
+    {
+      "id": "clock",
+      "kind": "real",
+      "err": 1.4142135623730951,
+      "hit": true,
+      "ms": 1774,
+      "source": "codex",
+      "primaryPct": 24
+    },
+    {
+      "id": "review",
+      "kind": "real",
+      "err": 1,
+      "hit": true,
+      "ms": 1832,
+      "source": "codex",
+      "primaryPct": 24
+    },
+    {
+      "id": "openin",
+      "kind": "real",
+      "err": 4.47213595499958,
+      "hit": true,
+      "ms": 2098,
+      "source": "codex",
+      "primaryPct": 24
+    }
+  ],
+  "usage": {
+    "primaryPercent": 24,
+    "secondaryPercent": 0,
+    "inputTokens": 43272,
+    "outputTokens": 210
+  },
+  "summary": {
+    "n": 15,
+    "ok": 15,
+    "medianErrPx": 1,
+    "maxErrPx": 4,
+    "inElement": 15,
+    "p50LatencyMs": 1910,
+    "maxLatencyMs": 4660
+  }
+}

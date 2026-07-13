@@ -40,6 +40,15 @@ const ctl = vi.hoisted(() => {
     snap: (async () => noMatch) as (q: unknown) => Promise<unknown>,
     restQueries: [] as { jpegBase64: string; imageW: number; imageH: number; label: string }[],
     rest: (async () => null) as (q: unknown) => Promise<{ x: number; y: number } | null>,
+    // M13-core: the grounding transport the mock RestGrounder.ground() reports,
+    // and a quota-exhausted flag to drive the fail-closed assertion.
+    restBackend: 'apiKey' as 'apiKey' | 'codex' | 'none',
+    restQuota: false,
+    restUsedPercent: null as { primary: number | null; secondary: number | null } | null,
+    // M13-core: controllable Codex sign-in state for resolveGroundingAuth.
+    codexInfo: null as
+      | { accessToken: string; accountId: string; planType: string; expiresAt: number }
+      | null,
   };
 });
 
@@ -68,9 +77,26 @@ vi.mock('../src/main/grounding/snapper', () => ({
 
 vi.mock('../src/main/grounding/rest-grounder', () => ({
   RestGrounder: class {
-    groundWithModel(q: unknown): Promise<{ x: number; y: number } | null> {
-      ctl.restQueries.push(q as (typeof ctl.restQueries)[number]);
-      return ctl.rest(q);
+    // M13-core: the transport-selecting entry point. Records the query and
+    // returns a GroundOutcome built from the controllable ctl state.
+    async ground(
+      query: { jpegBase64: string; imageW: number; imageH: number; label: string },
+      auth: { kind: 'apiKey' | 'chatgptCodex' },
+    ): Promise<{
+      point: { x: number; y: number } | null;
+      source: 'apiKey' | 'codex' | 'none';
+      quotaExhausted: boolean;
+      usedPercent: { primary: number | null; secondary: number | null } | null;
+    }> {
+      ctl.restQueries.push(query);
+      const point = await ctl.rest(query);
+      const source = auth.kind === 'chatgptCodex' ? 'codex' : 'apiKey';
+      return {
+        point: ctl.restQuota ? null : point,
+        source,
+        quotaExhausted: ctl.restQuota,
+        usedPercent: ctl.restUsedPercent,
+      };
     }
   },
 }));
@@ -114,14 +140,16 @@ type AnimateCommand = Extract<PointerCommand, { type: 'animate' }>;
 function fakeDeps(pointers: PointerCommand[]) {
   const settings = {
     get: () => ({
-      apiKeyPresent: false,
+      apiKeyPresent: true,
       model: 'gpt-realtime-2.1-mini',
       voice: 'marin',
       captionsEnabled: false,
       micDeviceId: '',
       hotkeyLabel: 'Ctrl+Alt',
     }),
-    getApiKey: () => null, // mock mode: the session needs no key
+    // A key IS present so resolveGroundingAuth returns the apiKey arm by
+    // default; the realtime session runs in mock mode and ignores it.
+    getApiKey: () => 'sk-mock',
     onChange: () => () => {},
   };
   const overlays = {
@@ -130,7 +158,17 @@ function fakeDeps(pointers: PointerCommand[]) {
     count: () => 1,
   };
   const panel = { send: () => {} };
-  return { settings: settings as never, overlays: overlays as never, panel: panel as never };
+  // M13-core: deterministic Codex provider (no real ~/.codex/auth.json read).
+  const codexAuth = {
+    getCodexAuth: () => ctl.codexInfo,
+    getBearer: async () => ctl.codexInfo?.accessToken ?? '',
+  };
+  return {
+    settings: settings as never,
+    overlays: overlays as never,
+    panel: panel as never,
+    codexAuth: codexAuth as never,
+  };
 }
 
 describe('Conversation: layered grounding dispatch (M10)', () => {
@@ -153,7 +191,11 @@ describe('Conversation: layered grounding dispatch (M10)', () => {
     ctl.rest = async () => null;
     ctl.snapQueries.length = 0;
     ctl.restQueries.length = 0;
+    ctl.restQuota = false;
+    ctl.restUsedPercent = null;
+    ctl.codexInfo = null;
     delete process.env['CLICKY_NO_REST_GROUND'];
+    delete process.env['CLICKY_NO_CODEX_SUB'];
     server.clientEvents.length = 0;
   });
 
@@ -269,6 +311,70 @@ describe('Conversation: layered grounding dispatch (M10)', () => {
     expect(cmd.groundingSource).toBe('raw');
     expect(cmd.restUsed).toBe(false);
     expect(cmd.restMs).toBeUndefined();
+    expect(cmd.points[0]!.x).toBeCloseTo(1280, 5);
+  });
+
+  // -------------------------------------------------------------------------
+  // M13-core: ChatGPT-subscription grounding transport + fail-closed quota
+  // -------------------------------------------------------------------------
+
+  /** A signed-in, valid Codex sub (token far from expiry). */
+  function signedInCodex(): void {
+    ctl.codexInfo = {
+      accessToken: 'codex-bearer',
+      accountId: 'acct-123',
+      planType: 'pro',
+      expiresAt: Date.now() + 99 * 3_600_000,
+    };
+  }
+
+  it('Codex sub signed in -> grounds via the codex backend (preferred over the key)', async () => {
+    signedInCodex();
+    ctl.rest = async () => ({ x: 512, y: 288 });
+    ctl.restUsedPercent = { primary: 12, secondary: 3 };
+    const pointers: PointerCommand[] = [];
+    const conversation = makeConversation(pointers);
+    const cmd = await askAndAwaitPointer(conversation, pointers);
+
+    expect(cmd.groundingSource).toBe('rest');
+    expect(cmd.restUsed).toBe(true);
+    // Attribution records the CODEX backend + the plan usage headers.
+    const debug = conversation.debugInfo();
+    expect(debug.lastGrounding?.backend).toBe('codex');
+    expect(debug.lastGrounding?.quotaExhausted).toBe(false);
+    expect(debug.lastGrounding?.usedPercent).toEqual({ primary: 12, secondary: 3 });
+    // Grounded point mapped like a model point: (512,288) -> (640,360) DIP.
+    expect(cmd.points[0]!.x).toBeCloseTo(640, 5);
+  });
+
+  it('CLICKY_NO_CODEX_SUB=1 forces the metered API key even when signed in', async () => {
+    process.env['CLICKY_NO_CODEX_SUB'] = '1';
+    signedInCodex();
+    ctl.rest = async () => ({ x: 512, y: 288 });
+    const pointers: PointerCommand[] = [];
+    const conversation = makeConversation(pointers);
+    await askAndAwaitPointer(conversation, pointers);
+
+    expect(conversation.debugInfo().lastGrounding?.backend).toBe('apiKey');
+  });
+
+  it('FAIL CLOSED: codex plan quota -> raw model point, no metered-key fallback', async () => {
+    signedInCodex();
+    ctl.restQuota = true; // 429/quota-classified
+    ctl.rest = async () => ({ x: 512, y: 288 }); // would-be point, must be ignored
+    ctl.restUsedPercent = { primary: 100, secondary: 87 };
+    const pointers: PointerCommand[] = [];
+    const conversation = makeConversation(pointers);
+    const cmd = await askAndAwaitPointer(conversation, pointers);
+
+    // The RAW model point is flown (center of screen0 -> (1280,720) DIP) —
+    // the metered key is NOT consulted for this call.
+    expect(cmd.groundingSource).toBe('raw');
+    expect(ctl.restQueries).toHaveLength(1); // exactly one transport tried
+    const debug = conversation.debugInfo();
+    expect(debug.lastGrounding?.backend).toBe('codex');
+    expect(debug.lastGrounding?.quotaExhausted).toBe(true);
+    expect(debug.lastGrounding?.usedPercent).toEqual({ primary: 100, secondary: 87 });
     expect(cmd.points[0]!.x).toBeCloseTo(1280, 5);
   });
 });
