@@ -14,7 +14,7 @@
  *   permission prompt (use-fake-ui-for-media-stream).
  */
 
-import { app, ipcMain, powerMonitor, shell } from 'electron';
+import { app, ipcMain, Notification, powerMonitor, shell } from 'electron';
 import type { Tray } from 'electron';
 import { appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -34,6 +34,7 @@ import { SessionRecorder } from './session-recorder';
 import { createTray } from './tray';
 import { OverlayManager } from './windows/overlay';
 import { PanelManager } from './windows/panel';
+import { preflightMacPermissions, showMacPermissionGuide } from './windows/mac-permissions';
 import { PhoneAudioBridgeClient } from './phone-audio-bridge';
 import { ENV_DEBUG } from '../shared/constants';
 import type { InvokeArgs, InvokeChannel, InvokeResult } from '../shared/ipc';
@@ -71,6 +72,12 @@ if (process.env['CLICKY_FAKE_MIC']) {
 }
 
 // Single instance: a second launch just pops the panel of the first.
+if (process.platform === 'darwin') {
+  // Buddy is a menu-bar utility: no Dock icon and no regular app-switcher
+  // entry. Its panel is still focusable when opened from the status item.
+  app.setActivationPolicy('accessory');
+}
+
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -109,6 +116,17 @@ async function main(): Promise<void> {
   const panel = new PanelManager();
   const hotkey = new HotkeyManager();
   let tray: Tray | null = null;
+  const notifyUser = (title: string, body: string): void => {
+    try {
+      if (process.platform === 'darwin' && Notification.isSupported()) {
+        new Notification({ title, body }).show();
+      } else {
+        tray?.displayBalloon({ title, content: body });
+      }
+    } catch {
+      /* notifications may be disabled; transcript and tray tooltip remain */
+    }
+  };
   const codexAuth = getCodexAuthProvider();
   const codexAgentBackend = new CodexAgentBackend(codexAuth);
   const agentMock = process.env['CLICKY_AGENT_MOCK'] === '1';
@@ -127,9 +145,7 @@ async function main(): Promise<void> {
       overlays.broadcast('overlay:agents', list);
     },
     onFinished: (summary) => conversation.deliverAgentResult(summary),
-    notify: (title, body) => {
-      try { tray?.displayBalloon({ title, content: body }); } catch { /* unavailable on some systems */ }
-    },
+    notify: notifyUser,
   });
   conversation = new Conversation({
     settings,
@@ -276,8 +292,12 @@ async function main(): Promise<void> {
     conversation.onSettingsChanged(snapshot);
     tray?.setToolTip(
       snapshot.fullRealtimeMode
-        ? 'buddy - press Ctrl + left Alt to start or stop realtime'
-        : 'buddy - hold Ctrl + left Alt and talk',
+        ? process.platform === 'darwin'
+          ? 'buddy - press Control + left Option to start or stop realtime'
+          : 'buddy - press Ctrl + left Alt to start or stop realtime'
+        : process.platform === 'darwin'
+          ? 'buddy - hold Control + left Option and talk'
+          : 'buddy - hold Ctrl + left Alt and talk',
     );
   });
 
@@ -302,7 +322,12 @@ async function main(): Promise<void> {
   // Boot
   // ---------------------------------------------------------------------
   await app.whenReady();
-  app.setAppUserModelId('ai.fastyr.buddy');
+  if (process.platform === 'win32') app.setAppUserModelId('ai.fastyr.buddy');
+  if (process.platform === 'darwin') app.dock?.hide();
+
+  // Request only microphone and Accessibility here. Screen Recording remains
+  // deferred until an explicit capture so startup never screenshots the user.
+  await preflightMacPermissions();
 
   overlays.start();
 
@@ -312,12 +337,17 @@ async function main(): Promise<void> {
   // and abort the rest of boot (tray, powerMonitor, debug server never ran):
   // a hook failure left the app running with no UI entry point at all.
   tray = createTray({
-    onTogglePanel: () => panel.toggle(),
-    onOpenPanel: () => panel.show(),
+    onTogglePanel: (anchor) => panel.toggle(anchor),
+    onOpenPanel: (anchor) => panel.show(anchor),
+    onOpenPermissions: () => void showMacPermissionGuide(),
     onQuit: () => app.quit(),
   });
   if (settings.get().fullRealtimeMode) {
-    tray.setToolTip('buddy - press Ctrl + left Alt to start or stop realtime');
+    tray.setToolTip(
+      process.platform === 'darwin'
+        ? 'buddy - press Control + left Option to start or stop realtime'
+        : 'buddy - press Ctrl + left Alt to start or stop realtime',
+    );
   }
 
   hotkey.on('error', () => {
@@ -334,11 +364,7 @@ async function main(): Promise<void> {
   // torn down (a tray click builds a fresh one); tell the user via the tray.
   panel.onFatal(() => {
     const dead = describeKind('renderer_dead');
-    try {
-      tray?.displayBalloon({ title: 'buddy', content: dead.message });
-    } catch {
-      /* balloons can be unavailable; the tooltip below still lands */
-    }
+    notifyUser('buddy', dead.message);
     tray?.setToolTip(`buddy — ${dead.message}`);
   });
 
@@ -390,6 +416,7 @@ async function main(): Promise<void> {
   });
 
   app.on('second-instance', () => panel.show());
+  app.on('activate', () => panel.show());
 
   // M11: last-resort-handler verification hook (headless QA only):
   // CLICKY_TEST_THROW=exception|rejection blows up 3s after boot so the

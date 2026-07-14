@@ -1,11 +1,12 @@
-# Buddy for Windows — MVP Architecture & Scope
+# Buddy for macOS and Windows — MVP Architecture & Scope
 
 > The single source of truth for this MVP. All implementation agents read this first.
 > Product research: see `docs/RESEARCH.md` (copied from the original teardown).
 
 ## 1. Product in one paragraph
 
-A Windows tray app. By default you **hold Ctrl+Alt (left Alt) and talk**; an opt-in full realtime
+A macOS menu-bar / Windows tray app. By default you **hold Control+left Option on macOS or
+Ctrl+left Alt on Windows and talk**; an opt-in full realtime
 mode turns the same hotkey into start/stop for an open-mic conversation. It screenshots your monitors,
 streams your voice + the screenshots to a realtime speech-to-speech model (OpenAI `gpt-realtime` family), speaks
 the answer back, and **flies an animated "buddy" pointer** (a friendly blue triangle) across a
@@ -16,8 +17,9 @@ typed action** and is always signposted by a visible indicator.
 ## 2. MVP scope
 
 **In:**
-- Hold-to-talk global hotkey (default **Ctrl+Alt**, both held; release = send). Only the LEFT
-  Alt participates — Right Alt is AltGr on international layouts and never triggers.
+- Hold-to-talk global hotkey (default **Control+Option/Alt**, both held; release = send). Only the
+  LEFT Option/Alt participates — Right Alt is AltGr on international Windows layouts and never
+  triggers.
 - Opt-in full realtime mode: press the hotkey once to connect and keep the mic streaming with
   server VAD; each detected speech turn gets a fresh multi-monitor capture before its response.
   Press the hotkey again to stop. Lock/suspend always stops it.
@@ -47,8 +49,7 @@ typed action** and is always signposted by a visible indicator.
 - Agent mode ("Buddy, agent") — main-process, read-only research agents with hosted web search,
   guarded web fetch, persisted panel results, cancellation, and voice handoff/return.
 - Cloudflare Worker / ephemeral-token proxy (MVP is local-key, single user).
-- Integrations (Notion/Gmail/Calendar/Linear), wake word, ElevenLabs, macOS build (keep platform
-  code isolated so macOS can come later), auto-update, installer polish.
+- Integrations (Notion/Gmail/Calendar/Linear), wake word, ElevenLabs, auto-update, installer polish.
 
 ## 3. Stack
 
@@ -68,7 +69,8 @@ typed action** and is always signposted by a visible indicator.
   the **RealtimeSession** (WS client), tool-call dispatch, debug server.
 - **Overlay renderer** (one `BrowserWindow` per display): `transparent: true`, `frame: false`,
   `alwaysOnTop: 'screen-saver'`, `setIgnoreMouseEvents(true)`, `skipTaskbar`, full display bounds,
-  visible on all workspaces. Draws buddy + caption + indicator. Never focusable.
+  visible on all workspaces. Draws buddy + caption + indicator. Never focusable. macOS overlays
+  stay unconditionally click-through and are hidden from Mission Control.
 - **Panel renderer**: ~380×520 frameless window toggled from tray click, hides on blur.
 - IPC is **typed**: all channels + payload types live in `src/shared/ipc.ts`. Renderers get a
   narrow `window.clicky` API from `preload`. No `remote`, contextIsolation on everywhere.
@@ -123,7 +125,7 @@ tests/               vitest unit tests (coords, protocol framing, settings, hotk
 
 The live evals (docs/EVAL.md §7-§8) proved the model names the right element essentially every
 time but its raw coordinates drift scene-dependently. `point_at` is therefore GROUNDED before the
-buddy flies: `src/main/grounding/` keeps a persistent PowerShell daemon (`snapper.ps1`, embedded
+buddy flies. On Windows, `src/main/grounding/` keeps a persistent PowerShell daemon (`snapper.ps1`, embedded
 at build time, spawned lazily, restarted on crash, killed on quit) that resolves the top-level
 window under the model's point via Win32 `WindowFromPoint` (mouse hit-test semantics — skips
 Buddy's own click-through overlays; the daemon makes itself Per-Monitor-V2 DPI-aware so user32
@@ -137,6 +139,11 @@ snapping is never worse than no snapping. The label chip keeps the MODEL's words
 disables it (eval A/B); `POST /grounding/query` drives the snapper directly (debug server).
 Attribution (raw vs snapped point, score, name, ms) rides on `PointerCommand.snap` and
 `TurnTimings.tPointerDispatched`/`snapMs` for the eval harness.
+
+On macOS the UIA layer is intentionally skipped and the REST vision layer below runs first. macOS
+Accessibility grants are process-scoped, so a separate native enumeration helper would require a
+second, confusing permission grant; Buddy keeps the grant attached to the app process for the
+global hotkey and optional computer-use input instead.
 
 **M10 — REST grounding fallback: UIA snap → REST ground → raw point.** The coordinate study
 (docs/COORD-STUDY.md §8-§9) measured that coordinate weakness is realtime-family-specific:
@@ -215,7 +222,8 @@ take down or stall shutdown of the tray app.
 - Unit: vitest on coords/protocol/settings/hotkey FSM.
 - E2E (no API key needed): launch app with `CLICKY_DEBUG=1 CLICKY_MOCK_URL=ws://127.0.0.1:8123`,
   drive via debug HTTP (simulate hotkey press/release, inject text), assert state via debug
-  endpoints, and verify visuals via full-screen screenshots (PowerShell System.Drawing capture).
+  endpoints, and verify visuals via renderer state and platform screenshots (ScreenCaptureKit on
+  macOS, PowerShell System.Drawing on Windows).
 - Mock scenarios must exercise: spoken answer + single point, multi-monitor point, caption text,
   tool-call round-trip, error recovery.
 - Live smoke test with a real OpenAI key = final user step (documented in README).
@@ -227,4 +235,5 @@ take down or stall shutdown of the tray app.
   integration/orchestrator-approved edits**.
 - Commit per milestone with clear messages.
 - `npm run dev` (electron-vite dev), `npm run build`, `npm test`, `npm run mock` (mock server),
-  `npm run dist` (electron-builder, portable + NSIS; unsigned for MVP).
+  `npm run dist` (electron-builder: DMG + ZIP on macOS, portable + NSIS on Windows; unsigned for
+  MVP).

@@ -53,6 +53,7 @@ public static class BuddyInput {
   const uint LEFTDOWN = 0x0002, LEFTUP = 0x0004;
   const uint RIGHTDOWN = 0x0008, RIGHTUP = 0x0010;
   const uint MIDDLEDOWN = 0x0020, MIDDLEUP = 0x0040;
+  const uint WHEEL = 0x0800, HWHEEL = 0x1000;
 
   static readonly Dictionary<string, ushort> Keys = new Dictionary<string, ushort>(StringComparer.OrdinalIgnoreCase) {
     {"BACKSPACE", 0x08}, {"TAB", 0x09}, {"ENTER", 0x0D}, {"SHIFT", 0x10},
@@ -74,6 +75,15 @@ public static class BuddyInput {
     if (String.Equals(button, "right", StringComparison.OrdinalIgnoreCase)) { down = RIGHTDOWN; up = RIGHTUP; }
     if (String.Equals(button, "middle", StringComparison.OrdinalIgnoreCase)) { down = MIDDLEDOWN; up = MIDDLEUP; }
     for (int i = 0; i < Math.Max(1, Math.Min(count, 2)); i++) { mouse_event(down, 0, 0, 0, UIntPtr.Zero); mouse_event(up, 0, 0, 0, UIntPtr.Zero); }
+  }
+
+  public static void Move(int x, int y) {
+    if (!SetCursorPos(x, y)) throw new InvalidOperationException("SetCursorPos failed");
+  }
+
+  public static void Scroll(int deltaX, int deltaY) {
+    if (deltaY != 0) mouse_event(WHEEL, 0, 0, unchecked((uint)deltaY), UIntPtr.Zero);
+    if (deltaX != 0) mouse_event(HWHEEL, 0, 0, unchecked((uint)deltaX), UIntPtr.Zero);
   }
 
   public static void TypeText(string text) {
@@ -115,7 +125,9 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
     $request = $line | ConvertFrom-Json
     $id = [int]$request.id
     switch ([string]$request.action) {
+      'move' { [BuddyInput]::Move([int]$request.x, [int]$request.y) }
       'click' { [BuddyInput]::Click([int]$request.x, [int]$request.y, [string]$request.button, [int]$request.count) }
+      'scroll' { [BuddyInput]::Scroll([int]$request.deltaX, [int]$request.deltaY) }
       'type_text' { [BuddyInput]::TypeText([string]$request.text) }
       'press_keys' { [BuddyInput]::Press([string[]]$request.keys) }
       default { throw "unknown action" }

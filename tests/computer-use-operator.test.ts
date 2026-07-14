@@ -68,6 +68,7 @@ describe('ComputerUseOperator', () => {
       input,
       initialCaptures: [CAPTURE],
       isAllowed: () => true,
+      inputPointFromDip: ({ x, y }) => ({ x: x * 2, y: y * 2 }),
       capture: async () => { captures += 1; return [CAPTURE]; },
       buildSession: (auth) => new CodexResponsesSession({
         auth,

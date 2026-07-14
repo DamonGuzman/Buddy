@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * Generates build/icon.ico (16/32/48/256, 32-bit RGBA) from the Clicky buddy —
+ * Generates Windows, macOS app, and macOS menu-bar icons from Buddy —
  * the rounded blue gradient triangle with eyes — entirely programmatically:
  * an SDF rasterizer + a minimal zlib-based PNG encoder + an ICO container.
  * No dependencies beyond node:zlib. The geometry mirrors BuddySvg in
  * src/renderer/overlay/main.tsx (40x40 viewBox, stroke-width 7 round join =
  * a 3.5-unit rounding radius on the triangle).
  *
- * Usage: node build/make-icon.mjs   (writes build/icon.ico; commit the result)
+ * Usage: node build/make-icon.mjs
+ * Writes icon.ico, icon.icns, trayTemplate.png, and trayTemplate@2x.png.
  */
 
 import { deflateSync } from 'node:zlib';
@@ -15,7 +16,11 @@ import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const OUT = path.join(path.dirname(fileURLToPath(import.meta.url)), 'icon.ico');
+const BUILD_DIR = path.dirname(fileURLToPath(import.meta.url));
+const ICO_OUT = path.join(BUILD_DIR, 'icon.ico');
+const ICNS_OUT = path.join(BUILD_DIR, 'icon.icns');
+const TRAY_OUT = path.join(BUILD_DIR, 'trayTemplate.png');
+const TRAY_2X_OUT = path.join(BUILD_DIR, 'trayTemplate@2x.png');
 
 // ---------------------------------------------------------------------------
 // Buddy geometry (viewBox 0 0 40 40 — see BuddySvg)
@@ -122,6 +127,31 @@ function renderRgba(size, ss = 4) {
   return rgba;
 }
 
+/** Monochrome template image: macOS supplies light/dark menu-bar coloring. */
+function renderTemplateRgba(size, ss = 4) {
+  const rgba = Buffer.alloc(size * size * 4);
+  const scale = 40 / size;
+  const inv = 1 / (ss * ss);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      let alpha = 0;
+      for (let sy = 0; sy < ss; sy++) {
+        for (let sx = 0; sx < ss; sx++) {
+          const ux = (x + (sx + 0.5) / ss) * scale;
+          const uy = (y + (sy + 0.5) / ss) * scale;
+          if (sdTriangle(ux, uy, TRI) - ROUND > 0) continue;
+          const inEye =
+            Math.hypot(ux - EYES[0].cx, uy - EYES[0].cy) <= EYES[0].r ||
+            Math.hypot(ux - EYES[1].cx, uy - EYES[1].cy) <= EYES[1].r;
+          if (!inEye) alpha += 255;
+        }
+      }
+      rgba[(y * size + x) * 4 + 3] = Math.round(alpha * inv);
+    }
+  }
+  return rgba;
+}
+
 // ---------------------------------------------------------------------------
 // Minimal PNG encoder (RGBA8, filter 0)
 // ---------------------------------------------------------------------------
@@ -191,5 +221,28 @@ const entries = SIZES.map((s, i) => {
   return e;
 });
 
-writeFileSync(OUT, Buffer.concat([header, ...entries, ...pngs]));
-console.log(`wrote ${OUT} (${SIZES.join('/')}px, ${Buffer.concat(pngs).length + 6 + 64} bytes)`);
+writeFileSync(ICO_OUT, Buffer.concat([header, ...entries, ...pngs]));
+
+// Modern ICNS files store PNG-compressed representations in named chunks.
+const ICNS_SIZES = [16, 32, 64, 128, 256, 512, 1024];
+const ICNS_TYPES = ['icp4', 'icp5', 'icp6', 'ic07', 'ic08', 'ic09', 'ic10'];
+const icnsChunks = ICNS_SIZES.map((size, index) => {
+  const data = encodePng(size, renderRgba(size));
+  const chunk = Buffer.alloc(8 + data.length);
+  chunk.write(ICNS_TYPES[index], 0, 'ascii');
+  chunk.writeUInt32BE(chunk.length, 4);
+  data.copy(chunk, 8);
+  return chunk;
+});
+const icnsHeader = Buffer.alloc(8);
+icnsHeader.write('icns', 0, 'ascii');
+icnsHeader.writeUInt32BE(8 + icnsChunks.reduce((sum, chunk) => sum + chunk.length, 0), 4);
+writeFileSync(ICNS_OUT, Buffer.concat([icnsHeader, ...icnsChunks]));
+
+writeFileSync(TRAY_OUT, encodePng(18, renderTemplateRgba(18, 8)));
+writeFileSync(TRAY_2X_OUT, encodePng(36, renderTemplateRgba(36, 8)));
+
+console.log(
+  `wrote ${path.basename(ICO_OUT)}, ${path.basename(ICNS_OUT)}, ` +
+    `${path.basename(TRAY_OUT)}, ${path.basename(TRAY_2X_OUT)}`,
+);

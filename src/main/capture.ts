@@ -12,9 +12,10 @@
  * is exported separately so it can be unit-tested without Electron.
  */
 
-import { BrowserWindow, desktopCapturer, screen } from 'electron';
+import { BrowserWindow, desktopCapturer, screen, systemPreferences } from 'electron';
 import { CAPTURE_JPEG_QUALITY, CAPTURE_MAX_EDGE } from '../shared/constants';
 import type { CaptureMeta, Rect } from '../shared/types';
+import { requestMacScreenCaptureAccess } from './windows/mac-screen-permission';
 
 export interface CaptureResult {
   meta: CaptureMeta;
@@ -158,7 +159,7 @@ export function exemptFromCaptureProtection(win: BrowserWindow): void {
  * sees the buddy/caption/panel in screenshots. Best-effort per window (a
  * window may be destroyed mid-iteration).
  */
-function setClickyWindowsContentProtection(enabled: boolean): void {
+function setBuddyWindowsContentProtection(enabled: boolean): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.isDestroyed() || captureVisibleWindows.has(win)) continue;
     try {
@@ -167,6 +168,40 @@ function setClickyWindowsContentProtection(enabled: boolean): void {
       console.warn('[capture] setContentProtection failed:', err);
     }
   }
+}
+
+/**
+ * `setContentProtection` maps to NSWindowSharingNone on macOS, but modern
+ * ScreenCaptureKit can still include those windows. Make Buddy's windows
+ * fully transparent for one compositor beat as the macOS belt-and-braces
+ * exclusion path, preserving each window's previous opacity.
+ */
+function hideBuddyWindowsForMacCapture(): () => void {
+  if (process.platform !== 'darwin') return () => {};
+  const prior = new Map<BrowserWindow, number>();
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed() || captureVisibleWindows.has(win)) continue;
+    try {
+      prior.set(win, win.getOpacity());
+      win.setOpacity(0);
+    } catch (err) {
+      console.warn('[capture] temporary macOS window exclusion failed:', err);
+    }
+  }
+  return () => {
+    for (const [win, opacity] of prior) {
+      if (win.isDestroyed()) continue;
+      try {
+        win.setOpacity(opacity);
+      } catch (err) {
+        console.warn('[capture] restoring macOS window opacity failed:', err);
+      }
+    }
+  };
+}
+
+function compositorBeat(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 34));
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +217,22 @@ function setClickyWindowsContentProtection(enabled: boolean): void {
  * them afterwards).
  */
 export async function captureAllDisplays(): Promise<CaptureResult[]> {
+  if (process.platform === 'darwin') {
+    let status = systemPreferences?.getMediaAccessStatus?.('screen');
+    if (status !== 'granted') {
+      // On current macOS a freshly reset/unlisted app can report `denied`
+      // before Apple has shown any consent UI. The native request is safe for
+      // both states: it prompts/registers when possible and returns false
+      // immediately after a real denial.
+      requestMacScreenCaptureAccess();
+      status = systemPreferences?.getMediaAccessStatus?.('screen');
+    }
+    if (status !== 'granted') {
+      throw new Error(
+        'screen recording permission is denied; allow Buddy in System Settings > Privacy & Security > Screen & System Audio Recording',
+      );
+    }
+  }
   const displays = screen.getAllDisplays();
   if (displays.length === 0) return [];
 
@@ -200,15 +251,18 @@ export async function captureAllDisplays(): Promise<CaptureResult[]> {
   }
 
   // SELF-EXCLUSION: hide Clicky's windows from the grab, always restore.
-  setClickyWindowsContentProtection(true);
+  setBuddyWindowsContentProtection(true);
+  const restoreMacVisibility = hideBuddyWindowsForMacCapture();
   let sources;
   try {
+    if (process.platform === 'darwin') await compositorBeat();
     sources = await desktopCapturer.getSources({
       types: ['screen'],
       thumbnailSize: { width: thumbW, height: thumbH },
     });
   } finally {
-    setClickyWindowsContentProtection(false);
+    restoreMacVisibility();
+    setBuddyWindowsContentProtection(false);
   }
 
   const match = matchSourcesToDisplays(

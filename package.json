@@ -1,7 +1,7 @@
 {
   "name": "buddy",
   "version": "0.1.0",
-  "description": "Buddy for Windows — talk to Buddy while it sees your screens and points at things.",
+  "description": "Buddy for Windows and macOS — talk while it sees your screens and points at things.",
   "main": "out/main/index.js",
   "private": true,
   "author": "Fastyr, Inc.",
@@ -10,7 +10,7 @@
     "dev": "node tools/dev.mjs",
     "dev:raw": "electron-vite dev --watch",
     "typecheck": "tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false",
-    "build": "npm run typecheck && electron-vite build",
+    "build": "node build/build-mac-native.mjs && npm run typecheck && electron-vite build",
     "test": "vitest run",
     "mock": "node tools/mock-realtime/index.js",
     "phone-audio": "node tools/phone-audio-bridge/start.mjs",
@@ -21,7 +21,9 @@
     "eval:voice": "node eval/voice-roundtrip.mjs",
     "eval:tts": "node eval/tts.mjs",
     "icon": "node build/make-icon.mjs",
-    "dist": "npm run build && electron-builder --win"
+    "dist": "node tools/dist.mjs",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:mac": "node tools/dist.mjs"
   },
   "dependencies": {
     "uiohook-napi": "^1.5.5",

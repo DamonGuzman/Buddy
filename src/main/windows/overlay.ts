@@ -42,6 +42,7 @@ import { getSettingsStore } from '../settings';
 import { togglePanel } from './panel';
 import { CrashLoopGuard, lockdownNavigation, recoverOnRenderProcessGone } from './harden';
 import { listeningBlocksHover } from './hover-policy';
+import { offsetPointerForWindow } from './overlay-offset';
 
 /**
  * Module-level handle to the started manager so sibling main modules (e.g.
@@ -143,9 +144,12 @@ export class OverlayManager {
       for (const [displayId, index] of this.indexByDisplayId) {
         const win = this.windows.get(displayId);
         if (!win || win.isDestroyed()) continue;
+        const display = screen.getAllDisplays().find((item) => item.id === displayId);
         win.webContents.send(
           'overlay:pointer',
-          index === cmd.screenIndex ? cmd : ({ type: 'hide' } satisfies PointerCommand),
+          index === cmd.screenIndex && display
+            ? offsetPointerForWindow(cmd, display.bounds, win.getBounds())
+            : ({ type: 'hide' } satisfies PointerCommand),
         );
       }
       this.buddyHostIndex = cmd.screenIndex;
@@ -223,6 +227,11 @@ export class OverlayManager {
   private createWindow(display: Display, screenIndex: number): BrowserWindow {
     const isPrimary = screen.getPrimaryDisplay().id === display.id;
     const win = new BrowserWindow({
+      // NSPanel is allowed to cover the full display (including beneath the
+      // menu bar) without becoming a normal activating app window. A plain
+      // frameless NSWindow is clamped to workArea.y on macOS, shifting every
+      // pointer by the menu-bar height.
+      ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
       x: display.bounds.x,
       y: display.bounds.y,
       width: display.bounds.width,
@@ -277,6 +286,12 @@ export class OverlayManager {
     // forwarding entirely (no mousemove stream = zero idle cost).
     win.setIgnoreMouseEvents(true);
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    if (process.platform === 'darwin') {
+      // Keep the transparent overlays out of Mission Control/window switchers.
+      // focusable:false + ignoreMouseEvents:true remain the safety contract.
+      win.setHiddenInMissionControl(true);
+      win.setWindowButtonVisibility(false);
+    }
     // Belt-and-braces: bounds again after frameless quirks on scaled displays.
     win.setBounds(display.bounds);
 
@@ -338,7 +353,10 @@ export class OverlayManager {
     const settings = getSettingsStore()?.get() ?? null;
     const rest = settings?.buddyRest ?? null;
     return {
-      hotkeyLabel: settings?.hotkeyLabel ?? 'Ctrl+Alt (left alt)',
+      hotkeyLabel:
+        process.platform === 'darwin'
+          ? 'Control+Option (left option)'
+          : (settings?.hotkeyLabel ?? 'Ctrl+Alt (left alt)'),
       fullRealtimeMode: settings?.fullRealtimeMode ?? false,
       rest:
         rest && rest.screenIndex === screenIndex && screenIndex === this.restScreenIndex()
@@ -434,6 +452,10 @@ export class OverlayManager {
 
   /** Flip one overlay interactive; poll the cursor as a fallback exit path. */
   private makeInteractive(displayId: number, region: Rect): void {
+    // The macOS overlay stays unconditionally click-through/non-focusable.
+    // Temporarily accepting events can activate the process or intercept a
+    // click intended for the application beneath the transparent window.
+    if (process.platform === 'darwin') return;
     const win = this.windows.get(displayId);
     if (!win || win.isDestroyed()) return;
     this.interactiveRegion = region;

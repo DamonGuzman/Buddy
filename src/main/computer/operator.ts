@@ -14,8 +14,7 @@ import type {
   CodexTurnResult,
   CodexUserTurn,
 } from '../codex/responses-session';
-import { WindowsInputController } from './windows-input';
-import type { MouseButton } from './windows-input';
+import type { ComputerInputController, MouseButton } from './input-controller';
 
 const MAX_ACTIONS = 12;
 const SETTLE_MS = 350;
@@ -32,6 +31,13 @@ rules:
 - never invent hidden state. if the target is unclear, stop and explain what prevented safe completion.
 - do not perform a materially different action from the user's task.
 - when the task is complete, answer with one short plain-language sentence and call no tool.`;
+
+export function operatorInstructions(platform: NodeJS.Platform = process.platform): string {
+  if (platform !== 'darwin') return OPERATOR_INSTRUCTIONS;
+  return `${OPERATOR_INSTRUCTIONS}
+- this is macOS: use META or COMMAND for native Command-key shortcuts (for example META+L and
+  META+TAB). CTRL means the distinct Control key and is not a substitute for Command.`;
+}
 
 export const CLICK_AT_TOOL: CodexToolDef = {
   type: 'function',
@@ -75,6 +81,14 @@ export const PRESS_KEYS_TOOL: CodexToolDef = {
   },
 };
 
+function pressKeysTool(platform: NodeJS.Platform = process.platform): CodexToolDef {
+  if (platform !== 'darwin') return PRESS_KEYS_TOOL;
+  return {
+    ...PRESS_KEYS_TOOL,
+    description: 'Press a macOS key or chord. Examples: ["ENTER"], ["META","L"], ["META","TAB"]. META and COMMAND are the Command key.',
+  };
+}
+
 export interface ComputerUseResult {
   ok: boolean;
   summary: string;
@@ -84,11 +98,12 @@ export interface ComputerUseResult {
 
 export interface ComputerUseOperatorOptions {
   auth: ChatGptCodexAuthSource;
-  input: WindowsInputController;
+  input: ComputerInputController;
   initialCaptures?: CaptureResult[];
   isAllowed(): boolean;
   capture?: () => Promise<CaptureResult[]>;
   buildSession?: (auth: ChatGptCodexAuthSource) => CodexResponsesSession;
+  inputPointFromDip?: (point: { x: number; y: number }) => { x: number; y: number };
 }
 
 export class ComputerUseOperator {
@@ -103,8 +118,8 @@ export class ComputerUseOperator {
     this.session = options.buildSession?.(options.auth) ?? new CodexResponsesSession({
       auth: options.auth,
       model: DEFAULT_CODEX_MODEL,
-      instructions: OPERATOR_INSTRUCTIONS,
-      tools: [CLICK_AT_TOOL, TYPE_TEXT_TOOL, PRESS_KEYS_TOOL],
+      instructions: operatorInstructions(),
+      tools: [CLICK_AT_TOOL, TYPE_TEXT_TOOL, pressKeysTool()],
       reasoningEffort: 'low',
       serviceTier: 'priority',
       timeoutMs: 45_000,
@@ -176,7 +191,8 @@ export class ComputerUseOperator {
         const capture = this.captures.find((item) => item.meta.screenIndex === screenIndex);
         if (!capture) return { error: 'that screenshot does not exist' };
         const mapped = mapModelPoint({ x, y }, capture.meta);
-        const physical = screen.dipToScreenPoint(mapped.global);
+        const physical = this.options.inputPointFromDip?.(mapped.global)
+          ?? inputPointFromDip(mapped.global);
         const button = isButton(args['button']) ? args['button'] : 'left';
         const count = args['count'] === 2 ? 2 : 1;
         await this.options.input.click(physical.x, physical.y, button, count);
@@ -209,6 +225,15 @@ function captureContext(captures: CaptureResult[]): string {
 }
 function finiteNumber(value: unknown): number | null { return typeof value === 'number' && Number.isFinite(value) ? value : null; }
 function isButton(value: unknown): value is MouseButton { return value === 'left' || value === 'right' || value === 'middle'; }
+/** CoreGraphics mouse coordinates are macOS global logical points, matching Electron DIPs. */
+export function inputPointFromDip(
+  point: { x: number; y: number },
+  platform: NodeJS.Platform = process.platform,
+): { x: number; y: number } {
+  return platform === 'darwin'
+    ? { x: Math.round(point.x), y: Math.round(point.y) }
+    : screen.dipToScreenPoint(point);
+}
 function delay(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function failure(summary: string, actions: number): ComputerUseResult { return { ok: false, summary, actions, quotaExhausted: false }; }
 function stopped(actions: number): ComputerUseResult { return failure('computer use was turned off or the turn was superseded, so i stopped.', actions); }

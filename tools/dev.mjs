@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 const require = createRequire(import.meta.url);
@@ -10,9 +11,13 @@ const bridgeEntry = join(repoRoot, 'tools', 'phone-audio-bridge', 'start.mjs');
 const cliArgs = process.argv.slice(2);
 
 const appData =
-  process.env.APPDATA ?? join(process.env.USERPROFILE ?? process.cwd(), 'AppData', 'Roaming');
+  process.platform === 'darwin'
+    ? join(homedir(), 'Library', 'Application Support')
+    : (process.env.APPDATA ?? join(process.env.USERPROFILE ?? process.cwd(), 'AppData', 'Roaming'));
 const devUserData = join(appData, 'Buddy Dev');
 const activeDevUserData = process.env.CLICKY_USER_DATA ?? devUserData;
+const usePhoneBridge =
+  process.platform === 'win32' && process.env.CLICKY_SKIP_PHONE_AUDIO !== '1';
 
 function readLocalApiKey() {
   const processKey = process.env.OPENAI_API_KEY?.trim() ?? '';
@@ -81,7 +86,11 @@ async function waitForBridge(predicate, timeoutMs) {
 function spawnElectron() {
   console.log(`[dev] profile: ${activeDevUserData}`);
   console.log('[dev] renderer edits hot-reload; main and preload edits restart Electron');
-  console.log('[dev] quit the installed Buddy from its tray icon before testing Ctrl+Alt');
+  console.log(
+    process.platform === 'darwin'
+      ? '[dev] quit the installed Buddy from its menu-bar icon before testing Control+Option'
+      : '[dev] quit the installed Buddy from its tray icon before testing Ctrl+Alt',
+  );
   if (localApiKey !== '') {
     console.log('[dev] local OPENAI_API_KEY will be encrypted into the development profile');
   } else {
@@ -98,7 +107,9 @@ function spawnElectron() {
         ...process.env,
         CLICKY_USER_DATA: activeDevUserData,
         CLICKY_SHOW_PANEL: process.env.CLICKY_SHOW_PANEL ?? '1',
-        CLICKY_PHONE_AUDIO_URL: process.env.CLICKY_PHONE_AUDIO_URL ?? bridgeSocketUrl,
+        ...(usePhoneBridge
+          ? { CLICKY_PHONE_AUDIO_URL: process.env.CLICKY_PHONE_AUDIO_URL ?? bridgeSocketUrl }
+          : {}),
         CLICKY_IMPORT_API_KEY_FROM_ENV: localApiKey !== '' ? '1' : '0',
       },
     },
@@ -117,6 +128,14 @@ function spawnElectron() {
 
 async function main() {
   if (cliArgs.some((arg) => ['--help', '-h', '--version', '-v'].includes(arg))) {
+    spawnElectron();
+    return;
+  }
+
+  // The optional iPhone-audio bridge is currently Windows-only. macOS uses
+  // the ordinary renderer getUserMedia path, so `npm run dev` must not try to
+  // launch PowerShell before Electron.
+  if (!usePhoneBridge) {
     spawnElectron();
     return;
   }

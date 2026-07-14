@@ -88,8 +88,8 @@ interface CatalogEntry {
 }
 
 const MIC_BLOCKED_COPY =
-  "windows is blocking desktop apps from using the microphone — flip it on in " +
-  "settings > privacy > microphone and i'll hear you. typing works meanwhile.";
+  "your system is blocking buddy from using the microphone — allow buddy in system " +
+  "privacy settings and i'll hear you. typing works meanwhile.";
 
 const CATALOG: Record<ErrorKind, CatalogEntry> = {
   no_api_key: {
@@ -106,7 +106,7 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
   },
   api_key_unreadable: {
     copy:
-      "windows changed its keys and buddy can't unlock your saved api key anymore — " +
+      "your system keychain changed and buddy can't unlock your saved api key anymore — " +
       "paste it again in settings and you're set.",
     surfaces: ['transcript', 'pill'],
     autoShowPanel: true,
@@ -154,8 +154,8 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
   },
   mic_unavailable: {
     copy:
-      "i couldn't hear your mic. check it's plugged in — and that windows lets " +
-      'desktop apps use the microphone (settings > privacy > microphone). typing works meanwhile.',
+      "i couldn't hear your mic. check it's connected — and that buddy is allowed to use " +
+      'the microphone in system privacy settings. typing works meanwhile.',
     surfaces: ['transcript', 'pill'],
     autoShowPanel: true,
   },
@@ -169,9 +169,9 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
   capture_failed: {
     copy:
       "heads up — i couldn't grab your screen this time, so i'm answering blind. " +
-      'try once more?',
+      'allow buddy to record the screen in system privacy settings, then try once more.',
     surfaces: ['transcript', 'caption'],
-    autoShowPanel: false,
+    autoShowPanel: true,
   },
   // M17 (integration): the ChatGPT-plan grounding quota is spent. We FAIL
   // CLOSED — the metered api key is NOT spent for that pointer; clicky flies
@@ -187,8 +187,8 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
   },
   hotkey_dead: {
     copy:
-      "buddy couldn't grab the push-to-talk keys (windows blocked the keyboard hook). " +
-      'typing down below still works — a restart usually brings the hotkey back.',
+      "buddy couldn't grab the push-to-talk keys (system accessibility access is blocked). " +
+      'allow buddy in system privacy settings; typing down below still works meanwhile.',
     surfaces: ['transcript', 'tray'],
     autoShowPanel: true,
   },

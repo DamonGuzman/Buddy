@@ -65,7 +65,9 @@ import { validatePointAtArgs } from './realtime/protocol';
 import type { AgentManager } from './agents/manager';
 import type { AgentBrief } from './agents/types';
 import { ComputerUseOperator } from './computer/operator';
-import { WindowsInputController } from './computer/windows-input';
+import { createComputerInputController } from './computer/input-controller';
+import type { ComputerInputController } from './computer/input-controller';
+import { supportsComputerUse } from './platform';
 import type { SettingsStore } from './settings';
 import type { OverlayManager } from './windows/overlay';
 import { showPanelOnce } from './windows/panel';
@@ -255,7 +257,7 @@ export class Conversation {
   private readonly agents: AgentManager | null;
   private agentModeAvailableSnapshot = false;
   private computerUseEnabledSnapshot = false;
-  private computerInput: WindowsInputController | null = null;
+  private computerInput: ComputerInputController | null = null;
   private computerUseBusy = false;
   private codexToolPromises: Promise<void>[] = [];
   private agentSeq = 0;
@@ -1800,7 +1802,7 @@ export class Conversation {
   }
 
   private computerUseAvailable(): boolean {
-    if (!this.computerUseEnabledSnapshot || process.platform !== 'win32') return false;
+    if (!this.computerUseEnabledSnapshot || !supportsComputerUse()) return false;
     try { return this.codexProvider().getCodexAuth() !== null; }
     catch { return false; }
   }
@@ -1824,7 +1826,7 @@ export class Conversation {
     if (resolved === null || resolved.kind !== 'chatgptCodex') {
       return { error: 'computer use needs chatgpt sign-in' };
     }
-    this.computerInput ??= new WindowsInputController(app.getPath('userData'));
+    this.computerInput ??= createComputerInputController(app.getPath('userData'));
     this.computerUseBusy = true;
     try {
       const operator = new ComputerUseOperator({
@@ -2297,6 +2299,13 @@ export class Conversation {
     label: string;
     radiusPx?: number;
   }): Promise<unknown> {
+    if (process.platform === 'darwin') {
+      return {
+        query: q,
+        matched: false,
+        reason: 'macOS uses vision grounding during explicit Buddy turns',
+      };
+    }
     const display = screen.getDisplayNearestPoint({ x: Math.round(q.x), y: Math.round(q.y) });
     const geom = { displayBounds: display.bounds, scaleFactor: display.scaleFactor };
     const phys = (() => {

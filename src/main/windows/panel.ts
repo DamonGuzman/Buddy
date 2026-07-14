@@ -20,6 +20,7 @@
  */
 
 import { app, BrowserWindow, screen } from 'electron';
+import type { Rectangle } from 'electron';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { PANEL_HEIGHT, PANEL_WIDTH } from '../../shared/constants';
@@ -120,17 +121,17 @@ export class PanelManager {
     return this.win !== null && !this.win.isDestroyed() && this.win.isVisible();
   }
 
-  toggle(): void {
+  toggle(anchor?: Rectangle): void {
     if (this.isVisible()) {
       this.hide();
     } else {
-      this.show();
+      this.show(anchor);
     }
   }
 
-  show(): void {
+  show(anchor?: Rectangle): void {
     const win = this.ensureWindow();
-    this.positionNearTray(win);
+    this.positionNearTray(win, anchor);
     win.show();
     win.focus();
     this.reassertTopmost(win);
@@ -184,7 +185,11 @@ export class PanelManager {
 
     // Dev/unpacked runs: give the window the buddy icon (packaged builds get
     // it from the exe resources via electron-builder's win.icon).
-    const icoPath = join(app.getAppPath(), 'build', 'icon.ico');
+    const iconPath = join(
+      app.getAppPath(),
+      'build',
+      process.platform === 'darwin' ? 'icon.icns' : 'icon.ico',
+    );
     const win = new BrowserWindow({
       width: PANEL_WIDTH,
       height: PANEL_HEIGHT,
@@ -196,7 +201,7 @@ export class PanelManager {
       skipTaskbar: true,
       show: false,
       alwaysOnTop: true,
-      ...(existsSync(icoPath) ? { icon: icoPath } : {}),
+      ...(existsSync(iconPath) ? { icon: iconPath } : {}),
       webPreferences: {
         preload: join(__dirname, '../preload/panel.js'),
         contextIsolation: true,
@@ -333,9 +338,21 @@ export class PanelManager {
     });
   }
 
-  /** Bottom-right of the primary display's work area — near the Windows tray. */
-  private positionNearTray(win: BrowserWindow): void {
-    const { workArea } = screen.getPrimaryDisplay();
+  /** Position by the menu-bar icon on macOS or the Windows notification area. */
+  private positionNearTray(win: BrowserWindow, anchor?: Rectangle): void {
+    if (process.platform === 'darwin') {
+      const display = anchor ? screen.getDisplayMatching(anchor) : screen.getPrimaryDisplay();
+      const { workArea } = display;
+      const anchorCenter = anchor ? anchor.x + anchor.width / 2 : workArea.x + workArea.width;
+      const x = Math.min(
+        Math.max(Math.round(anchorCenter - PANEL_WIDTH / 2), workArea.x + MARGIN),
+        workArea.x + workArea.width - PANEL_WIDTH - MARGIN,
+      );
+      win.setPosition(x, Math.round(workArea.y + MARGIN));
+      return;
+    }
+    const display = anchor ? screen.getDisplayMatching(anchor) : screen.getPrimaryDisplay();
+    const { workArea } = display;
     win.setPosition(
       Math.round(workArea.x + workArea.width - PANEL_WIDTH - MARGIN),
       Math.round(workArea.y + workArea.height - PANEL_HEIGHT - MARGIN),

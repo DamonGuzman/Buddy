@@ -228,7 +228,8 @@ describe('grounding convert: DIP <-> physical', () => {
 
 /**
  * Fake JSON-lines daemon: answers every request with one "Save" candidate at
- * (100,100,80,40) after FAKE_DELAY_MS; exits after the first answer when
+ * (100,100,80,40) after FAKE_DELAY_MS; supports a macOS AX-shaped candidate
+ * and permission-error response; exits after the first answer when
  * FAKE_EXIT_AFTER=1 (crash-respawn testing).
  */
 const FAKE_DAEMON = `
@@ -244,10 +245,18 @@ process.stdin.on('data', (d) => {
     const req = JSON.parse(line);
     const delay = Number(process.env.FAKE_DELAY_MS || 0);
     setTimeout(() => {
+      const candidates = process.env.FAKE_PERMISSION_ERROR === '1'
+        ? []
+        : process.env.FAKE_MAC_CANDIDATE === '1'
+          ? [{ name: 'System Settings', ct: 'Button', x: 400, y: 240, w: 160, h: 80 }]
+          : [{ name: 'Save', x: 100, y: 100, w: 80, h: 40 }];
       process.stdout.write(JSON.stringify({
         id: req.id,
         elapsedMs: delay,
-        candidates: [{ name: 'Save', x: 100, y: 100, w: 80, h: 40 }],
+        ...(process.env.FAKE_PERMISSION_ERROR === '1'
+          ? { error: 'accessibility_permission_required' }
+          : {}),
+        candidates,
       }) + '\\n');
       if (process.env.FAKE_EXIT_AFTER === '1') process.exit(0);
     }, delay);
@@ -270,6 +279,8 @@ describe('GroundingService (fake daemon)', () => {
     for (const s of services.splice(0)) s.dispose();
     delete process.env['FAKE_DELAY_MS'];
     delete process.env['FAKE_EXIT_AFTER'];
+    delete process.env['FAKE_MAC_CANDIDATE'];
+    delete process.env['FAKE_PERMISSION_ERROR'];
   });
 
   it('snaps to the matching element (label does the work)', async () => {
@@ -290,6 +301,28 @@ describe('GroundingService (fake daemon)', () => {
     expect(outcome.matched).toBe(false);
     expect(outcome.point).toBeNull();
     expect(outcome.candidates).toBe(1);
+  });
+
+  it('accepts macOS Accessibility candidates through the same scoring contract', async () => {
+    process.env['FAKE_MAC_CANDIDATE'] = '1';
+    const service = fakeService(2_000);
+    services.push(service);
+    const outcome = await service.snap(
+      { x: 430, y: 260, label: 'the System Settings button' },
+      { debug: true },
+    );
+    expect(outcome.matched).toBe(true);
+    expect(outcome.point).toEqual({ x: 480, y: 280 });
+    expect(outcome.name).toBe('System Settings');
+    expect(outcome.debug?.[0]).toMatchObject({ name: 'System Settings', ct: 'Button' });
+  });
+
+  it('fails soft when macOS Accessibility permission is not granted', async () => {
+    process.env['FAKE_PERMISSION_ERROR'] = '1';
+    const service = fakeService(2_000);
+    services.push(service);
+    const outcome = await service.snap({ x: 150, y: 120, label: 'the save button' });
+    expect(outcome).toMatchObject({ matched: false, point: null, candidates: 0, timedOut: false });
   });
 
   it('times out within the timebox and falls back (slow daemon)', async () => {

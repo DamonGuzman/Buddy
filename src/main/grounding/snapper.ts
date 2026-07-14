@@ -1,16 +1,17 @@
 /**
- * GroundingService (M9): owns the persistent PowerShell "snapper" daemon
- * (snapper.ps1, embedded at build time) that enumerates UIA elements near a
- * point, and does the label->element SELECTION in TS (scoring.ts, pure).
+ * GroundingService (M9): owns the persistent Windows UIA snapper daemon and
+ * does label->element selection in TypeScript. macOS uses the vision
+ * grounding layer directly because Accessibility permission is process-bound
+ * and must not be delegated to an opaque helper executable.
  *
  * Contract with the conversation layer:
  * - `snap()` takes the model's point in GLOBAL PHYSICAL px + its spoken
  *   label, and answers within TIMEBOX_MS (default 600ms) — on timeout or any
  *   daemon trouble it reports no match, so the caller falls back to the raw
  *   model point. Snapping can never make pointing WORSE than today.
- * - The daemon is spawned lazily (warmUp() front-loads the ~1s PowerShell +
- *   assembly load), restarted after a crash or repeated timeouts, and killed
- *   on dispose() (app quit).
+ * - The daemon is spawned lazily (warmUp() front-loads PowerShell assembly
+ *   setup), restarted after a crash or repeated timeouts, and killed on
+ *   dispose() (app quit).
  * - One retry at a wider radius (350 -> 700 physical px) when nothing near
  *   the point clears the text threshold, budget permitting.
  */
@@ -30,9 +31,8 @@ const RADIUS_PX = 350;
 const RETRY_RADIUS_PX = 700;
 /** Consecutive request timeouts before the daemon is presumed wedged. */
 const MAX_CONSECUTIVE_TIMEOUTS = 2;
-
 export interface GroundingOptions {
-  /** Directory the snapper script is materialized into (userData). */
+  /** Directory the Windows snapper script is materialized into (userData). */
   scriptDir: string;
   /** Process id whose windows are never used as the search scope (our overlays). */
   excludePid?: number;
@@ -44,7 +44,7 @@ export interface GroundingOptions {
 }
 
 export interface SnapQuery {
-  /** GLOBAL PHYSICAL px (UIA space) — convert from DIP in the caller. */
+  /** GLOBAL PHYSICAL px (platform accessibility space) — caller converts DIP. */
   x: number;
   y: number;
   /** The model's spoken label for the element ("the save button"). */
@@ -135,6 +135,11 @@ export class GroundingService {
 
   /** Spawn the daemon ahead of the first snap (assembly load takes ~1s). */
   warmUp(): void {
+    // Production macOS grounding goes straight to the vision layer. A child
+    // Accessibility helper would need its own TCC grant, separate from Buddy.
+    // Keep command overrides working so the cross-platform protocol tests can
+    // still exercise this service with their fake daemon.
+    if (process.platform === 'darwin' && this.options.command === undefined) return;
     try {
       this.ensureChild();
     } catch (err) {
@@ -169,6 +174,7 @@ export class GroundingService {
       timedOut,
     });
     if (this.disposed) return none(false);
+    if (process.platform === 'darwin' && this.options.command === undefined) return none(false);
 
     let lastCount = 0;
     let lastDaemonMs: number | null = null;

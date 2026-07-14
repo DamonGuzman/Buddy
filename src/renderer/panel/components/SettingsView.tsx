@@ -98,7 +98,7 @@ export function SettingsView({
               {settings.apiKeyPresent ? (
                 <>
                   {/* M11 UI (deferred by the error-catalog agent, built at M16):
-                      a stored blob that DPAPI can no longer decrypt reads as
+                      a stored safeStorage blob that can no longer decrypt reads as
                       present-but-dead. Warn instead of the green "saved" badge
                       so the user knows to paste the key again. */}
                   {settings.apiKeyUnreadable ? (
