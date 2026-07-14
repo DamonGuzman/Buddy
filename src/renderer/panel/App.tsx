@@ -21,6 +21,7 @@ import type {
   AssistantState,
   AgentSummary,
   MicDevice,
+  PermissionHealth,
   RuntimeFlags,
   SessionStatus,
   Settings,
@@ -64,6 +65,7 @@ export function App(): React.JSX.Element {
   const [micError, setMicError] = useState<string | null>(null);
   // M11 addition (orchestrator-approved): hookAlive + dev flags from main.
   const [runtime, setRuntime] = useState<RuntimeFlags | null>(null);
+  const [permissions, setPermissions] = useState<PermissionHealth | null>(null);
 
   // Capture needs the *current* mic preference without resubscribing.
   const micDeviceIdRef = useRef('');
@@ -89,9 +91,13 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     void clicky.getSettings().then(setSettings);
     void clicky.listAgents().then(setAgents);
+    void clicky.getRequestedPanelView().then((requested) => {
+      if (requested === 'settings') setView('settings');
+    });
     // M11: tolerate an older preload (crash-recreate races) — best-effort.
     try {
       void clicky.getRuntime().then(setRuntime);
+      void clicky.getPermissionHealth().then(setPermissions);
     } catch {
       /* runtime flags are progressive enhancement */
     }
@@ -101,10 +107,12 @@ export function App(): React.JSX.Element {
       clicky.onSessionStatus(setSession),
       clicky.onSettings(setSettings),
       clicky.onRuntime(setRuntime),
+      clicky.onPermissions(setPermissions),
       clicky.onAgents(setAgents),
       // M19: an overlay helper sprite / agent card was clicked — land on the
       // agents view (main has already shown the panel).
       clicky.onShowAgents(() => setView('agents')),
+      clicky.onShowSettings(() => setView('settings')),
       // M17: merge the Codex sign-in snapshot into settings (the "ChatGPT"
       // settings card reads it) — lower latency than waiting for the next
       // panel:settings, and reflects the CLI's auth.json rotating live.
@@ -137,7 +145,11 @@ export function App(): React.JSX.Element {
   }, [upsertEntry]);
 
   // ---- mic permission pre-warm + device list ------------------------------
+  const canPrewarmMic = permissions?.supported === false || permissions?.grants.microphone === 'granted';
   useEffect(() => {
+    // On macOS, never summon a privacy prompt from Buddy's hidden renderer.
+    // The permission card owns that explicit user action.
+    if (!canPrewarmMic) return;
     const refresh = (): void => {
       void enumerateMics().then(setMicDevices);
     };
@@ -152,7 +164,7 @@ export function App(): React.JSX.Element {
     }
     navigator.mediaDevices.addEventListener('devicechange', refresh);
     return () => navigator.mediaDevices.removeEventListener('devicechange', refresh);
-  }, []);
+  }, [canPrewarmMic]);
 
   // ---- dev hooks (test tone, transcript seed, capture stats) --------------
   useEffect(() => {
@@ -234,10 +246,29 @@ export function App(): React.JSX.Element {
         </Card>
       ) : null}
 
+      {view === 'chat' && permissions?.supported && (!permissions.hotkeyAlive || permissions.nextPermission !== null) ? (
+        <Card className="mx-4 mt-3 flex-row items-center gap-2.5 rounded-lg border-amber-400/30 bg-amber-400/10 px-3.5 py-2.5 shadow-none">
+          <span className="flex-1 text-xs leading-relaxed">
+            {!permissions.hotkeyAlive
+              ? 'push-to-talk needs attention — typing still works'
+              : 'buddy needs one more privacy permission'}
+          </span>
+          <Button type="button" size="sm" className="h-7 rounded-full px-3 text-xs" onClick={() => setView('settings')}>
+            fix
+          </Button>
+        </Card>
+      ) : null}
+
       <main className="flex min-h-0 flex-1 flex-col">
         {view === 'settings' ? (
           settings ? (
-            <SettingsView settings={settings} micDevices={micDevices} micError={micError} />
+            <SettingsView
+              settings={settings}
+              micDevices={micDevices}
+              micError={micError}
+              permissions={permissions}
+              onPermissionHealth={setPermissions}
+            />
           ) : null
         ) : view === 'agents' ? (
           <AgentsView

@@ -55,10 +55,22 @@ typed action** and is always signposted by a visible indicator.
 
 - **Electron + TypeScript + electron-vite** (main / preload / renderer). React in renderers.
 - **uiohook-napi** for global keydown/keyup (Electron `globalShortcut` has no keyup → can't do
-  hold-to-talk).
+  hold-to-talk). On macOS the event tap requires both Accessibility and Input Monitoring; Buddy
+  checks/requests both in-process. Permission checks never prompt at hidden startup: a persistent
+  panel health card owns explicit request/deep-link actions and reports launch failures. A
+  lightweight background status poll detects revocation/restoration even while System Settings has
+  focus, and retries the hook once when grants transition to valid. If valid-looking toggles still
+  leave the hook dead, the card offers retry, restart, a two-click Buddy-only `tccutil` reset, and
+  reveal-current-app manual stale-entry repair. Reset never runs at startup or without user action.
+  Unsigned/ad-hoc build replacements have a new TCC code identity and must be re-granted unless
+  distribution uses a stable signing identity. The macOS distribution pipeline rejects an ad-hoc
+  final signature by default; `BUDDY_ALLOW_ADHOC=1` is an explicit disposable-QA escape hatch.
 - Audio: renderer `getUserMedia` → `AudioWorklet` → PCM16 (24kHz mono) chunks → main → WS.
   Playback: WS audio deltas → renderer `AudioWorklet` queue. Barge-in not required for MVP
-  (push-to-talk model).
+  (push-to-talk model). On macOS, Chromium's capture and playback graphs share one CoreAudio
+  service session: capture teardown synchronously invalidates the old playback graph, and the next
+  output waits for teardown before creating a fresh graph. Idle macOS playback graphs are closed;
+  Windows retains suspend/resume. A playback clear must never create an idle graph.
 - Screenshots: Electron `desktopCapturer` per display; resize via canvas in a hidden worker window
   or `sharp`-free approach (nativeImage resize is fine).
 - No backend. Everything local.
@@ -87,6 +99,8 @@ src/
     hotkey.ts        uiohook hold-to-talk state machine (down→capture+listen, up→commit)
     capture.ts       multi-display screenshot pipeline (capture, resize, label, filter own windows)
     coords.ts        screenshot px → display DIP coord mapping (pure functions, unit-tested)
+    windows/permission-controller.ts
+                     reconciles macOS TCC grants with the real hook; recovery actions + UI state
     grounding/       M9 element-snap grounding: snapper.ps1 (UIA daemon, embedded at build),
                      snapper.ts (daemon lifecycle + timebox), scoring.ts (pure label matching)
     realtime/

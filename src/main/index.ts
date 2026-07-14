@@ -34,7 +34,7 @@ import { SessionRecorder } from './session-recorder';
 import { createTray } from './tray';
 import { OverlayManager } from './windows/overlay';
 import { PanelManager } from './windows/panel';
-import { preflightMacPermissions, showMacPermissionGuide } from './windows/mac-permissions';
+import { PermissionController } from './windows/permission-controller';
 import { PhoneAudioBridgeClient } from './phone-audio-bridge';
 import { ENV_DEBUG } from '../shared/constants';
 import type { InvokeArgs, InvokeChannel, InvokeResult } from '../shared/ipc';
@@ -196,6 +196,40 @@ async function main(): Promise<void> {
     .sort();
   const runtimeFlags = (): RuntimeFlags => ({ hookAlive: hotkey.status().hookAlive, devFlags });
   const pushRuntime = (): void => panel.send('panel:runtime', runtimeFlags());
+  const restoreTrayTooltip = (): void => {
+    const realtime = settings.get().fullRealtimeMode;
+    tray?.setToolTip(
+      realtime
+        ? process.platform === 'darwin'
+          ? 'buddy - press Control + left Option to start or stop realtime'
+          : 'buddy - press Ctrl + left Alt to start or stop realtime'
+        : process.platform === 'darwin'
+          ? 'buddy - hold Control + left Option and talk'
+          : 'buddy - hold Ctrl + left Alt and talk',
+    );
+  };
+  const permissionController = new PermissionController({
+    hotkey,
+    onHealth: (health) => panel.send('panel:permissions', health),
+    onHookState: () => pushRuntime(),
+    onRecovered: () => restoreTrayTooltip(),
+    onUnavailable: (error, health) => {
+      sessionRecorder?.record('hotkey_start_failed', {
+        name: error.name,
+        message: error.message,
+        permissions: health,
+      });
+      sessionRecorder?.flush();
+      conversation.reportError('hotkey_dead', {
+        macHotkeyPermissions: process.platform === 'darwin',
+      });
+      tray?.setToolTip('buddy — permissions need attention, click to fix or type');
+      notifyUser(
+        'Buddy permissions need attention',
+        'Push-to-talk is offline. Open Buddy → Settings → Permissions to repair it; typing still works.',
+      );
+    },
+  });
 
   // M17 (integration): push the Codex ChatGPT-subscription sign-in snapshot to
   // the panel — on ready, and whenever it changes (the CLI's auth.json can
@@ -244,6 +278,9 @@ async function main(): Promise<void> {
   handle('overlay:get-state', () => conversation.assistantState());
   // M11 addition (orchestrator-approved): runtime flags bootstrap.
   handle('panel:get-runtime', () => runtimeFlags());
+  handle('panel:get-requested-view', () => panel.requestedPanelView());
+  handle('permissions:get', () => permissionController.current());
+  handle('permissions:action', (action) => permissionController.act(action));
   // M17 addition (integration-approved): Codex sign-in snapshot bootstrap.
   handle('codex:signin-state', () => getCodexAuthProvider().codexSignInState());
   handle('codex:sign-in', () => codexOAuth.start());
@@ -331,10 +368,6 @@ async function main(): Promise<void> {
   if (process.platform === 'win32') app.setAppUserModelId('ai.fastyr.buddy');
   if (process.platform === 'darwin') app.dock?.hide();
 
-  // Request only microphone and Accessibility here. Screen Recording remains
-  // deferred until an explicit capture so startup never screenshots the user.
-  await preflightMacPermissions();
-
   overlays.start();
 
   // M11 CRASH FIX: the tray AND the hotkey 'error' listener must exist
@@ -345,7 +378,10 @@ async function main(): Promise<void> {
   tray = createTray({
     onTogglePanel: (anchor) => panel.toggle(anchor),
     onOpenPanel: (anchor) => panel.show(anchor),
-    onOpenPermissions: () => void showMacPermissionGuide(),
+    onOpenPermissions: (anchor) => {
+      panel.showSettings(anchor);
+      panel.send('panel:permissions', permissionController.current());
+    },
     onQuit: () => app.quit(),
   });
   if (settings.get().fullRealtimeMode) {
@@ -356,15 +392,11 @@ async function main(): Promise<void> {
     );
   }
 
-  hotkey.on('error', () => {
-    // hotkey_dead: transcript entry + one-time panel auto-show (catalog
-    // policy) + a tray tooltip that points at the typing fallback.
-    conversation.reportError('hotkey_dead');
-    tray?.setToolTip('buddy — hotkey unavailable, click to type');
-    pushRuntime(); // the panel hero hint adapts to hookAlive === false
+  hotkey.on('error', (error) => {
+    permissionController.noteHotkeyError(error);
   });
 
-  hotkey.start();
+  permissionController.refresh(true);
 
   // M11 (renderer_dead): panel crash recovery gave up — the window has been
   // torn down (a tray click builds a fresh one); tell the user via the tray.
@@ -382,6 +414,7 @@ async function main(): Promise<void> {
     conversation.replayToPanel();
     panel.send('panel:settings', settings.get());
     pushRuntime();
+    panel.send('panel:permissions', permissionController.current());
     // M17: hand the (re)loaded panel the current Codex sign-in snapshot.
     pushCodexSignin(true);
     panel.send('panel:agents', agents.list());
@@ -400,6 +433,12 @@ async function main(): Promise<void> {
   pushCodexSignin(true);
   const codexPoll = setInterval(() => pushCodexSignin(false), 60_000);
   codexPoll.unref?.();
+  // Lightweight TCC checks keep working while System Settings owns focus, so
+  // returning to Buddy is not required for a restored grant to recover.
+  const permissionPoll = setInterval(() => {
+    if (process.platform === 'darwin') permissionController.refresh();
+  }, 3_000);
+  permissionPoll.unref?.();
 
   // F1 fix (C1 + sleep/resume): the secure desktop (Ctrl+Alt+Del) and lock
   // screen swallow keyups — force-cancel any live hold and reset modifier
@@ -419,10 +458,15 @@ async function main(): Promise<void> {
   powerMonitor.on('resume', () => {
     sessionRecorder?.record('system_resume', null);
     conversation.onSystemResume();
+    permissionController.refresh();
   });
 
   app.on('second-instance', () => panel.show());
-  app.on('activate', () => panel.show());
+  app.on('activate', () => {
+    panel.show();
+    permissionController.refresh();
+  });
+  app.on('browser-window-focus', () => permissionController.refresh());
 
   // M11: last-resort-handler verification hook (headless QA only):
   // CLICKY_TEST_THROW=exception|rejection blows up 3s after boot so the
@@ -492,6 +536,7 @@ async function main(): Promise<void> {
   });
   app.on('will-quit', () => {
     clearInterval(codexPoll); // M17: stop the Codex sign-in refresh poll
+    clearInterval(permissionPoll);
     codexOAuth.stop();
     hotkey.stop();
     conversation.close();

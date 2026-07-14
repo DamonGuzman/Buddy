@@ -36,9 +36,25 @@ static napi_value request_screen_capture_access(napi_env env, napi_callback_info
   return result;
 }
 
+static napi_value preflight_listen_event_access(napi_env env, napi_callback_info info) {
+  (void)info;
+  napi_value result = NULL;
+  napi_get_boolean(env, CGPreflightListenEventAccess(), &result);
+  return result;
+}
+
+static napi_value request_listen_event_access(napi_env env, napi_callback_info info) {
+  (void)info;
+  napi_value result = NULL;
+  napi_get_boolean(env, CGRequestListenEventAccess(), &result);
+  return result;
+}
+
 __attribute__((visibility("default")))
 napi_value napi_register_module_v1(napi_env env, napi_value exports) {
   napi_value request = NULL;
+  napi_value preflight_listen = NULL;
+  napi_value request_listen = NULL;
   if (napi_create_function(
         env,
         "requestScreenCaptureAccess",
@@ -50,5 +66,27 @@ napi_value napi_register_module_v1(napi_env env, napi_value exports) {
     return exports;
   }
   napi_set_named_property(env, exports, "requestScreenCaptureAccess", request);
+
+  if (napi_create_function(
+        env,
+        "preflightListenEventAccess",
+        26,
+        preflight_listen_event_access,
+        NULL,
+        &preflight_listen
+      ) == 0) {
+    napi_set_named_property(env, exports, "preflightListenEventAccess", preflight_listen);
+  }
+
+  if (napi_create_function(
+        env,
+        "requestListenEventAccess",
+        24,
+        request_listen_event_access,
+        NULL,
+        &request_listen
+      ) == 0) {
+    napi_set_named_property(env, exports, "requestListenEventAccess", request_listen);
+  }
   return exports;
 }

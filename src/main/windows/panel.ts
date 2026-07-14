@@ -9,6 +9,7 @@
  *
  * Env flags (dev/testing):
  * - CLICKY_SHOW_PANEL=1  → show the panel on launch (it still hides on blur).
+ * - CLICKY_SHOW_SETTINGS=1 → show the panel directly on Settings (visual QA).
  * - CLICKY_KEEP_PANEL_OPEN=1 → don't hide on blur (visual QA only).
  * - CLICKY_TEST_CAPTURE=1 → after load, send a capture start/stop cycle to the
  *                          hidden renderer and mirror its console to stdout
@@ -30,6 +31,7 @@ import { CrashLoopGuard, lockdownNavigation, recoverOnRenderProcessGone } from '
 const MARGIN = 12;
 
 const SHOW_ON_LAUNCH = process.env['CLICKY_SHOW_PANEL'] === '1';
+const SHOW_SETTINGS_ON_LAUNCH = process.env['CLICKY_SHOW_SETTINGS'] === '1';
 const KEEP_PANEL_OPEN = process.env['CLICKY_KEEP_PANEL_OPEN'] === '1';
 const TEST_CAPTURE = process.env['CLICKY_TEST_CAPTURE'] === '1';
 
@@ -80,6 +82,10 @@ export function openPanel(): void {
 
 export class PanelManager {
   private win: BrowserWindow | null = null;
+  private requestedView: 'chat' | 'settings' = SHOW_SETTINGS_ON_LAUNCH ? 'settings' : 'chat';
+  private ignoreBlurUntil = 0;
+  private panelLoaded = false;
+  private pendingInactiveShow = false;
   private crashGuard = new CrashLoopGuard(3, 5 * 60_000, 'panel');
   /** M11: crash recovery gave up — index.ts surfaces it via the tray. */
   private fatalCb: (() => void) | null = null;
@@ -112,7 +118,9 @@ export class PanelManager {
       // discovers the UI (it otherwise hides behind a tray icon).
       const firstRun = !existsSync(join(app.getPath('userData'), 'settings.json'));
       const win = this.ensureWindow();
-      if (SHOW_ON_LAUNCH) {
+      if (SHOW_SETTINGS_ON_LAUNCH) {
+        win.webContents.once('did-finish-load', () => this.showSettings());
+      } else if (SHOW_ON_LAUNCH) {
         win.webContents.once('did-finish-load', () => this.show());
       } else if (firstRun) {
         win.webContents.once('did-finish-load', () => {
@@ -135,19 +143,47 @@ export class PanelManager {
   }
 
   show(anchor?: Rectangle): void {
+    this.ignoreBlurUntil = 0;
+    this.pendingInactiveShow = false;
     const win = this.ensureWindow();
     this.positionNearTray(win, anchor);
     win.show();
+    // An all-Spaces NSWindow can be parked just beyond a fullscreen Space
+    // while hidden. Re-apply bounds after show, when macOS accepts the target
+    // display coordinates.
+    this.positionNearTray(win, anchor);
+    this.stabilizePosition(win, anchor);
     win.focus();
     this.reassertTopmost(win);
+  }
+
+  /** Open the persistent permission repair UI, including during first load. */
+  showSettings(anchor?: Rectangle): void {
+    this.requestedView = 'settings';
+    const win = this.ensureWindow();
+    this.show(anchor);
+    const send = (): void => {
+      if (!win.isDestroyed()) win.webContents.send('panel:show-settings', null);
+    };
+    if (win.webContents.isLoadingMainFrame()) win.webContents.once('did-finish-load', send);
+    else send();
+  }
+
+  requestedPanelView(): 'chat' | 'settings' {
+    return this.requestedView;
   }
 
   /** Show without stealing focus (first-run auto-show, background surfacing). */
   showInactive(): void {
     const win = this.ensureWindow();
-    this.positionNearTray(win);
-    win.showInactive();
-    this.reassertTopmost(win);
+    // Permission diagnosis can finish before the hidden renderer's first
+    // navigation. Electron's isLoading* values briefly read false during that
+    // cold-launch gap, so use our did-finish-load latch instead of guessing.
+    if (!this.panelLoaded) {
+      this.pendingInactiveShow = true;
+      return;
+    }
+    this.presentInactive(win);
   }
 
   /**
@@ -169,6 +205,7 @@ export class PanelManager {
   }
 
   hide(): void {
+    this.pendingInactiveShow = false;
     if (this.win && !this.win.isDestroyed()) this.win.hide();
   }
 
@@ -187,6 +224,7 @@ export class PanelManager {
 
   private ensureWindow(): BrowserWindow {
     if (this.win && !this.win.isDestroyed()) return this.win;
+    this.panelLoaded = false;
 
     // Dev/unpacked runs: give the window the buddy icon (packaged builds get
     // it from the exe resources via electron-builder's win.icon).
@@ -217,6 +255,14 @@ export class PanelManager {
         backgroundThrottling: false,
       },
     });
+
+    // Permission failures must remain actionable while the user is in a
+    // fullscreen app (a common Buddy use case). Without this macOS silently
+    // shows the panel on the ordinary desktop Space, making tray/Fix clicks
+    // look broken even though the window did open.
+    if (process.platform === 'darwin') {
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    }
 
     lockdownNavigation(win);
     // Crash recovery: a dead panel renderer silently kills mic capture AND
@@ -250,14 +296,31 @@ export class PanelManager {
     // M11: notify main wiring on every renderer load (first boot AND
     // crash-recreates) so the transcript ring / status can be replayed —
     // entries pushed before the renderer existed are otherwise lost.
-    win.webContents.on('did-finish-load', () => this.rendererReadyCb?.());
+    win.webContents.on('did-finish-load', () => {
+      if (this.win !== win) return;
+      this.panelLoaded = true;
+      this.rendererReadyCb?.();
+      if (this.pendingInactiveShow) {
+        this.pendingInactiveShow = false;
+        this.presentInactive(win);
+      }
+    });
 
     win.on('blur', () => {
       if (KEEP_PANEL_OPEN) return; // explicit visual QA mode: keep the panel up
-      if (!win.isDestroyed()) win.hide();
+      if (Date.now() < this.ignoreBlurUntil) return;
+      // Promoting a showInactive/all-Spaces window can emit blur immediately
+      // before focus. Defer dismissal long enough for the click target to
+      // become key; genuine outside clicks remain unfocused and still close.
+      setTimeout(() => {
+        if (!win.isDestroyed() && !win.isFocused()) win.hide();
+      }, 100);
     });
     win.on('closed', () => {
-      this.win = null;
+      if (this.win === win) {
+        this.win = null;
+        this.panelLoaded = false;
+      }
     });
 
     if (TEST_CAPTURE) this.wireCaptureTest(win);
@@ -270,6 +333,28 @@ export class PanelManager {
 
     this.win = win;
     return win;
+  }
+
+  private presentInactive(win: BrowserWindow): void {
+    if (win.isDestroyed()) return;
+    this.positionNearTray(win);
+    // macOS emits a synthetic blur as a focus-less window is shown. Without
+    // a short guard the generic hide-on-blur behavior closes an actionable
+    // permission/error panel in the same tick, so it appears never to open.
+    this.ignoreBlurUntil = Date.now() + 1_000;
+    win.showInactive();
+    this.positionNearTray(win);
+    this.stabilizePosition(win);
+    this.reassertTopmost(win);
+  }
+
+  /** macOS fullscreen Spaces may relocate an inactive window after show. */
+  private stabilizePosition(win: BrowserWindow, anchor?: Rectangle): void {
+    for (const delay of [100, 400, 1_000]) {
+      setTimeout(() => {
+        if (!win.isDestroyed() && win.isVisible()) this.positionNearTray(win, anchor);
+      }, delay);
+    }
   }
 
   /**
@@ -347,13 +432,16 @@ export class PanelManager {
   private positionNearTray(win: BrowserWindow, anchor?: Rectangle): void {
     if (process.platform === 'darwin') {
       const display = anchor ? screen.getDisplayMatching(anchor) : screen.getPrimaryDisplay();
-      const { workArea } = display;
-      const anchorCenter = anchor ? anchor.x + anchor.width / 2 : workArea.x + workArea.width;
+      const { bounds, workArea } = display;
+      // Fullscreen/remote-desktop Spaces can report a transient workArea
+      // wider than the actual display. Horizontal placement must use bounds
+      // or the panel is clamped just beyond the visible right edge.
+      const anchorCenter = anchor ? anchor.x + anchor.width / 2 : bounds.x + bounds.width;
       const x = Math.min(
-        Math.max(Math.round(anchorCenter - PANEL_WIDTH / 2), workArea.x + MARGIN),
-        workArea.x + workArea.width - PANEL_WIDTH - MARGIN,
+        Math.max(Math.round(anchorCenter - PANEL_WIDTH / 2), bounds.x + MARGIN),
+        bounds.x + bounds.width - PANEL_WIDTH - MARGIN,
       );
-      win.setPosition(x, Math.round(workArea.y + MARGIN));
+      win.setPosition(x, Math.round(Math.max(bounds.y, workArea.y) + MARGIN));
       return;
     }
     const display = anchor ? screen.getDisplayMatching(anchor) : screen.getPrimaryDisplay();

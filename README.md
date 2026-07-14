@@ -37,9 +37,12 @@ Choose the artifact for your computer. MVP builds are unsigned.
 1. Launch Buddy. A tray icon appears, and the control panel opens by itself on first run.
 2. Open settings (gear in the panel) and paste your OpenAI API key. It is encrypted on your
    machine before it's stored and never shown again.
-3. On macOS, approve **Microphone** and **Accessibility** when asked. Screen Recording is requested
-   only on your first explicit capture. You can review status from the Buddy menu-bar icon's
-   **Permissions…** item. After enabling Accessibility or Screen Recording, quit and reopen Buddy.
+3. On macOS, open **Settings → Permissions** in Buddy (or choose **Permissions…** from its
+   menu-bar item). Each grant has its own **allow/fix** action and visible status. Buddy does not
+   throw privacy prompts from its hidden startup window; it requests access only after you click a
+   repair action or explicitly use the corresponding feature. Return from System Settings and
+   Buddy re-checks automatically, including a live hotkey retry. Restart only when the card says
+   the toggles are allowed but the running process is still blocked.
 4. **Hold `Control` + left `Option` on macOS, or `Ctrl` + left `Alt` on Windows, and talk**
    ("what am I looking at?"). Keep holding while you
    speak; release to send. Buddy answers in voice and points at what it mentions.
@@ -137,6 +140,15 @@ Read `docs/ARCHITECTURE.md` first (scope, module ownership, IPC/coordinate contr
 - **Fixed hotkey** (Control + left Option/Alt) — not remappable yet.
 - **Single voice pipeline** — mic capture and playback live in the (hidden) panel renderer; if
   that renderer is killed, voice drops until it auto-recovers.
-- **Unsigned binaries** — expect a macOS Gatekeeper or Windows SmartScreen warning.
+- **Unsigned Windows binaries** — expect a Windows SmartScreen warning.
+- **macOS distribution builds require stable signing** — `npm run dist` fails instead of silently
+  producing a build that will invalidate privacy grants. Configure an Apple Development or
+  Developer ID Application identity through `CSC_NAME` or `CSC_LINK`. Disposable local QA can set
+  `BUDDY_ALLOW_ADHOC=1`, with the explicit tradeoff that every replacement needs fresh grants.
+- **Ad-hoc macOS rebuilds need fresh privacy grants** — replacing an ad-hoc-signed Buddy changes
+  its TCC identity. Buddy's Permissions card detects the stale grant, links each affected pane,
+  offers a confirmed Buddy-only privacy reset, reveals the exact current app for manual
+  remove/re-add, re-checks on return, and offers live retry plus restart. Stable signing avoids
+  this churn for release builds.
 - **macOS grounding fallback** uses the vision grounding layer; Windows additionally uses UIA.
 - One realtime session at a time; no wake word, no integrations yet.

@@ -410,6 +410,46 @@ export interface RuntimeFlags {
 }
 
 // ---------------------------------------------------------------------------
+// macOS permission health (permission recovery UX)
+// ---------------------------------------------------------------------------
+
+export type PermissionKey = 'microphone' | 'accessibility' | 'inputMonitoring' | 'screen';
+
+export type PermissionGrantState = 'granted' | 'missing' | 'not-determined' | 'unknown';
+
+/** Main-owned, renderer-safe view of Buddy's macOS privacy/runtime health. */
+export interface PermissionHealth {
+  /** False on Windows, where this macOS recovery UI is hidden. */
+  supported: boolean;
+  checkedAt: number;
+  grants: Record<PermissionKey, PermissionGrantState>;
+  /** The actual uiohook result, not an inference from System Settings toggles. */
+  hotkeyAlive: boolean;
+  hotkeyError: string | null;
+  /** First grant worth fixing, ordered by impact on the core voice flow. */
+  nextPermission: PermissionKey | null;
+  /** True when grants look valid but the running process still cannot hook keys. */
+  restartRecommended: boolean;
+  /** Current app path to use when removing/re-adding a stale TCC entry. */
+  appPath: string;
+}
+
+export type PermissionAction =
+  | { type: 'open'; permission: PermissionKey }
+  | { type: 'recheck' }
+  | { type: 'retry-hotkey' }
+  | { type: 'reset-grants' }
+  | { type: 'reveal-app' }
+  | { type: 'restart' };
+
+/** Repair calls never fail silently: even an OS-link failure returns copy. */
+export interface PermissionActionResult {
+  ok: boolean;
+  message: string;
+  health: PermissionHealth;
+}
+
+// ---------------------------------------------------------------------------
 // Turn timings (M8.5 addition, orchestrator-approved — audio-experience eval)
 // ---------------------------------------------------------------------------
 

@@ -22,6 +22,9 @@ import type {
   OverlayHoverEvent,
   PlaybackCommand,
   PlaybackStatsUpdate,
+  PermissionAction,
+  PermissionActionResult,
+  PermissionHealth,
   PointerCommand,
   RuntimeFlags,
   SessionStatus,
@@ -91,6 +94,8 @@ export interface MainToPanelEvents {
   // M11 addition (orchestrator-approved): runtime flags for the panel —
   // hookAlive (hero hint adapts) + CLICKY_* dev flags (header dev chip).
   'panel:runtime': RuntimeFlags;
+  /** Live macOS privacy + hotkey health; refreshed after Settings changes. */
+  'panel:permissions': PermissionHealth;
   // M18 addition (integration-approved): agent-mode mirror — the FULL
   // renderer-safe agent list, pushed on every state change (full-list upsert;
   // the panel replaces its list wholesale). Never carries screenshot bytes.
@@ -99,6 +104,8 @@ export interface MainToPanelEvents {
   // (an overlay helper sprite / agent card was clicked; main shows the panel
   // and sends this so the click lands on the right view).
   'panel:show-agents': null;
+  /** Tray Permissions item opens the persistent in-panel repair UI. */
+  'panel:show-settings': null;
 }
 
 // ===========================================================================
@@ -152,6 +159,12 @@ export interface InvokeChannels {
   // M11 addition (orchestrator-approved): panel bootstrap for runtime flags
   // (push updates ride on 'panel:runtime').
   'panel:get-runtime': { args: []; result: RuntimeFlags };
+  /** Main-owned destination survives a tray click racing panel startup. */
+  'panel:get-requested-view': { args: []; result: 'chat' | 'settings' };
+  /** Current macOS privacy + hotkey health (safe on other platforms). */
+  'permissions:get': { args: []; result: PermissionHealth };
+  /** Run one explicit repair action and return visible success/failure copy. */
+  'permissions:action': { args: [action: PermissionAction]; result: PermissionActionResult };
   // M17 addition (integration-approved): panel bootstrap for the Codex
   // sign-in snapshot (push updates ride on 'panel:codex-signin').
   'codex:signin-state': { args: []; result: CodexSignInState };
@@ -234,6 +247,7 @@ export interface PanelApi {
   onCaptureCommand(cb: (payload: { command: CaptureCommand }) => void): Unsubscribe;
   // M11 addition (orchestrator-approved): runtime flags (hookAlive + dev flags).
   onRuntime(cb: (flags: RuntimeFlags) => void): Unsubscribe;
+  onPermissions(cb: (health: PermissionHealth) => void): Unsubscribe;
   // M17 addition (integration-approved): Codex sign-in state push.
   onCodexSignin(cb: (state: CodexSignInState) => void): Unsubscribe;
   // M18 addition (integration-approved): agent list push (full-list upsert).
@@ -241,10 +255,14 @@ export interface PanelApi {
   // M19 addition (integration-approved): switch to the agents view (an
   // overlay helper sprite / agent card was clicked).
   onShowAgents(cb: () => void): Unsubscribe;
+  onShowSettings(cb: () => void): Unsubscribe;
 
   getSettings(): Promise<Settings>;
   // M11 addition (orchestrator-approved): runtime flags bootstrap.
   getRuntime(): Promise<RuntimeFlags>;
+  getRequestedPanelView(): Promise<'chat' | 'settings'>;
+  getPermissionHealth(): Promise<PermissionHealth>;
+  permissionAction(action: PermissionAction): Promise<PermissionActionResult>;
   // M17 addition (integration-approved): Codex sign-in state bootstrap.
   getCodexSigninState(): Promise<CodexSignInState>;
   signInToCodex(): Promise<{ ok: true } | { ok: false; error: string }>;

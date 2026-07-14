@@ -19,7 +19,7 @@ const TRAY_ICON_BASE64 =
 export interface TrayCallbacks {
   onTogglePanel: (anchor?: Rectangle) => void;
   onOpenPanel: (anchor?: Rectangle) => void;
-  onOpenPermissions?: () => void;
+  onOpenPermissions?: (anchor?: Rectangle) => void;
   onQuit: () => void;
 }
 
@@ -37,7 +37,7 @@ export function createTray(callbacks: TrayCallbacks): Tray {
       ? [
           {
             label: 'Permissions…',
-            click: () => callbacks.onOpenPermissions?.(),
+            click: () => callbacks.onOpenPermissions?.(tray.getBounds()),
           } as const,
         ]
       : []),

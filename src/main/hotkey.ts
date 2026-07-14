@@ -78,6 +78,8 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
   private hookAlive = false;
   private lastError: string | undefined;
   private watchdog: NodeJS.Timeout | null = null;
+  private hook: UiohookLike | null = null;
+  private listenersAttached = false;
 
   constructor(options: HotkeyOptions = {}) {
     super();
@@ -86,33 +88,46 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
 
   /** Start the global hook. Never throws; check status().hookAlive. */
   start(): void {
+    if (this.hookAlive) return;
     try {
-      const hook = this.options.hook ?? this.loadUiohook();
+      const hook = this.hook ?? this.options.hook ?? this.loadUiohook();
+      this.hook = hook;
 
-      hook.on('keydown', (e: { keycode: number }) => {
-        if (CTRL_KEYCODES.has(e.keycode)) this.ctrlDown = true;
-        if (e.keycode === ALT_LEFT_KEYCODE) this.altDown = true;
-        this.evaluate();
-      });
-      hook.on('keyup', (e: { keycode: number }) => {
-        if (CTRL_KEYCODES.has(e.keycode)) this.ctrlDown = false;
-        if (e.keycode === ALT_LEFT_KEYCODE) this.altDown = false;
-        this.evaluate();
-      });
-      hook.on('click', (e: { button: unknown }) => {
-        // libuiohook numbers the primary/left mouse button as 1 on both
-        // macOS and Windows. Coordinates are deliberately read through
-        // Electron at the consumer so mixed-DPI screens stay in DIP space.
-        if (e.button === 1) this.emit('primary-click');
-      });
+      // Permission recovery may call start() again. Attach native listeners
+      // once so every recovered key press still produces exactly one hold.
+      if (!this.listenersAttached) {
+        hook.on('keydown', (e: { keycode: number }) => {
+          if (CTRL_KEYCODES.has(e.keycode)) this.ctrlDown = true;
+          if (e.keycode === ALT_LEFT_KEYCODE) this.altDown = true;
+          this.evaluate();
+        });
+        hook.on('keyup', (e: { keycode: number }) => {
+          if (CTRL_KEYCODES.has(e.keycode)) this.ctrlDown = false;
+          if (e.keycode === ALT_LEFT_KEYCODE) this.altDown = false;
+          this.evaluate();
+        });
+        hook.on('click', (e: { button: unknown }) => {
+          // libuiohook numbers the primary/left mouse button as 1 on both
+          // macOS and Windows. Coordinates are deliberately read through
+          // Electron at the consumer so mixed-DPI screens stay in DIP space.
+          if (e.button === 1) this.emit('primary-click');
+        });
+        this.listenersAttached = true;
+      }
 
       hook.start();
       this.hookAlive = true;
+      this.lastError = undefined;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       this.hookAlive = false;
       this.lastError = error.message;
       console.error('[hotkey] failed to start uiohook, hold-to-talk disabled:', error);
+      try {
+        this.hook?.stop();
+      } catch {
+        /* failed startup may not have a live native loop to stop */
+      }
       // M11 CRASH FIX: an EventEmitter 'error' with no listener THROWS — the
       // throw escaped start() and aborted app boot (tray/powerMonitor/debug
       // server never ran). index.ts now subscribes before start(); this guard
@@ -127,15 +142,9 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
     this.altDown = false;
     this.holding = false;
     if (!this.hookAlive) return;
-    if (!this.options.hook) {
+    if (this.hook) {
       try {
-        this.loadUiohook().stop();
-      } catch (err) {
-        console.error('[hotkey] failed to stop uiohook:', err);
-      }
-    } else {
-      try {
-        this.options.hook.stop();
+        this.hook.stop();
       } catch (err) {
         console.error('[hotkey] failed to stop hook:', err);
       }

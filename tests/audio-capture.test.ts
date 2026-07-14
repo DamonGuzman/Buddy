@@ -11,6 +11,7 @@ const clicky = vi.hoisted(() => ({
 vi.mock('../src/renderer/panel/clicky', () => ({ clicky }));
 
 import { MicCapture } from '../src/renderer/panel/audio/capture';
+import { macAudioLifecycle } from '../src/renderer/panel/audio/mac-audio-lifecycle';
 
 class FakeAudioWorkletNode {
   readonly port = {
@@ -76,6 +77,7 @@ describe('MicCapture audio-context lifecycle', () => {
   });
 
   it('closes the capture context on release so playback can own a fresh output route', async () => {
+    const lifecycle = vi.spyOn(macAudioLifecycle, 'beginCaptureTeardown');
     const first = fakeStream();
     const second = fakeStream();
     const getUserMedia = vi
@@ -94,6 +96,7 @@ describe('MicCapture audio-context lifecycle', () => {
 
     capture.stop();
     await vi.waitFor(() => expect(firstContext.close).toHaveBeenCalledOnce());
+    expect(lifecycle).toHaveBeenCalledOnce();
     expect(firstContext.suspend).not.toHaveBeenCalled();
     expect(first.stop).toHaveBeenCalledOnce();
 

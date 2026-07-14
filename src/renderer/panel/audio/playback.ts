@@ -16,9 +16,10 @@
  * module's own onPlayback subscription (the frozen App wiring only forwards
  * the command string to control()).
  *
- * F1 fix (battery): the AudioContext is suspended shortly after the queue
- * drains and resumed on the next enqueue — mirroring what mic capture does —
- * so an idle Clicky doesn't keep the audio render thread spinning.
+ * F1 fix (battery + macOS reliability): Windows suspends the AudioContext
+ * shortly after the queue drains and resumes it on the next enqueue. macOS
+ * closes the idle graph instead: Chromium's process-wide CoreAudio session can
+ * detach a logically `running` output graph when the mic graph closes.
  *
  * M8.5 addition (orchestrator-approved): playback tap. The worklet streams
  * back the samples it ACTUALLY rendered ('played' blocks); this class
@@ -30,6 +31,7 @@
 
 import { clicky } from '../clicky';
 import { PlaybackEpochGate } from './epoch-gate';
+import { isMacOS, macAudioLifecycle } from './mac-audio-lifecycle';
 import type { AudioOutputDelta, PlaybackCommand, PlaybackStatsUpdate } from '../../../shared/types';
 import playerWorkletUrl from '../worklets/pcm-player.worklet.js?url&no-inline';
 
@@ -76,6 +78,14 @@ export class AudioPlayer {
   private readonly gate = new PlaybackEpochGate();
   /** F1 (battery): pending context-suspend after the queue drained. */
   private suspendTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Invalidates an output graph while it is being initialized. */
+  private graphGeneration = 0;
+  /** Invalidates queued async chunk deliveries on flush/stop. */
+  private deliveryGeneration = 0;
+  /** Preserves PCM chunk order across async context initialization/recovery. */
+  private deliveryChain: Promise<void> = Promise.resolve();
+  /** Prevents a replacement graph overlapping teardown of its predecessor. */
+  private graphClose: Promise<void> = Promise.resolve();
 
   // ---- playback tap state (M8.5) ----
   private readonly ring = new Float32Array(RING_SAMPLES);
@@ -91,6 +101,7 @@ export class AudioPlayer {
     } catch (err) {
       console.warn('[playback] epoch subscription unavailable:', err);
     }
+    macAudioLifecycle.onCaptureTeardown(() => this.disposeGraph());
   }
 
   /** Queue a model audio chunk (drops stale-item and stale-epoch chunks). */
@@ -105,16 +116,21 @@ export class AudioPlayer {
     const pcm = new Int16Array(delta.chunk);
     const samples = new Float32Array(pcm.length);
     for (let i = 0; i < pcm.length; i++) samples[i] = (pcm[i] ?? 0) / 32768;
-    void this.withNode((node) => {
-      // F1 (battery): wake the render thread back up for the new audio.
-      if (this.ctx !== null && this.ctx.state === 'suspended') {
-        void this.ctx.resume().catch(() => undefined);
-      }
-      node.port.postMessage(
-        { type: 'chunk', samples: samples.buffer, itemId: delta.itemId },
-        [samples.buffer],
-      );
-    });
+    const generation = this.deliveryGeneration;
+    this.deliveryChain = this.deliveryChain
+      .then(async () => {
+        if (generation !== this.deliveryGeneration) return;
+        const { ctx, node } = await this.ensureNode();
+        if (generation !== this.deliveryGeneration) return;
+        if (ctx.state !== 'running') await ctx.resume();
+        if (generation !== this.deliveryGeneration || ctx.state !== 'running') return;
+        node.port.postMessage(
+          { type: 'chunk', samples: samples.buffer, itemId: delta.itemId },
+          [samples.buffer],
+        );
+        this.initErrorReported = false;
+      })
+      .catch((err: unknown) => this.handleOutputError(err));
   }
 
   /**
@@ -125,11 +141,17 @@ export class AudioPlayer {
   control(command: PlaybackCommand, epoch?: number): void {
     void command; // both commands clear the queue and staleify the current item
     this.gate.flush(epoch);
+    this.deliveryGeneration++;
+    this.cancelSuspend();
     if (this.currentItemId !== null) {
       this.markStale(this.currentItemId);
       this.currentItemId = null;
     }
-    void this.withNode((node) => node.port.postMessage({ type: 'clear' }));
+    // A clear must never create an idle output graph. On macOS, discard the
+    // graph because a following microphone teardown can detach it from the
+    // physical device while AudioContext.state still says `running`.
+    this.node?.port.postMessage({ type: 'clear' });
+    if (isMacOS()) this.disposeGraph();
   }
 
   /** Notifies when the worklet queue runs empty (playback finished). */
@@ -255,11 +277,16 @@ export class AudioPlayer {
 
   // ---- F1 (battery): suspend the context while nothing is queued ----
 
-  private scheduleSuspend(): void {
+  private scheduleSuspend(generation: number, ctx: AudioContext): void {
     this.cancelSuspend();
     this.suspendTimer = setTimeout(() => {
       this.suspendTimer = null;
-      void this.ctx?.suspend().catch(() => undefined);
+      if (generation !== this.graphGeneration || ctx !== this.ctx) return;
+      if (isMacOS()) {
+        this.disposeGraph();
+      } else {
+        void ctx.suspend().catch(() => undefined);
+      }
     }, SUSPEND_AFTER_DRAIN_MS);
   }
 
@@ -273,59 +300,106 @@ export class AudioPlayer {
   /** M11: playback init failed and main was told (re-armed on recovery). */
   private initErrorReported = false;
 
-  private async withNode(fn: (node: AudioWorkletNode) => void): Promise<void> {
-    try {
-      await this.ensure();
-      if (this.node) fn(this.node);
-      this.initErrorReported = false;
-    } catch (err) {
-      console.warn('[playback] audio output unavailable:', err);
-      // M11 addition (orchestrator-approved): report the failure to main —
-      // audio_output_failed copy + forced captions — instead of a silent
-      // console.warn while the user hears nothing. Reset `ready` so the next
-      // chunk retries init (audio devices come back).
-      this.ready = null;
-      this.node = null;
-      void this.ctx?.close().catch(() => undefined);
-      this.ctx = null;
-      if (!this.initErrorReported) {
-        this.initErrorReported = true;
-        try {
-          clicky.reportAudioError({
-            source: 'playback',
-            name: err instanceof Error ? err.name : 'Error',
-            message: err instanceof Error ? err.message : String(err),
-          });
-        } catch {
-          /* reporting is best-effort */
-        }
+  private handleOutputError(err: unknown): void {
+    console.warn('[playback] audio output unavailable:', err);
+    // M11 addition (orchestrator-approved): report the failure to main —
+    // audio_output_failed copy + forced captions — instead of a silent
+    // console.warn while the user hears nothing. A later chunk retries init.
+    this.disposeGraph();
+    if (!this.initErrorReported) {
+      this.initErrorReported = true;
+      try {
+        clicky.reportAudioError({
+          source: 'playback',
+          name: err instanceof Error ? err.name : 'Error',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      } catch {
+        /* reporting is best-effort */
       }
+    }
+  }
+
+  private async ensureNode(): Promise<{ ctx: AudioContext; node: AudioWorkletNode }> {
+    for (;;) {
+      const generation = this.graphGeneration;
+      try {
+        await this.ensure();
+      } catch (err) {
+        if (generation !== this.graphGeneration) continue;
+        throw err;
+      }
+      if (generation !== this.graphGeneration) continue;
+      if (this.ctx && this.node) return { ctx: this.ctx, node: this.node };
     }
   }
 
   private ensure(): Promise<void> {
     if (!this.ready) {
-      this.ready = (async () => {
-        this.ctx = new AudioContext({ sampleRate: 24_000 });
-        await this.ctx.audioWorklet.addModule(playerWorkletUrl);
-        this.node = new AudioWorkletNode(this.ctx, 'pcm-player', {
+      const generation = this.graphGeneration;
+      const ready = (async () => {
+        await Promise.all([macAudioLifecycle.waitForCaptureTeardown(), this.graphClose]);
+        if (generation !== this.graphGeneration) return;
+        const ctx = new AudioContext({ sampleRate: 24_000 });
+        this.ctx = ctx;
+        await ctx.audioWorklet.addModule(playerWorkletUrl);
+        if (generation !== this.graphGeneration || ctx !== this.ctx) {
+          await ctx.close().catch(() => undefined);
+          return;
+        }
+        const node = new AudioWorkletNode(ctx, 'pcm-player', {
           numberOfInputs: 0,
           numberOfOutputs: 1,
           outputChannelCount: [1],
         });
-        this.node.port.onmessage = (e: MessageEvent<{ type?: string }>) => {
+        this.node = node;
+        node.port.onmessage = (e: MessageEvent<{ type?: string }>) => {
+          if (generation !== this.graphGeneration || node !== this.node) return;
           if (e.data?.type === 'drained') {
-            this.scheduleSuspend(); // F1 (battery)
+            this.scheduleSuspend(generation, ctx); // F1 (battery)
             this.onDrainedCb?.();
           } else if (e.data?.type === 'played') {
             this.onPlayedBlock(e.data as PlayedBlock);
           }
         };
-        this.node.connect(this.ctx.destination);
-        if (this.ctx.state !== 'running') await this.ctx.resume();
+        node.connect(ctx.destination);
+        if (ctx.state !== 'running') await ctx.resume();
       })();
+      this.ready = ready;
+      void ready.then(
+        () => {
+          if (this.ready === ready && generation !== this.graphGeneration) this.ready = null;
+        },
+        () => {
+          if (this.ready === ready && generation !== this.graphGeneration) this.ready = null;
+        },
+      );
     }
     return this.ready;
+  }
+
+  private disposeGraph(): void {
+    this.cancelSuspend();
+    this.graphGeneration++;
+    const ctx = this.ctx;
+    const node = this.node;
+    this.ready = null;
+    this.ctx = null;
+    this.node = null;
+    if (node) {
+      node.port.onmessage = null;
+      try {
+        node.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+    }
+    if (ctx) {
+      const priorClose = this.graphClose;
+      this.graphClose = Promise.all([priorClose, ctx.close().catch(() => undefined)]).then(
+        () => undefined,
+      );
+    }
   }
 }
 

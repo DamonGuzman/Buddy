@@ -125,6 +125,13 @@ describe('error catalog (describeKind)', () => {
     expect(pres.autoShowPanel).toBe(true);
   });
 
+  it('gives macOS hotkey failures the stale-build and Input Monitoring repair steps', () => {
+    const pres = describeKind('hotkey_dead', { macHotkeyPermissions: true });
+    expect(pres.message).toContain('settings → permissions');
+    expect(pres.message).toContain('reset stale grants');
+    expect(pres.message).toContain('recheck automatically');
+  });
+
   it('interpolates the model into model_unavailable copy', () => {
     const pres = describeKind('model_unavailable', { model: 'gpt-realtime-2.1' });
     expect(pres.message).toBe(

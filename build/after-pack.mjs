@@ -1,4 +1,4 @@
-/** electron-builder hook: make unsigned macOS builds internally valid. */
+/** electron-builder hook: give otherwise-unsigned macOS builds a valid provisional seal. */
 
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -25,4 +25,5 @@ export default async function afterPack(context) {
     throw new Error(`ad-hoc signing ${appPath} failed${detail ? `:\n${detail}` : ''}`);
   }
   console.log(`[after-pack] ad-hoc signed ${appPath}`);
+  console.log('[after-pack] the after-sign hook will require a stable final identity');
 }

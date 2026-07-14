@@ -172,6 +172,40 @@ describe('hook start failure (M11 crash fix)', () => {
     hotkey.simulate('release');
     expect(events).toEqual(['start', 'end']);
   });
+
+  it('retries a recovered native hook without duplicating event listeners', () => {
+    class RecoveringHook extends EventEmitter implements UiohookLike {
+      starts = 0;
+      stops = 0;
+      start(): void {
+        this.starts++;
+        if (this.starts === 1) throw new Error('access denied');
+      }
+      stop(): void {
+        this.stops++;
+      }
+    }
+
+    const hook = new RecoveringHook();
+    const onSpy = vi.spyOn(hook, 'on');
+    const hotkey = new HotkeyManager({ hook });
+    hotkey.on('error', () => undefined);
+    hotkey.start();
+    expect(hotkey.status().hookAlive).toBe(false);
+    hotkey.start();
+
+    expect(hotkey.status()).toMatchObject({ hookAlive: true, holding: false });
+    expect(hotkey.status().error).toBeUndefined();
+    expect(hook.starts).toBe(2);
+    expect(hook.stops).toBe(1);
+    expect(onSpy).toHaveBeenCalledTimes(3); // keydown, keyup, click — once each
+
+    let starts = 0;
+    hotkey.on('hold-start', () => starts++);
+    hook.emit('keydown', { keycode: L_CTRL });
+    hook.emit('keydown', { keycode: L_ALT });
+    expect(starts).toBe(1);
+  });
 });
 
 describe('hold-cancel reasons (M11 hold_too_long)', () => {

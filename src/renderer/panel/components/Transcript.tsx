@@ -66,8 +66,8 @@ export function Transcript({
               type a question below — i&rsquo;ll look at your screen and point things out
             </p>
             <p className="text-[11.5px] text-muted-foreground/70">
-              the push-to-talk hotkey isn&rsquo;t available right now (a restart usually brings it
-              back)
+              push-to-talk needs permission — use the fix button above; buddy will recheck it
+              automatically
             </p>
           </>
         )}

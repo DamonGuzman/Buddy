@@ -79,6 +79,8 @@ export interface ErrorParams {
   model?: string;
   /** DOMException name from the renderer mic report (NotAllowedError, ...). */
   micErrorName?: string;
+  /** Selects macOS-specific repair steps for the global hotkey. */
+  macHotkeyPermissions?: boolean;
 }
 
 interface CatalogEntry {
@@ -258,6 +260,12 @@ export function describeKind(kind: ErrorKind, params?: ErrorParams): ErrorPresen
   if (kind === 'mic_unavailable' && params?.micErrorName === 'NotAllowedError') {
     // Permission denial: lead with the windows privacy toggle.
     message = MIC_BLOCKED_COPY;
+  }
+  if (kind === 'hotkey_dead' && params?.macHotkeyPermissions) {
+    message =
+      "buddy couldn't grab the push-to-talk keys. open buddy settings → permissions and use fix; " +
+      'i’ll recheck automatically. if macos already shows buddy as allowed, use “reset stale ' +
+      'grants” there for a guided clean start. typing still works meanwhile.';
   }
   return { kind, message, surfaces: entry.surfaces, autoShowPanel: entry.autoShowPanel };
 }

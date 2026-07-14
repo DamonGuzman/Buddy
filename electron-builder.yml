@@ -2,6 +2,7 @@
 appId: ai.fastyr.buddy
 productName: Buddy
 afterPack: build/after-pack.mjs
+afterSign: build/after-sign.mjs
 directories:
   output: dist
 files:

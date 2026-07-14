@@ -14,6 +14,7 @@
  */
 
 import { clicky } from '../clicky';
+import { isMacOS, macAudioLifecycle } from './mac-audio-lifecycle';
 import captureWorkletUrl from '../worklets/pcm-capture.worklet.js?url&no-inline';
 
 export interface CaptureStats {
@@ -37,13 +38,6 @@ function rmsOfInt16(buf: ArrayBuffer): number {
     sum += s * s;
   }
   return Math.sqrt(sum / samples.length);
-}
-
-function isMacOS(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  return (
-    navigator.platform.startsWith('Mac') || /Macintosh|Mac OS X/.test(navigator.userAgent)
-  );
 }
 
 export class MicCapture {
@@ -129,6 +123,7 @@ export class MicCapture {
       this.lastError = err instanceof Error ? err.message : String(err);
       console.warn('[capture] failed to start mic capture:', this.lastError);
       this.running = false;
+      this.releaseAudioGraph();
       // M11 addition (orchestrator-approved): report the failure to main so
       // the hold that produced no audio surfaces mic_unavailable (with the
       // NotAllowedError privacy-toggle variant) instead of a silent nothing.
@@ -173,6 +168,7 @@ export class MicCapture {
     } catch (err) {
       console.warn('[capture] test tone failed:', err);
       this.running = false;
+      this.releaseAudioGraph();
     }
   }
 
@@ -202,11 +198,7 @@ export class MicCapture {
       for (const track of this.stream.getTracks()) track.stop();
       this.stream = null;
     }
-    if (isMacOS()) {
-      this.closeContext();
-    } else {
-      void this.ctx?.suspend().catch(() => undefined);
-    }
+    this.releaseAudioGraph();
     console.debug(
       `[capture] stopped after ${this.chunkCount} chunks (peak rms ${this.peakRms.toFixed(4)})`,
     );
@@ -227,7 +219,15 @@ export class MicCapture {
 
   // -------------------------------------------------------------------------
 
-  private closeContext(): void {
+  private releaseAudioGraph(): void {
+    if (isMacOS()) {
+      macAudioLifecycle.beginCaptureTeardown(this.closeContext());
+    } else {
+      void this.ctx?.suspend().catch(() => undefined);
+    }
+  }
+
+  private closeContext(): Promise<void> {
     const ctx = this.ctx;
     const node = this.node;
     this.ctx = null;
@@ -248,7 +248,9 @@ export class MicCapture {
       void closing.finally(() => {
         if (this.contextClose === closing) this.contextClose = null;
       });
+      return closing;
     }
+    return this.contextClose ?? Promise.resolve();
   }
 
   private async ensureContext(): Promise<AudioContext> {

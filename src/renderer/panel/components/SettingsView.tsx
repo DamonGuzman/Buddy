@@ -15,7 +15,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import type { MicDevice, ModelId, Settings } from '../../../shared/types';
+import { PermissionCard } from './PermissionCard';
+import type { MicDevice, ModelId, PermissionHealth, Settings } from '../../../shared/types';
 
 const VOICES = [
   'marin',
@@ -39,6 +40,8 @@ interface SettingsViewProps {
   settings: Settings;
   micDevices: MicDevice[];
   micError: string | null;
+  permissions: PermissionHealth | null;
+  onPermissionHealth: (health: PermissionHealth) => void;
 }
 
 /** Settings: API key, model, voice, captions, mic, hotkey, agent-mode teaser. */
@@ -46,6 +49,8 @@ export function SettingsView({
   settings,
   micDevices,
   micError,
+  permissions,
+  onPermissionHealth,
 }: SettingsViewProps): React.JSX.Element {
   const [keyDraft, setKeyDraft] = useState('');
   const [savingKey, setSavingKey] = useState(false);
@@ -87,6 +92,9 @@ export function SettingsView({
   return (
     <ScrollArea className="min-h-0 flex-1" data-settings-scroll>
       <div className="flex flex-col gap-3.5 px-4 pt-3.5 pb-4">
+        {permissions?.supported ? (
+          <PermissionCard health={permissions} onHealth={onPermissionHealth} />
+        ) : null}
         <Card className="gap-3 rounded-lg py-3.5 shadow-none">
           <CardHeader className="px-3.5">
             <CardTitle className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground">
