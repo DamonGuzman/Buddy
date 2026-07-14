@@ -450,13 +450,16 @@ function App(): React.JSX.Element {
     // JS-driven on purpose — see the .buddy-eyes comment in overlay.css.
     let blinkTimer: ReturnType<typeof setTimeout> | null = null;
     const scheduleBlink = (): void => {
-      blinkTimer = setTimeout(() => {
-        if (visible) {
-          setBlink(true);
-          setTimeout(() => setBlink(false), 130);
-        }
-        scheduleBlink();
-      }, 3500 + Math.random() * 3000);
+      blinkTimer = setTimeout(
+        () => {
+          if (visible) {
+            setBlink(true);
+            setTimeout(() => setBlink(false), 130);
+          }
+          scheduleBlink();
+        },
+        3500 + Math.random() * 3000,
+      );
     };
     scheduleBlink();
 
@@ -767,8 +770,7 @@ function App(): React.JSX.Element {
       // Drag: move the buddy with the cursor (imperative, no re-render).
       if (drag !== null) {
         if (!drag.moved) {
-          const moved =
-            Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > DRAG_THRESHOLD;
+          const moved = Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > DRAG_THRESHOLD;
           if (moved) {
             drag.moved = true;
             setDragging(true);
@@ -777,10 +779,7 @@ function App(): React.JSX.Element {
           }
         }
         if (drag.moved) {
-          flight.jumpTo(
-            { x: e.clientX + drag.grabDx, y: e.clientY + drag.grabDy },
-            REST_ROT,
-          );
+          flight.jumpTo({ x: e.clientX + drag.grabDx, y: e.clientY + drag.grabDy }, REST_ROT);
         }
         processHover();
         return;

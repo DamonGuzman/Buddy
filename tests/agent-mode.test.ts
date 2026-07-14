@@ -3,7 +3,13 @@ import { AgentManager } from '../src/main/agents/manager';
 import { MockAgentBackend } from '../src/main/agents/mock-backend';
 import { CodexAgentBackend } from '../src/main/agents/backend';
 import { findAgentTool } from '../src/main/agents/tools';
-import type { AgentBackend, AgentBackendRequest, AgentBackendResult, AgentBrief, AgentToolContext } from '../src/main/agents/types';
+import type {
+  AgentBackend,
+  AgentBackendRequest,
+  AgentBackendResult,
+  AgentBrief,
+  AgentToolContext,
+} from '../src/main/agents/types';
 
 function brief(id: string): AgentBrief {
   return { id, task: `research ${id}`, recentTranscript: '', createdAt: Date.now() };
@@ -17,7 +23,9 @@ describe('Agent Mode runtime', () => {
       backend: new MockAgentBackend(),
       isReady: () => true,
       onAgentsChanged: (list) => updates.push(list),
-      onFinished: (summary) => { finished = summary.id; },
+      onFinished: (summary) => {
+        finished = summary.id;
+      },
     });
     expect(manager.spawn(brief('agent_1'))).toEqual({ ok: true, agentId: 'agent_1' });
     await vi.waitFor(() => expect(finished).toBe('agent_1'));
@@ -40,18 +48,22 @@ describe('Agent Mode runtime', () => {
           const callId = `note_${requests}`;
           return {
             ok: true,
-            outputItems: [{
-              type: 'function_call',
-              call_id: callId,
-              name: 'scratchpad_write',
-              arguments: JSON.stringify({ text: `round ${requests}` }),
-            }],
+            outputItems: [
+              {
+                type: 'function_call',
+                call_id: callId,
+                name: 'scratchpad_write',
+                arguments: JSON.stringify({ text: `round ${requests}` }),
+              },
+            ],
             text: '',
-            functionCalls: [{
-              callId,
-              name: 'scratchpad_write',
-              argsJson: JSON.stringify({ text: `round ${requests}` }),
-            }],
+            functionCalls: [
+              {
+                callId,
+                name: 'scratchpad_write',
+                argsJson: JSON.stringify({ text: `round ${requests}` }),
+              },
+            ],
             searchQueries: [],
             citations: [],
             usedPercent: null,
@@ -72,7 +84,9 @@ describe('Agent Mode runtime', () => {
       backend,
       isReady: () => true,
       onAgentsChanged: () => {},
-      onFinished: () => { finished = true; },
+      onFinished: () => {
+        finished = true;
+      },
     });
 
     expect(manager.spawn(brief('unbounded'))).toEqual({ ok: true, agentId: 'unbounded' });
@@ -88,24 +102,43 @@ describe('Agent Mode runtime', () => {
 
   it('fails closed when signed out and enforces the three-agent cap', async () => {
     const signedOut = new AgentManager({
-      backend: new MockAgentBackend(), isReady: () => false, onAgentsChanged: () => {}, onFinished: () => {},
+      backend: new MockAgentBackend(),
+      isReady: () => false,
+      onAgentsChanged: () => {},
+      onFinished: () => {},
     });
     expect(signedOut.spawn(brief('nope'))).toEqual({ ok: false, reason: 'not_signed_in' });
 
     const blocking: AgentBackend = {
-      request: (req) => new Promise<AgentBackendResult>((resolve) => {
-        req.signal.addEventListener('abort', () => resolve({ ok: false, errorKind: 'agent_backend_down', detail: 'aborted', retryable: false }), { once: true });
-      }),
+      request: (req) =>
+        new Promise<AgentBackendResult>((resolve) => {
+          req.signal.addEventListener(
+            'abort',
+            () =>
+              resolve({
+                ok: false,
+                errorKind: 'agent_backend_down',
+                detail: 'aborted',
+                retryable: false,
+              }),
+            { once: true },
+          );
+        }),
     };
     const manager = new AgentManager({
-      backend: blocking, isReady: () => true, onAgentsChanged: () => {}, onFinished: () => {},
+      backend: blocking,
+      isReady: () => true,
+      onAgentsChanged: () => {},
+      onFinished: () => {},
     });
     expect(manager.spawn(brief('a')).ok).toBe(true);
     expect(manager.spawn(brief('b')).ok).toBe(true);
     expect(manager.spawn(brief('c')).ok).toBe(true);
     expect(manager.spawn(brief('d'))).toEqual({ ok: false, reason: 'at_capacity' });
     manager.cancelAll();
-    await vi.waitFor(() => expect(manager.list().every((item) => item.status === 'cancelled')).toBe(true));
+    await vi.waitFor(() =>
+      expect(manager.list().every((item) => item.status === 'cancelled')).toBe(true),
+    );
   });
 
   it('blocks localhost/private web fetches before network access', async () => {
@@ -114,10 +147,16 @@ describe('Agent Mode runtime', () => {
       brief: brief('safe'),
       signal: new AbortController().signal,
       scratchpad: { get: () => '', set: () => {}, append: () => {} },
-      addSource: () => {}, fetchCount: () => 0, noteFetch: () => {},
+      addSource: () => {},
+      fetchCount: () => 0,
+      noteFetch: () => {},
     };
-    await expect(tool.execute({ url: 'http://127.0.0.1:8199/state' }, ctx)).rejects.toThrow('private addresses are blocked');
-    await expect(tool.execute({ url: 'http://localhost/secret' }, ctx)).rejects.toThrow('local addresses are blocked');
+    await expect(tool.execute({ url: 'http://127.0.0.1:8199/state' }, ctx)).rejects.toThrow(
+      'private addresses are blocked',
+    );
+    await expect(tool.execute({ url: 'http://localhost/secret' }, ctx)).rejects.toThrow(
+      'local addresses are blocked',
+    );
   });
 });
 
@@ -126,22 +165,54 @@ describe('CodexAgentBackend wire contract', () => {
     let body: Record<string, unknown> | null = null;
     const events = [
       { type: 'response.web_search_call.searching', item: { action: { query: 'best monitor' } } },
-      { type: 'response.output_text.annotation.added', annotation: { url: 'https://example.com/review' } },
-      { type: 'response.output_item.added', item: { id: 'fc1', type: 'function_call', call_id: 'call1', name: 'scratchpad_write', arguments: '{"text":"note"}' } },
-      { type: 'response.function_call_arguments.done', item_id: 'fc1', arguments: '{"text":"note"}' },
+      {
+        type: 'response.output_text.annotation.added',
+        annotation: { url: 'https://example.com/review' },
+      },
+      {
+        type: 'response.output_item.added',
+        item: {
+          id: 'fc1',
+          type: 'function_call',
+          call_id: 'call1',
+          name: 'scratchpad_write',
+          arguments: '{"text":"note"}',
+        },
+      },
+      {
+        type: 'response.function_call_arguments.done',
+        item_id: 'fc1',
+        arguments: '{"text":"note"}',
+      },
       { type: 'response.output_text.delta', delta: 'working' },
-      { type: 'response.completed', response: { usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } } },
+      {
+        type: 'response.completed',
+        response: { usage: { input_tokens: 10, output_tokens: 2, total_tokens: 12 } },
+      },
     ];
     const raw = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('');
     const backend = new CodexAgentBackend(
-      { getCodexAuth: () => ({ accessToken: 'secret', accountId: 'acct', planType: 'pro', expiresAt: Date.now() + 60_000 }), getBearer: async () => 'secret' },
+      {
+        getCodexAuth: () => ({
+          accessToken: 'secret',
+          accountId: 'acct',
+          planType: 'pro',
+          expiresAt: Date.now() + 60_000,
+        }),
+        getBearer: async () => 'secret',
+      },
       (async (_url, init) => {
         body = JSON.parse(init?.body as string) as Record<string, unknown>;
         return new Response(raw, { status: 200, headers: { 'x-codex-primary-used-percent': '5' } });
       }) as typeof fetch,
     );
     const req: AgentBackendRequest = {
-      model: 'gpt-5.6-sol', instructions: 'research', input: [], tools: [{ type: 'web_search' }], effort: 'medium', signal: new AbortController().signal,
+      model: 'gpt-5.6-sol',
+      instructions: 'research',
+      input: [],
+      tools: [{ type: 'web_search' }],
+      effort: 'medium',
+      signal: new AbortController().signal,
     };
     const result = await backend.request(req);
     expect(body?.['store']).toBe(false);

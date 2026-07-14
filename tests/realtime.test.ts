@@ -16,7 +16,8 @@ import { getSessionInstructions, getToolDefinitions } from '../src/main/persona'
 import type { CaptureMeta, SessionStatus } from '../src/shared/types';
 
 const require = createRequire(import.meta.url);
-const mock = require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
+const mock =
+  require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
 type MockServer = Awaited<ReturnType<typeof mock.createMockServer>>;
 
 // ---------------------------------------------------------------------------
@@ -125,7 +126,10 @@ describe('RealtimeSession against the mock server', () => {
       type: string;
       instructions: string;
       output_modalities: string[];
-      audio: { input: { turn_detection: null; format: { type: string; rate: number } }; output: { voice: string } };
+      audio: {
+        input: { turn_detection: null; format: { type: string; rate: number } };
+        output: { voice: string };
+      };
       tools: Array<{ name: string }>;
     };
     expect(update.type).toBe('realtime');
@@ -160,21 +164,27 @@ describe('RealtimeSession against the mock server', () => {
     const before = server.clientEvents.length;
     const socket = [...server.wss.clients].at(-1);
     expect(socket).toBeDefined();
-    socket!.send(JSON.stringify({
-      type: 'input_audio_buffer.speech_started',
-      item_id: 'vad_user_1',
-      audio_start_ms: 0,
-    }));
-    socket!.send(JSON.stringify({
-      type: 'input_audio_buffer.speech_stopped',
-      item_id: 'vad_user_1',
-      audio_end_ms: 800,
-    }));
-    socket!.send(JSON.stringify({
-      type: 'input_audio_buffer.committed',
-      item_id: 'vad_user_1',
-      previous_item_id: null,
-    }));
+    socket!.send(
+      JSON.stringify({
+        type: 'input_audio_buffer.speech_started',
+        item_id: 'vad_user_1',
+        audio_start_ms: 0,
+      }),
+    );
+    socket!.send(
+      JSON.stringify({
+        type: 'input_audio_buffer.speech_stopped',
+        item_id: 'vad_user_1',
+        audio_end_ms: 800,
+      }),
+    );
+    socket!.send(
+      JSON.stringify({
+        type: 'input_audio_buffer.committed',
+        item_id: 'vad_user_1',
+        previous_item_id: null,
+      }),
+    );
 
     await vi.waitFor(() => expect(audioCommits).toEqual([{ itemId: 'vad_user_1' }]));
     const donePromise = waitFor<{ responseId: string; status: string }>(session, 'response-done');
@@ -206,10 +216,11 @@ describe('RealtimeSession against the mock server', () => {
     const audioDone = collect<{ itemId: string }>(session, 'audio-done');
 
     await session.askText('hello there');
-    const done = await waitFor<{ responseId: string; status: string; usage?: { total_tokens?: number } }>(
-      session,
-      'response-done',
-    );
+    const done = await waitFor<{
+      responseId: string;
+      status: string;
+      usage?: { total_tokens?: number };
+    }>(session, 'response-done');
 
     expect(done.status).toBe('completed');
     expect(done.usage?.total_tokens).toBeGreaterThan(0);
@@ -242,9 +253,15 @@ describe('RealtimeSession against the mock server', () => {
     await waitFor(session, 'response-done');
 
     const events = server.clientEvents.slice(before) as Array<Record<string, unknown>>;
-    const created = events.find((event) => event['type'] === 'conversation.item.create') as {
-      item?: { type?: string; role?: string; content?: Array<{ type?: string; text?: string }> };
-    } | undefined;
+    const created = events.find((event) => event['type'] === 'conversation.item.create') as
+      | {
+          item?: {
+            type?: string;
+            role?: string;
+            content?: Array<{ type?: string; text?: string }>;
+          };
+        }
+      | undefined;
     expect(created?.item).toMatchObject({ type: 'message', role: 'user' });
     expect(created?.item?.content?.[0]?.text).toContain('<system_reminder>');
     expect(events.some((event) => event['type'] === 'response.create')).toBe(true);
@@ -282,49 +299,65 @@ describe('RealtimeSession against the mock server', () => {
         if (event.type !== 'response.create') return;
         responseCreates += 1;
         if (responseCreates === 1) {
-          socket.send(JSON.stringify({
-            type: 'response.created',
-            response: { id: 'resp_old', status: 'in_progress' },
-          }));
-          socket.send(JSON.stringify({
-            type: 'response.output_audio.delta',
-            response_id: 'resp_old',
-            item_id: 'old_initial',
-            delta: Buffer.from([1, 0]).toString('base64'),
-          }));
+          socket.send(
+            JSON.stringify({
+              type: 'response.created',
+              response: { id: 'resp_old', status: 'in_progress' },
+            }),
+          );
+          socket.send(
+            JSON.stringify({
+              type: 'response.output_audio.delta',
+              response_id: 'resp_old',
+              item_id: 'old_initial',
+              delta: Buffer.from([1, 0]).toString('base64'),
+            }),
+          );
           return;
         }
-        socket.send(JSON.stringify({
-          type: 'response.created',
-          response: { id: 'resp_new', status: 'in_progress' },
-        }));
+        socket.send(
+          JSON.stringify({
+            type: 'response.created',
+            response: { id: 'resp_new', status: 'in_progress' },
+          }),
+        );
         // Deliberately violate clean cancellation: stale audio arrives after
         // the new response is active. Clicky must never forward this chunk.
-        socket.send(JSON.stringify({
-          type: 'response.output_audio.delta',
-          response_id: 'resp_old',
-          item_id: 'old_late',
-          delta: Buffer.from([2, 0]).toString('base64'),
-        }));
-        socket.send(JSON.stringify({
-          type: 'response.output_audio.delta',
-          response_id: 'resp_new',
-          item_id: 'new_audio',
-          delta: Buffer.from([3, 0]).toString('base64'),
-        }));
-        socket.send(JSON.stringify({
-          type: 'response.done',
-          response: { id: 'resp_old', status: 'cancelled' },
-        }));
-        socket.send(JSON.stringify({
-          type: 'response.output_audio.done',
-          response_id: 'resp_new',
-          item_id: 'new_audio',
-        }));
-        socket.send(JSON.stringify({
-          type: 'response.done',
-          response: { id: 'resp_new', status: 'completed' },
-        }));
+        socket.send(
+          JSON.stringify({
+            type: 'response.output_audio.delta',
+            response_id: 'resp_old',
+            item_id: 'old_late',
+            delta: Buffer.from([2, 0]).toString('base64'),
+          }),
+        );
+        socket.send(
+          JSON.stringify({
+            type: 'response.output_audio.delta',
+            response_id: 'resp_new',
+            item_id: 'new_audio',
+            delta: Buffer.from([3, 0]).toString('base64'),
+          }),
+        );
+        socket.send(
+          JSON.stringify({
+            type: 'response.done',
+            response: { id: 'resp_old', status: 'cancelled' },
+          }),
+        );
+        socket.send(
+          JSON.stringify({
+            type: 'response.output_audio.done',
+            response_id: 'resp_new',
+            item_id: 'new_audio',
+          }),
+        );
+        socket.send(
+          JSON.stringify({
+            type: 'response.done',
+            response: { id: 'resp_new', status: 'completed' },
+          }),
+        );
       });
     });
 
@@ -668,8 +701,7 @@ describe('RealtimeSession handshake rejection', () => {
         error: {
           type: 'invalid_request_error',
           code: 'insufficient_quota',
-          message:
-            'You exceeded your current quota, please check your plan and billing details.',
+          message: 'You exceeded your current quota, please check your plan and billing details.',
         },
       },
       1013,

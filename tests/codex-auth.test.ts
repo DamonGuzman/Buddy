@@ -30,11 +30,7 @@ function b64url(obj: unknown): string {
 }
 
 /** A fake access-token JWT with the given exp (unix seconds) + auth claim. */
-function jwt(opts: {
-  expSec: number;
-  accountId?: string;
-  planType?: string;
-}): string {
+function jwt(opts: { expSec: number; accountId?: string; planType?: string }): string {
   const header = b64url({ alg: 'RS256', typ: 'JWT' });
   const payload = b64url({
     exp: opts.expSec,
@@ -172,8 +168,22 @@ describe('CodexAuth: auth.json parsing', () => {
 describe('CodexAuth: isValid', () => {
   it('requires exp > now + 60s', () => {
     const auth = new CodexAuth({ tokenStore: fakeStore(), now: () => 1_000_000 });
-    expect(auth.isValid({ accessToken: 't', accountId: 'a', planType: 'p', expiresAt: 1_000_000 + 61_000 })).toBe(true);
-    expect(auth.isValid({ accessToken: 't', accountId: 'a', planType: 'p', expiresAt: 1_000_000 + 59_000 })).toBe(false);
+    expect(
+      auth.isValid({
+        accessToken: 't',
+        accountId: 'a',
+        planType: 'p',
+        expiresAt: 1_000_000 + 61_000,
+      }),
+    ).toBe(true);
+    expect(
+      auth.isValid({
+        accessToken: 't',
+        accountId: 'a',
+        planType: 'p',
+        expiresAt: 1_000_000 + 59_000,
+      }),
+    ).toBe(false);
   });
 });
 
@@ -248,9 +258,7 @@ describe('CodexAuth: refresh', () => {
     expect(captured[0]!.body).toContain('client_id=app_EMoamEEZ73f0CkXaXp7hrann');
     expect(captured[0]!.body).toContain('scope=openid');
     // The rotated token is returned + cached; the CLI file is untouched.
-    expect(bearer).toBe(
-      jwt({ expSec: newExpSec, accountId: 'acct', planType: 'pro' }),
-    );
+    expect(bearer).toBe(jwt({ expSec: newExpSec, accountId: 'acct', planType: 'pro' }));
     expect(store.save).toHaveBeenCalledOnce();
     expect(store.current?.refreshToken).toBe('refresh-rotated');
     expect(store.current?.expiresAt).toBe(newExpSec * 1000);

@@ -193,10 +193,20 @@ describe('CodexResponsesSession: function calls + tool-output continue', () => {
         sse([
           {
             type: 'response.output_item.added',
-            item: { id: 'fc_1', type: 'function_call', call_id: 'call_abc', name: 'point_at', arguments: '' },
+            item: {
+              id: 'fc_1',
+              type: 'function_call',
+              call_id: 'call_abc',
+              name: 'point_at',
+              arguments: '',
+            },
           },
           { type: 'response.function_call_arguments.delta', item_id: 'fc_1', delta: '{"x":10,' },
-          { type: 'response.function_call_arguments.delta', item_id: 'fc_1', delta: '"y":20,"screen":0}' },
+          {
+            type: 'response.function_call_arguments.delta',
+            item_id: 'fc_1',
+            delta: '"y":20,"screen":0}',
+          },
           {
             type: 'response.function_call_arguments.done',
             item_id: 'fc_1',
@@ -207,7 +217,10 @@ describe('CodexResponsesSession: function calls + tool-output continue', () => {
       ),
     );
     const calls: { callId: string; name: string; argsJson: string }[] = [];
-    const result = await session.submit({ text: 'point' }, { onFunctionCall: (c) => calls.push(c) });
+    const result = await session.submit(
+      { text: 'point' },
+      { onFunctionCall: (c) => calls.push(c) },
+    );
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({
       callId: 'call_abc',
@@ -230,7 +243,11 @@ describe('CodexResponsesSession: function calls + tool-output continue', () => {
               type: 'response.output_item.added',
               item: { id: 'fc_1', type: 'function_call', call_id: 'call_1', name: 'point_at' },
             },
-            { type: 'response.function_call_arguments.done', item_id: 'fc_1', arguments: '{"x":1,"y":2,"screen":0}' },
+            {
+              type: 'response.function_call_arguments.done',
+              item_id: 'fc_1',
+              arguments: '{"x":1,"y":2,"screen":0}',
+            },
             completed('resp_1'),
           ]),
         );
@@ -306,22 +323,24 @@ describe('CodexResponsesSession: multi-turn continuity', () => {
     const session = makeSession(async (_url, init) => {
       bodies.push(JSON.parse(init.body as string) as Record<string, unknown>);
       n += 1;
-      return streamResponse(sse([
-        { type: 'response.output_text.done', item_id: `m_${n}`, text: `answer ${n}` },
-        completed(`resp_${n}`),
-      ]));
+      return streamResponse(
+        sse([
+          { type: 'response.output_text.done', item_id: `m_${n}`, text: `answer ${n}` },
+          completed(`resp_${n}`),
+        ]),
+      );
     });
     await session.submit({ text: 'first' }, {});
     await session.submit({ text: 'second' }, {});
     await session.submit({ text: 'third' }, {});
     expect(bodies.every((body) => body['previous_response_id'] === undefined)).toBe(true);
-    expect((bodies[0]!['input'] as unknown[])).toHaveLength(1);
-    expect((bodies[1]!['input'] as unknown[])).toHaveLength(3);
-    expect((bodies[2]!['input'] as unknown[])).toHaveLength(5);
+    expect(bodies[0]!['input'] as unknown[]).toHaveLength(1);
+    expect(bodies[1]!['input'] as unknown[]).toHaveLength(3);
+    expect(bodies[2]!['input'] as unknown[]).toHaveLength(5);
     // reset() forgets the thread.
     session.reset();
     await session.submit({ text: 'fresh' }, {});
-    expect((bodies[3]!['input'] as unknown[])).toHaveLength(1);
+    expect(bodies[3]!['input'] as unknown[]).toHaveLength(1);
   });
 });
 
@@ -340,7 +359,12 @@ describe('CodexResponsesSession: quota + failure paths', () => {
   it('classifies a streamed usage-limit error as quotaExhausted', async () => {
     const session = makeSession(async () =>
       streamResponse(
-        sse([{ type: 'response.failed', error: { code: 'usage_limit_reached', message: 'plan quota' } }]),
+        sse([
+          {
+            type: 'response.failed',
+            error: { code: 'usage_limit_reached', message: 'plan quota' },
+          },
+        ]),
       ),
     );
     const result = await session.submit({ text: 'q' }, {});
@@ -410,7 +434,12 @@ describe('CodexResponsesSession: cancellation', () => {
 describe('CodexResponsesSession: pure parsers', () => {
   it('parseUsage reads Responses-API token fields incl. reasoning', () => {
     expect(
-      parseUsage({ input_tokens: 100, output_tokens: 5, total_tokens: 105, output_tokens_details: { reasoning_tokens: 3 } }),
+      parseUsage({
+        input_tokens: 100,
+        output_tokens: 5,
+        total_tokens: 105,
+        output_tokens_details: { reasoning_tokens: 3 },
+      }),
     ).toEqual({ inputTokens: 100, outputTokens: 5, totalTokens: 105, reasoningTokens: 3 });
     expect(parseUsage(null)).toBeNull();
   });

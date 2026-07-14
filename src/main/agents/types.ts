@@ -24,21 +24,21 @@ import type { AgentStatus, AgentStep, AgentSummary, CaptureMeta } from '../../sh
 export const AGENT_MAX_CONCURRENT = 3;
 export const AGENT_STEP_LOG_CAP = 30;
 export const AGENT_RUN_WALL_CLOCK_MS = 4 * 60_000;
-export const AGENT_BACKEND_TIMEOUT_MS = 90_000;   // per backend request (search rounds can be slow)
+export const AGENT_BACKEND_TIMEOUT_MS = 90_000; // per backend request (search rounds can be slow)
 export const AGENT_TOOL_TIMEOUT_MS = 15_000;
 export const AGENT_FETCH_TIMEOUT_MS = 20_000;
 export const AGENT_FETCH_MAX_CHARS = 8_000;
-export const AGENT_FETCH_MAX_CALLS = 6;           // per run
+export const AGENT_FETCH_MAX_CALLS = 6; // per run
 export const AGENT_DEFAULT_MODEL = 'gpt-5.6-sol'; // CLICKY_AGENT_MODEL env overrides
 export const AGENT_REASONING_EFFORT = 'medium';
 
 // --- brief (built by conversation.ts at spawn) ---
 export interface AgentBrief {
-  id: string;                       // "agent_<seq>_<ts>"
+  id: string; // "agent_<seq>_<ts>"
   task: string;
   why?: string;
-  screenshot?: { jpegBase64: string; meta: CaptureMeta };  // active display's turn capture
-  recentTranscript: string;         // last ~6 entries flattened "user:/clicky:", capped ~1500 chars
+  screenshot?: { jpegBase64: string; meta: CaptureMeta }; // active display's turn capture
+  recentTranscript: string; // last ~6 entries flattened "user:/clicky:", capped ~1500 chars
   createdAt: number;
 }
 
@@ -47,17 +47,21 @@ export interface AgentBrief {
  *  items returned by the backend are appended to history VERBATIM. */
 export type ResponseItem = Record<string, unknown>;
 
-export interface AgentFunctionCall { callId: string; name: string; argsJson: string; }
+export interface AgentFunctionCall {
+  callId: string;
+  name: string;
+  argsJson: string;
+}
 
 export type AgentToolDefinition =
-  | { type: 'web_search' }                        // hosted, server-side
-  | { type: 'function'; name: string; description: string; parameters: Record<string, unknown>; };
+  | { type: 'web_search' } // hosted, server-side
+  | { type: 'function'; name: string; description: string; parameters: Record<string, unknown> };
 
 // --- backend (implemented by agents/backend.ts; faked by agents/mock-backend.ts) ---
 export interface AgentBackendRequest {
   model: string;
   instructions: string;
-  input: ResponseItem[];            // FULL history each round (store:false backend)
+  input: ResponseItem[]; // FULL history each round (store:false backend)
   tools: AgentToolDefinition[];
   effort: 'low' | 'medium' | 'high';
   signal: AbortSignal;
@@ -66,11 +70,11 @@ export type AgentBackendErrorKind = 'agent_not_signed_in' | 'agent_quota' | 'age
 export type AgentBackendResult =
   | {
       ok: true;
-      outputItems: ResponseItem[];      // accumulated from output_item.done events — append to history verbatim
-      text: string;                     // assistant message text ('' if none this round)
+      outputItems: ResponseItem[]; // accumulated from output_item.done events — append to history verbatim
+      text: string; // assistant message text ('' if none this round)
       functionCalls: AgentFunctionCall[];
-      searchQueries: string[];          // from response.web_search_call events (for the activity log)
-      citations: string[];              // urls from output_text.annotation.added events
+      searchQueries: string[]; // from response.web_search_call events (for the activity log)
+      citations: string[]; // urls from output_text.annotation.added events
       usedPercent: { primary: number | null; secondary: number | null } | null;
       usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
     }
@@ -83,16 +87,16 @@ export interface AgentBackend {
 // --- tools (implemented by agents/tools/*; registry in agents/tools/index.ts) ---
 export interface AgentToolContext {
   brief: AgentBrief;
-  signal: AbortSignal;                  // aborts on cancel/wall-clock
+  signal: AbortSignal; // aborts on cancel/wall-clock
   scratchpad: { get(): string; set(text: string): void; append(text: string): void };
   addSource(url: string): void;
-  fetchCount(): number;                 // web_fetch budget bookkeeping
+  fetchCount(): number; // web_fetch budget bookkeeping
   noteFetch(): void;
 }
 export interface AgentToolSpec {
   definition: Extract<AgentToolDefinition, { type: 'function' }>;
   timeoutMs: number;
-  stepKind: AgentStep['kind'];          // activity-log kind for this tool
+  stepKind: AgentStep['kind']; // activity-log kind for this tool
   stepLabel(args: Record<string, unknown>): string;
   /** Returns the function_call_output string handed back to the model. Throws/rejects → the loop wraps as {error}. */
   execute(args: Record<string, unknown>, ctx: AgentToolContext): Promise<string>;
@@ -113,4 +117,5 @@ export interface AgentManagerDeps {
   persistencePath?: string;
   now?(): number;
 }
-export type SpawnResult = { ok: true; agentId: string } | { ok: false; reason: 'at_capacity' | 'not_signed_in' };
+export type SpawnResult =
+  { ok: true; agentId: string } | { ok: false; reason: 'at_capacity' | 'not_signed_in' };

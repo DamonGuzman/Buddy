@@ -89,12 +89,16 @@ export function debugApi(base, token) {
 }
 
 /** Poll `fn` until it returns a truthy value or `timeoutMs` elapses. */
-export async function waitFor(fn, { timeoutMs = 15_000, intervalMs = 100, label = 'condition' } = {}) {
+export async function waitFor(
+  fn,
+  { timeoutMs = 15_000, intervalMs = 100, label = 'condition' } = {},
+) {
   const t0 = Date.now();
   for (;;) {
     const value = await fn();
     if (value) return value;
-    if (Date.now() - t0 > timeoutMs) throw new Error(`timed out waiting for ${label} (${timeoutMs}ms)`);
+    if (Date.now() - t0 > timeoutMs)
+      throw new Error(`timed out waiting for ${label} (${timeoutMs}ms)`);
     await sleep(intervalMs);
   }
 }
@@ -139,7 +143,15 @@ function seedUserData(userDataDir) {
  * Launch the built app (out/main/index.js) with an isolated userData dir and
  * the debug server enabled. Returns { proc, kill }.
  */
-export function launchApp({ token, mockUrl, fakeMicWav, userDataDir, debugPort, extraEnv = {}, logFile }) {
+export function launchApp({
+  token,
+  mockUrl,
+  fakeMicWav,
+  userDataDir,
+  debugPort,
+  extraEnv = {},
+  logFile,
+}) {
   if (!existsSync(path.join(ROOT, 'out', 'main', 'index.js'))) {
     throw new Error('out/main/index.js missing — run `npm run build` first');
   }
@@ -157,7 +169,11 @@ export function launchApp({ token, mockUrl, fakeMicWav, userDataDir, debugPort, 
   };
   // In --live mode the app must NOT see a stale mock URL from the shell.
   if (!mockUrl) delete env.CLICKY_MOCK_URL;
-  const proc = spawn(electronBinary(), ['.'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const proc = spawn(electronBinary(), ['.'], {
+    cwd: ROOT,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   const log = (chunk) => {
     if (logFile) logFile.write(chunk);
   };
@@ -256,7 +272,11 @@ export function findChrome() {
 
 /** Parse a PCM16 mono WAV buffer -> { sampleRate, samples: Float32Array }. */
 export function parseWav(buf) {
-  if (buf.length < 44 || buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') {
+  if (
+    buf.length < 44 ||
+    buf.toString('ascii', 0, 4) !== 'RIFF' ||
+    buf.toString('ascii', 8, 12) !== 'WAVE'
+  ) {
     throw new Error('not a RIFF/WAVE file');
   }
   let offset = 12;

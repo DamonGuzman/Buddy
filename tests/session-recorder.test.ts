@@ -86,9 +86,9 @@ describe('SessionRecorder', () => {
     recorder.appendAudio('input', 'turn_1', second);
     recorder.close();
 
-    expect(readFileSync(join(recorder.directoryPath, 'captures', 'turn_1', 'screen0-0.jpg'))).toEqual(
-      jpeg,
-    );
+    expect(
+      readFileSync(join(recorder.directoryPath, 'captures', 'turn_1', 'screen0-0.jpg')),
+    ).toEqual(jpeg);
     expect(readFileSync(join(recorder.directoryPath, 'audio', 'turn_1-input-input.pcm'))).toEqual(
       Buffer.from([1, 2, 3, 4, 5, 6]),
     );

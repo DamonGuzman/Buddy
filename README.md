@@ -1,7 +1,7 @@
 # Buddy for Windows
 
-Buddy is a voice assistant that can *see your screen and point at
-things*. It lives in your system tray. **Hold `Ctrl` + left `Alt` and talk** — while you hold,
+Buddy is a voice assistant that can _see your screen and point at
+things_. It lives in your system tray. **Hold `Ctrl` + left `Alt` and talk** — while you hold,
 Buddy screenshots your
 monitors and streams your voice to a realtime speech-to-speech model (OpenAI Realtime API).
 Release, and it answers out loud while a friendly blue buddy flies across a transparent overlay
@@ -66,9 +66,9 @@ conversation quality stay comparable.
 
 After first-run setup, verify the whole loop end to end:
 
-1. Open a busy app (a browser works). Hold `Ctrl`+left `Alt`, ask *"point at the address bar"*,
+1. Open a busy app (a browser works). Hold `Ctrl`+left `Alt`, ask _"point at the address bar"_,
    release → spoken answer + the buddy flies to the address bar.
-2. Ask *"show me two things I could click here"* → two pointer flights in sequence.
+2. Ask _"show me two things I could click here"_ → two pointer flights in sequence.
 3. Start a long answer, then press the hotkey mid-speech → playback stops instantly (barge-in)
    and Buddy listens to the new question.
 4. Type a question in the panel → same answer flow, with captions if enabled.

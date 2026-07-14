@@ -88,7 +88,7 @@ interface CatalogEntry {
 }
 
 const MIC_BLOCKED_COPY =
-  "windows is blocking desktop apps from using the microphone — flip it on in " +
+  'windows is blocking desktop apps from using the microphone — flip it on in ' +
   "settings > privacy > microphone and i'll hear you. typing works meanwhile.";
 
 const CATALOG: Record<ErrorKind, CatalogEntry> = {

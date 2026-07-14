@@ -245,9 +245,7 @@ export class Conversation {
   // M18: TEXT panel path — a typed question runs on gpt-5.6-sol over the Codex
   // sub (text in, text out) with the SAME tool harness, when a valid sub is
   // signed in; otherwise it falls back to the realtime voice model (below).
-  private readonly injectedBuildCodex:
-    | ((auth: ChatGptCodexAuthSource) => CodexTextSession)
-    | null;
+  private readonly injectedBuildCodex: ((auth: ChatGptCodexAuthSource) => CodexTextSession) | null;
   /** Reused across text turns so the session's client-side history gives memory. */
   private codexTextSession: CodexTextSession | null = null;
   /** Plan-usage telemetry of the most recent text turn (debug surface). */
@@ -507,8 +505,7 @@ export class Conversation {
     // firstPlayedAt + samples/rate is exact when underruns == 0 (barge-in
     // items in practice); with underruns it undercounts, so fall back.
     if (this.bargeWatch && stats.done && this.bargeWatch.itemIds.has(stats.itemId)) {
-      const renderedStopAt =
-        stats.firstPlayedAt + (stats.samplesPlayed / AUDIO_SAMPLE_RATE) * 1000;
+      const renderedStopAt = stats.firstPlayedAt + (stats.samplesPlayed / AUDIO_SAMPLE_RATE) * 1000;
       this.bargeWatch.turn.bargeInStopMs =
         stats.underruns === 0 && stats.firstPlayedAt > 0
           ? Math.max(0, Math.round(renderedStopAt - this.bargeWatch.t0))
@@ -982,19 +979,31 @@ export class Conversation {
     }
     if (call.name === 'spawn_agent') {
       let parsed: unknown;
-      try { parsed = JSON.parse(call.argsJson); } catch { parsed = {}; }
+      try {
+        parsed = JSON.parse(call.argsJson);
+      } catch {
+        parsed = {};
+      }
       session.sendToolOutput(call.callId, this.spawnAgent(parsed, 'text'));
       return;
     }
     if (call.name === 'check_agents') {
       let parsed: unknown;
-      try { parsed = JSON.parse(call.argsJson); } catch { parsed = {}; }
+      try {
+        parsed = JSON.parse(call.argsJson);
+      } catch {
+        parsed = {};
+      }
       session.sendToolOutput(call.callId, this.checkAgents(parsed));
       return;
     }
     if (call.name === 'use_computer') {
       let parsed: unknown;
-      try { parsed = JSON.parse(call.argsJson); } catch { parsed = {}; }
+      try {
+        parsed = JSON.parse(call.argsJson);
+      } catch {
+        parsed = {};
+      }
       const pending = this.runComputerUse(parsed, captures, token).then((output) => {
         if (!this.closed && token === this.turnToken && this.codexTextSession === session) {
           session.sendToolOutput(call.callId, output);
@@ -1652,10 +1661,7 @@ export class Conversation {
       }
       // A cancelled response was superseded — the superseding turn owns the
       // assistant state from here; nothing to settle.
-      if (
-        this.pendingResponses === 0 &&
-        this.agentContinuationInFlight?.mode === 'voice'
-      ) {
+      if (this.pendingResponses === 0 && this.agentContinuationInFlight?.mode === 'voice') {
         this.agentContinuationInFlight = null;
       }
       if (status === 'cancelled') return;
@@ -1776,7 +1782,8 @@ export class Conversation {
     const args = call.args as PointAtArgs;
     const byIndex = this.turnCaptures.find((c) => c.meta.screenIndex === args.screen);
     // Unknown screen index: fall back to the ACTIVE screen's capture (m2).
-    const capture = byIndex ?? this.turnCaptures.find((c) => c.meta.isActive) ?? this.turnCaptures[0];
+    const capture =
+      byIndex ?? this.turnCaptures.find((c) => c.meta.isActive) ?? this.turnCaptures[0];
     if (!capture) {
       this.session.sendToolOutput(call.callId, {
         error: 'no screenshot available for that screen',
@@ -1801,8 +1808,11 @@ export class Conversation {
 
   private computerUseAvailable(): boolean {
     if (!this.computerUseEnabledSnapshot || process.platform !== 'win32') return false;
-    try { return this.codexProvider().getCodexAuth() !== null; }
-    catch { return false; }
+    try {
+      return this.codexProvider().getCodexAuth() !== null;
+    } catch {
+      return false;
+    }
   }
 
   private async runComputerUse(
@@ -1810,12 +1820,14 @@ export class Conversation {
     captures: CaptureResult[],
     token: number,
   ): Promise<object> {
-    const args = value !== null && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
+    const args =
+      value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
     const task = typeof args['task'] === 'string' ? args['task'].trim().slice(0, 2_000) : '';
     if (!task) return { error: 'task is required' };
-    if (!this.computerUseEnabledSnapshot) return { error: 'computer use is turned off in settings' };
+    if (!this.computerUseEnabledSnapshot)
+      return { error: 'computer use is turned off in settings' };
     if (this.computerUseBusy) return { error: 'sol is already operating the computer' };
     const resolved = resolveGroundingAuth({
       getApiKey: () => null,
@@ -1832,14 +1844,18 @@ export class Conversation {
         input: this.computerInput,
         initialCaptures: [...captures],
         isAllowed: () =>
-          !this.closed &&
-          token === this.turnToken &&
-          this.settings.get().computerUseEnabled,
+          !this.closed && token === this.turnToken && this.settings.get().computerUseEnabled,
       });
       const result = await operator.run(task);
       if (result.quotaExhausted) this.surfaceCodexPlanLimit(token);
       return result.ok
-        ? { ok: true, summary: result.summary, actions: result.actions, model: 'gpt-5.6-sol', fast_mode: true }
+        ? {
+            ok: true,
+            summary: result.summary,
+            actions: result.actions,
+            model: 'gpt-5.6-sol',
+            fast_mode: true,
+          }
         : { error: result.summary, actions: result.actions, model: 'gpt-5.6-sol', fast_mode: true };
     } catch (error) {
       return { error: error instanceof Error ? error.message : String(error) };
@@ -1857,9 +1873,10 @@ export class Conversation {
 
   private spawnAgent(value: unknown, mode: AgentContinuationMode): object {
     if (this.agents === null) return { error: 'agent mode is unavailable' };
-    const args = value !== null && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
+    const args =
+      value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
     const task = typeof args['task'] === 'string' ? args['task'].trim().slice(0, 2_000) : '';
     if (!task) return { error: 'task is required' };
     const why = typeof args['why'] === 'string' ? args['why'].trim().slice(0, 1_000) : '';
@@ -1882,7 +1899,8 @@ export class Conversation {
       this.agentOrigins.set(result.agentId, mode);
       return { ok: true, agent_id: result.agentId };
     }
-    if (result.reason === 'at_capacity') return { error: 'at capacity — three agents are already running' };
+    if (result.reason === 'at_capacity')
+      return { error: 'at capacity — three agents are already running' };
     showPanelOnce('agent_not_signed_in');
     return { error: 'agent mode needs chatgpt sign-in' };
   }
@@ -1890,12 +1908,12 @@ export class Conversation {
   /** Compact, read-only foreground view of active and recent background work. */
   private checkAgents(value: unknown): object {
     if (this.agents === null) return { error: 'agent mode is unavailable' };
-    const args = value !== null && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
-    const agentId = typeof args['agent_id'] === 'string'
-      ? args['agent_id'].trim().slice(0, 200)
-      : '';
+    const args =
+      value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+    const agentId =
+      typeof args['agent_id'] === 'string' ? args['agent_id'].trim().slice(0, 200) : '';
     const all = this.agents.list();
     const selected = agentId
       ? all.filter((agent) => agent.id === agentId)
@@ -1945,8 +1963,7 @@ export class Conversation {
     }
 
     const continuation = this.pendingAgentContinuations.values().next().value as
-      | PendingAgentContinuation
-      | undefined;
+      PendingAgentContinuation | undefined;
     if (!continuation) return;
     this.agentContinuationInFlight = continuation;
 
@@ -1957,25 +1974,30 @@ export class Conversation {
 
     this.setState('thinking');
     const reminder = this.agentContinuationMessage(continuation.summary, 'voice');
-    void this.session.injectUserAndRespond(reminder, () =>
-      this.agentContinuationInFlight?.summary.id === continuation.summary.id &&
-      !this.holding &&
-      this.pendingResponses === 0,
-    ).then((started) => {
-      if (!started) return;
-      this.pendingAgentContinuations.delete(continuation.summary.id);
-      this.agents?.markSpoken(continuation.summary.id);
-    }).catch((error: unknown) => {
-      // One attempt only: the error->idle recovery re-runs the drain, so a
-      // still-queued continuation whose turn failed (no API key, connect
-      // refused) would retry — and fail — forever. Drop it; the panel/tray
-      // agent card remains the delivery path (`spoken` stays false).
-      this.pendingAgentContinuations.delete(continuation.summary.id);
-      if (this.agentContinuationInFlight?.summary.id === continuation.summary.id) {
-        this.agentContinuationInFlight = null;
-      }
-      this.failTurn(error);
-    });
+    void this.session
+      .injectUserAndRespond(
+        reminder,
+        () =>
+          this.agentContinuationInFlight?.summary.id === continuation.summary.id &&
+          !this.holding &&
+          this.pendingResponses === 0,
+      )
+      .then((started) => {
+        if (!started) return;
+        this.pendingAgentContinuations.delete(continuation.summary.id);
+        this.agents?.markSpoken(continuation.summary.id);
+      })
+      .catch((error: unknown) => {
+        // One attempt only: the error->idle recovery re-runs the drain, so a
+        // still-queued continuation whose turn failed (no API key, connect
+        // refused) would retry — and fail — forever. Drop it; the panel/tray
+        // agent card remains the delivery path (`spoken` stays false).
+        this.pendingAgentContinuations.delete(continuation.summary.id);
+        if (this.agentContinuationInFlight?.summary.id === continuation.summary.id) {
+          this.agentContinuationInFlight = null;
+        }
+        this.failTurn(error);
+      });
   }
 
   private runTextAgentContinuation(continuation: PendingAgentContinuation): void {
@@ -2001,44 +2023,41 @@ export class Conversation {
     this.setState('thinking');
     const reminder = this.agentContinuationMessage(continuation.summary, 'text');
 
-    void this.runCodexTextTurn(reminder, [], '', token, turn, auth).then((delivered) => {
-      if (this.agentContinuationInFlight?.summary.id !== continuation.summary.id) return;
-      if (delivered) {
-        this.pendingAgentContinuations.delete(continuation.summary.id);
-        this.agents?.markSpoken(continuation.summary.id);
-      }
-      this.agentContinuationInFlight = null;
-      this.drainAgentContinuations();
-    }).catch((error: unknown) => {
-      // Same one-attempt rule as the voice path: never re-queue a failed
-      // automated turn.
-      this.pendingAgentContinuations.delete(continuation.summary.id);
-      if (this.agentContinuationInFlight?.summary.id === continuation.summary.id) {
+    void this.runCodexTextTurn(reminder, [], '', token, turn, auth)
+      .then((delivered) => {
+        if (this.agentContinuationInFlight?.summary.id !== continuation.summary.id) return;
+        if (delivered) {
+          this.pendingAgentContinuations.delete(continuation.summary.id);
+          this.agents?.markSpoken(continuation.summary.id);
+        }
         this.agentContinuationInFlight = null;
-      }
-      this.failTurn(error);
-    });
+        this.drainAgentContinuations();
+      })
+      .catch((error: unknown) => {
+        // Same one-attempt rule as the voice path: never re-queue a failed
+        // automated turn.
+        this.pendingAgentContinuations.delete(continuation.summary.id);
+        if (this.agentContinuationInFlight?.summary.id === continuation.summary.id) {
+          this.agentContinuationInFlight = null;
+        }
+        this.failTurn(error);
+      });
   }
 
   /** A real user action wins over an automated voice turn still connecting. */
   private preemptPendingAgentVoiceContinuation(): void {
-    if (
-      this.agentContinuationInFlight?.mode === 'voice' &&
-      this.pendingResponses === 0
-    ) {
+    if (this.agentContinuationInFlight?.mode === 'voice' && this.pendingResponses === 0) {
       // Keep it queued; it will retry after the person's foreground turn.
       this.agentContinuationInFlight = null;
     }
   }
 
-  private agentContinuationMessage(
-    summary: AgentSummary,
-    mode: AgentContinuationMode,
-  ): string {
+  private agentContinuationMessage(summary: AgentSummary, mode: AgentContinuationMode): string {
     const result = summary.summary || summary.error || 'the agent stopped without a result';
-    const delivery = mode === 'voice'
-      ? 'Briefly tell the person the useful conclusion in your natural voice. Do not read URLs aloud.'
-      : 'Proactively post a concise text update with the useful conclusion.';
+    const delivery =
+      mode === 'voice'
+        ? 'Briefly tell the person the useful conclusion in your natural voice. Do not read URLs aloud.'
+        : 'Proactively post a concise text update with the useful conclusion.';
     return [
       '<system_reminder>',
       'A background agent you delegated has reached a terminal state. This is an automated Buddy continuation, not a new message written by the person.',
@@ -2171,7 +2190,7 @@ export class Conversation {
       const auth = resolveGroundingAuth({
         getApiKey: () => this.settings.getApiKey(),
         codex: this.codexProvider(),
-            preferApiKey: this.codexDisabled || this.settings.get().preferApiKeyGrounding,
+        preferApiKey: this.codexDisabled || this.settings.get().preferApiKeyGrounding,
       });
       if (auth !== null) {
         restUsed = true;
@@ -2309,7 +2328,12 @@ export class Conversation {
       return dipToPhysicalViaMeta({ x: q.x, y: q.y }, geom);
     })();
     const outcome = await this.getGrounding().snap(
-      { x: phys.x, y: phys.y, label: q.label, ...(q.radiusPx !== undefined ? { radiusPx: q.radiusPx } : {}) },
+      {
+        x: phys.x,
+        y: phys.y,
+        label: q.label,
+        ...(q.radiusPx !== undefined ? { radiusPx: q.radiusPx } : {}),
+      },
       { debug: true, timeboxMs: 2_500 },
     );
     let snappedDip: Pt | null = null;
@@ -2404,10 +2428,7 @@ export class Conversation {
 }
 
 function escapeXmlText(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
 /**

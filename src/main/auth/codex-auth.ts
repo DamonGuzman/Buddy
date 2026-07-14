@@ -107,8 +107,7 @@ export class CodexAuth {
   private refreshInFlight: Promise<CodexAuthInfo | null> | null = null;
 
   constructor(options: CodexAuthOptions = {}) {
-    this.authFilePath =
-      options.authFilePath ?? join(homedir(), '.codex', 'auth.json');
+    this.authFilePath = options.authFilePath ?? join(homedir(), '.codex', 'auth.json');
     this.tokenStore = options.tokenStore ?? new CodexTokenStore();
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.now = options.now ?? Date.now;
@@ -206,8 +205,7 @@ export class CodexAuth {
     // CLI file's current one.
     const fileRefresh = this.readFile()?.refresh_token;
     const refreshToken =
-      this.refreshed?.refreshToken ??
-      (typeof fileRefresh === 'string' ? fileRefresh : null);
+      this.refreshed?.refreshToken ?? (typeof fileRefresh === 'string' ? fileRefresh : null);
     if (refreshToken === null || refreshToken.length === 0) return null;
 
     const controller = new AbortController();
@@ -233,8 +231,7 @@ export class CodexAuth {
         access_token?: unknown;
         refresh_token?: unknown;
       };
-      const accessToken =
-        typeof payload.access_token === 'string' ? payload.access_token : '';
+      const accessToken = typeof payload.access_token === 'string' ? payload.access_token : '';
       if (accessToken.length === 0) return null;
       const decoded = decodeAccessToken(accessToken);
       if (decoded === null) return null;
@@ -243,9 +240,10 @@ export class CodexAuth {
         typeof payload.refresh_token === 'string' && payload.refresh_token.length > 0
           ? payload.refresh_token
           : refreshToken;
-      const accountId = decoded.accountId.length > 0
-        ? decoded.accountId
-        : (this.refreshed?.accountId ?? this.fileAccountId() ?? '');
+      const accountId =
+        decoded.accountId.length > 0
+          ? decoded.accountId
+          : (this.refreshed?.accountId ?? this.fileAccountId() ?? '');
       const stored: StoredCodexTokens = {
         accessToken,
         refreshToken: nextRefresh,

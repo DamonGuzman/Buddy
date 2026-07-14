@@ -61,7 +61,9 @@ if (jobs.length === 0) {
   const manifestPath = path.join(AUDIO_DIR, '_tts-jobs.json');
   writeFileSync(
     manifestPath,
-    JSON.stringify(jobs.map((u) => ({ id: u.id, text: u.text, out: path.join(AUDIO_DIR, `${u.id}.wav`) }))),
+    JSON.stringify(
+      jobs.map((u) => ({ id: u.id, text: u.text, out: path.join(AUDIO_DIR, `${u.id}.wav`) })),
+    ),
   );
   const script = `
 $ErrorActionPreference = 'Stop'
@@ -85,10 +87,14 @@ $synth.Dispose()
 `;
   const scriptPath = path.join(AUDIO_DIR, '_tts.ps1');
   writeFileSync(scriptPath, script, { encoding: 'utf8' });
-  const out = execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], {
-    encoding: 'utf8',
-    timeout: 300_000,
-  });
+  const out = execFileSync(
+    'powershell',
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
+    {
+      encoding: 'utf8',
+      timeout: 300_000,
+    },
+  );
   process.stdout.write(out);
   rmSync(scriptPath, { force: true });
   rmSync(manifestPath, { force: true });
@@ -108,6 +114,7 @@ for (const u of [...catalog.utterances.map((x) => x.id), 'silence']) {
   const seconds = samples.length / sampleRate;
   let peak = 0;
   for (const s of samples) peak = Math.max(peak, Math.abs(s));
-  const warn = u !== 'silence' && seconds > 3.2 ? '  <-- WARNING: longer than the ~3.5s hold window' : '';
+  const warn =
+    u !== 'silence' && seconds > 3.2 ? '  <-- WARNING: longer than the ~3.5s hold window' : '';
   console.log(`  ${u}.wav: ${sampleRate}Hz ${seconds.toFixed(2)}s peak=${peak.toFixed(3)}${warn}`);
 }

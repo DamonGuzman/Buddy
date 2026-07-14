@@ -274,7 +274,11 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     if (images.length > 0 || contextText.length > 0) {
       this.send({
         type: 'conversation.item.create',
-        item: { type: 'message', role: 'user', content: this.buildImageContent(images, contextText) },
+        item: {
+          type: 'message',
+          role: 'user',
+          content: this.buildImageContent(images, contextText),
+        },
       });
     }
     this.createResponse();
@@ -335,7 +339,10 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
    * `shouldStart` is checked after connection so a real user turn can preempt
    * a background completion that was still waiting on the handshake.
    */
-  async injectUserAndRespond(text: string, shouldStart: () => boolean = () => true): Promise<boolean> {
+  async injectUserAndRespond(
+    text: string,
+    shouldStart: () => boolean = () => true,
+  ): Promise<boolean> {
     await this.connect();
     if (!shouldStart()) return false;
     this.assertResponseIdle();
@@ -994,11 +1001,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
           });
           break;
         }
-        if (
-          responseId &&
-          this.activeResponseId !== null &&
-          responseId !== this.activeResponseId
-        ) {
+        if (responseId && this.activeResponseId !== null && responseId !== this.activeResponseId) {
           console.warn(
             `[realtime] ignoring completion for non-active response ${responseId}; ` +
               `active is ${this.activeResponseId}`,

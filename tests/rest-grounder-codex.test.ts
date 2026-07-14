@@ -91,7 +91,12 @@ describe('Codex transport: success + request shape', () => {
           { type: 'response.output_text.delta', delta: '640,"y":360}' },
           completed('{"x":640,"y":360}'),
         ]),
-        { headers: { 'x-codex-primary-used-percent': '12.5', 'x-codex-secondary-used-percent': '4' } },
+        {
+          headers: {
+            'x-codex-primary-used-percent': '12.5',
+            'x-codex-secondary-used-percent': '4',
+          },
+        },
       );
     });
 
@@ -170,7 +175,12 @@ describe('Codex transport: null + quota paths', () => {
       { env: { CLICKY_MOCK_URL: 'ws://127.0.0.1:9' } },
     );
     const outcome = await grounder.ground(QUERY, CODEX_AUTH);
-    expect(outcome).toEqual({ point: null, source: 'none', quotaExhausted: false, usedPercent: null });
+    expect(outcome).toEqual({
+      point: null,
+      source: 'none',
+      quotaExhausted: false,
+      usedPercent: null,
+    });
     expect(fetched).toBe(0);
   });
 
@@ -187,7 +197,12 @@ describe('Codex transport: null + quota paths', () => {
   it('classifies a streamed usage-limit error event as quota exhausted', async () => {
     const grounder = makeGrounder(async () =>
       response(
-        sse([{ type: 'response.failed', error: { code: 'usage_limit_reached', message: 'plan quota' } }]),
+        sse([
+          {
+            type: 'response.failed',
+            error: { code: 'usage_limit_reached', message: 'plan quota' },
+          },
+        ]),
       ),
     );
     const outcome = await grounder.ground(QUERY, CODEX_AUTH);
@@ -236,7 +251,12 @@ describe('Codex transport: null + quota paths', () => {
       planType: '',
     };
     const outcome = await grounder.ground(QUERY, failing);
-    expect(outcome).toEqual({ point: null, source: 'codex', quotaExhausted: false, usedPercent: null });
+    expect(outcome).toEqual({
+      point: null,
+      source: 'codex',
+      quotaExhausted: false,
+      usedPercent: null,
+    });
   });
 });
 
@@ -250,11 +270,12 @@ describe('pure parsers', () => {
   });
 
   it('parseCodexStream ignores [DONE] and unknown events, keeps the last text', () => {
-    const body = sse([
-      { type: 'response.created' },
-      { type: 'response.output_text.delta', delta: '{"x":1,"y":2}' },
-      completed('{"x":7,"y":8}'),
-    ]) + 'data: [DONE]\n\n';
+    const body =
+      sse([
+        { type: 'response.created' },
+        { type: 'response.output_text.delta', delta: '{"x":1,"y":2}' },
+        completed('{"x":7,"y":8}'),
+      ]) + 'data: [DONE]\n\n';
     const r = parseCodexStream(body, 100, 100);
     expect(r.point).toEqual({ x: 7, y: 8 });
     expect(r.usage).toEqual({ inputTokens: 2700, outputTokens: 8, totalTokens: 2708 });

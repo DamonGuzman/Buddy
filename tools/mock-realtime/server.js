@@ -79,7 +79,11 @@ function handleConnection(ws, server, options) {
     } catch {
       send({
         type: 'error',
-        error: { type: 'invalid_request_error', code: 'invalid_json', message: 'frame was not valid JSON' },
+        error: {
+          type: 'invalid_request_error',
+          code: 'invalid_json',
+          message: 'frame was not valid JSON',
+        },
       });
       return;
     }

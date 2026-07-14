@@ -95,7 +95,8 @@ function arg(name) {
   return idx === -1 ? undefined : process.argv[idx + 1];
 }
 
-const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/').split('/').pop());
+const isMain =
+  process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/').split('/').pop());
 if (isMain) {
   const file = arg('--file');
   const url = arg('--url');
@@ -105,7 +106,9 @@ if (isMain) {
   } else if (url) {
     buf = await debugApi(url, arg('--token')).getBinary('/audio/last-output.wav');
   } else {
-    console.error('usage: verify-audio.mjs (--file x.wav | --url http://127.0.0.1:8199 [--token t])');
+    console.error(
+      'usage: verify-audio.mjs (--file x.wav | --url http://127.0.0.1:8199 [--token t])',
+    );
     process.exit(2);
   }
   const { sampleRate, samples } = parseWav(buf);

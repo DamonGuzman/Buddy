@@ -25,13 +25,23 @@ export class CodexAgentBackend implements AgentBackend {
   async request(req: AgentBackendRequest): Promise<AgentBackendResult> {
     const auth = this.provider.getCodexAuth();
     if (auth === null) {
-      return { ok: false, errorKind: 'agent_not_signed_in', detail: 'codex sign-in unavailable', retryable: false };
+      return {
+        ok: false,
+        errorKind: 'agent_not_signed_in',
+        detail: 'codex sign-in unavailable',
+        retryable: false,
+      };
     }
     let bearer: string;
     try {
       bearer = await this.provider.getBearer();
     } catch (error) {
-      return { ok: false, errorKind: 'agent_not_signed_in', detail: messageOf(error), retryable: false };
+      return {
+        ok: false,
+        errorKind: 'agent_not_signed_in',
+        detail: messageOf(error),
+        retryable: false,
+      };
     }
     try {
       const response = await this.fetchImpl(RESPONSES_URL, {
@@ -128,7 +138,8 @@ class AgentStreamState {
   handle(event: Record<string, unknown>): void {
     const type = stringOf(event['type']);
     if (type === 'response.output_text.delta') this.text += stringOf(event['delta']);
-    if (type === 'response.output_text.done' && typeof event['text'] === 'string') this.text = event['text'];
+    if (type === 'response.output_text.done' && typeof event['text'] === 'string')
+      this.text = event['text'];
     if (type === 'response.output_item.added' || type === 'response.output_item.done') {
       const item = recordOf(event['item']);
       if (item?.['type'] === 'function_call') this.captureCall(item);
@@ -139,9 +150,11 @@ class AgentStreamState {
       const existing = this.calls.get(id);
       const callId = existing?.callId || stringOf(event['call_id']);
       const name = existing?.name || stringOf(event['name']);
-      if (callId && name) this.calls.set(id, { callId, name, argsJson: stringOf(event['arguments']) });
+      if (callId && name)
+        this.calls.set(id, { callId, name, argsJson: stringOf(event['arguments']) });
     }
-    if (type.startsWith('response.web_search_call.')) this.captureSearch(recordOf(event['item']) ?? event);
+    if (type.startsWith('response.web_search_call.'))
+      this.captureSearch(recordOf(event['item']) ?? event);
     if (type === 'response.output_text.annotation.added') {
       const annotation = recordOf(event['annotation']);
       const url = stringOf(annotation?.['url']);
@@ -160,7 +173,10 @@ class AgentStreamState {
     if (type === 'response.failed' || type === 'response.incomplete' || type === 'error') {
       const error = recordOf(event['error']) ?? event;
       const detail = stringOf(error['message']) || type;
-      this.failed = { detail, quota: /quota|usage.?limit|rate.?limit/i.test(JSON.stringify(error)) };
+      this.failed = {
+        detail,
+        quota: /quota|usage.?limit|rate.?limit/i.test(JSON.stringify(error)),
+      };
     }
   }
 
@@ -175,9 +191,19 @@ class AgentStreamState {
     }
     const calls = [...this.calls.values()];
     const outputItems: ResponseItem[] = [];
-    if (this.text) outputItems.push({ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: this.text }] });
+    if (this.text)
+      outputItems.push({
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: this.text }],
+      });
     for (const call of calls) {
-      outputItems.push({ type: 'function_call', call_id: call.callId, name: call.name, arguments: call.argsJson });
+      outputItems.push({
+        type: 'function_call',
+        call_id: call.callId,
+        name: call.name,
+        arguments: call.argsJson,
+      });
     }
     return {
       ok: true,
@@ -214,11 +240,17 @@ class AgentStreamState {
 function recordOf(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 }
-function stringOf(value: unknown): string { return typeof value === 'string' ? value : ''; }
-function numberOf(value: unknown): number { return typeof value === 'number' && Number.isFinite(value) ? value : 0; }
+function stringOf(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+function numberOf(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
 function nullableNumber(value: string | null): number | null {
   if (value === null) return null;
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
-function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

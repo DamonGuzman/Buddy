@@ -14,12 +14,12 @@ export class AgentManager {
   }
 
   list(): AgentSummary[] {
-    return [...this.records.values()]
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .map(clone);
+    return [...this.records.values()].sort((a, b) => b.createdAt - a.createdAt).map(clone);
   }
 
-  isReady(): boolean { return this.deps.isReady(); }
+  isReady(): boolean {
+    return this.deps.isReady();
+  }
 
   spawn(brief: AgentBrief): SpawnResult {
     if (!this.deps.isReady()) return { ok: false, reason: 'not_signed_in' };
@@ -47,8 +47,12 @@ export class AgentManager {
     return { ok: true, agentId: brief.id };
   }
 
-  cancel(id: string): void { this.runners.get(id)?.cancel(); }
-  cancelAll(): void { for (const runner of this.runners.values()) runner.cancel(); }
+  cancel(id: string): void {
+    this.runners.get(id)?.cancel();
+  }
+  cancelAll(): void {
+    for (const runner of this.runners.values()) runner.cancel();
+  }
   markSeen(id: string): void {
     const record = this.records.get(id);
     if (!record || !record.unseen) return;
@@ -63,9 +67,14 @@ export class AgentManager {
     this.persist();
     this.push();
   }
-  dispose(): void { this.cancelAll(); this.persist(); }
+  dispose(): void {
+    this.cancelAll();
+    this.persist();
+  }
 
-  private push(): void { this.deps.onAgentsChanged(this.list()); }
+  private push(): void {
+    this.deps.onAgentsChanged(this.list());
+  }
   private load(): void {
     const path = this.deps.persistencePath;
     if (!path || !existsSync(path)) return;
@@ -75,7 +84,9 @@ export class AgentManager {
       for (const value of parsed.slice(0, 50)) {
         if (isSummary(value)) this.records.set(value.id, { ...value, steps: [...value.steps] });
       }
-    } catch { /* corrupt history is non-fatal */ }
+    } catch {
+      /* corrupt history is non-fatal */
+    }
   }
   private persist(): void {
     const path = this.deps.persistencePath;
@@ -83,10 +94,14 @@ export class AgentManager {
     try {
       mkdirSync(dirname(path), { recursive: true });
       const tmp = `${path}.tmp`;
-      const terminal = this.list().filter((item) => item.finishedAt !== undefined).slice(0, 50);
+      const terminal = this.list()
+        .filter((item) => item.finishedAt !== undefined)
+        .slice(0, 50);
       writeFileSync(tmp, JSON.stringify(terminal, null, 2), { mode: 0o600 });
       renameSync(tmp, path);
-    } catch { /* persistence must never take down the tray */ }
+    } catch {
+      /* persistence must never take down the tray */
+    }
   }
 }
 
@@ -96,5 +111,10 @@ function clone(summary: AgentSummary): AgentSummary {
 function isSummary(value: unknown): value is AgentSummary {
   if (value === null || typeof value !== 'object') return false;
   const item = value as Partial<AgentSummary>;
-  return typeof item.id === 'string' && typeof item.task === 'string' && Array.isArray(item.steps) && typeof item.status === 'string';
+  return (
+    typeof item.id === 'string' &&
+    typeof item.task === 'string' &&
+    Array.isArray(item.steps) &&
+    typeof item.status === 'string'
+  );
 }

@@ -167,14 +167,15 @@ handoff:
 
 ```ts
 interface AgentBrief {
-  id: string;                 // "agent_<seq>_<ts>"
-  task: string;               // spawn_agent.task (model-cleaned)
-  why?: string;               // spawn_agent.why
-  screenshot?: {              // the ACTIVE display's capture from this turn
-    jpegBase64: string;       // reuse the exact JPEG the voice model saw
+  id: string; // "agent_<seq>_<ts>"
+  task: string; // spawn_agent.task (model-cleaned)
+  why?: string; // spawn_agent.why
+  screenshot?: {
+    // the ACTIVE display's capture from this turn
+    jpegBase64: string; // reuse the exact JPEG the voice model saw
     meta: CaptureMeta;
   };
-  recentTranscript: string;   // last ~6 entries, "user:/buddy:" flattened, capped ~1500 chars
+  recentTranscript: string; // last ~6 entries, "user:/buddy:" flattened, capped ~1500 chars
   createdAt: number;
 }
 ```
@@ -203,13 +204,13 @@ keeps the tool as the single source of truth.
 The persona produces this naturally, but the house lines to aim for (lowercase, warm, plants a
 seed, never a dead-end):
 
-- Spawn ack: *"on it — i'll keep digging in the background and ping you when it's done. want to
-  keep browsing while i work?"*
-- If they immediately ask "how long?": *"usually under a minute for a quick look, a bit longer if
-  it's a deep one. you'll hear from me — carry on."*
-- Second concurrent spawn: *"got it, that's two i'm running now. i'll bring both back to you."*
-- At the concurrency cap: *"i've got my hands full with three already — want me to swap one out,
-  or hold this till one finishes?"* (main supplies this as a caption when `spawn_agent` is
+- Spawn ack: _"on it — i'll keep digging in the background and ping you when it's done. want to
+  keep browsing while i work?"_
+- If they immediately ask "how long?": _"usually under a minute for a quick look, a bit longer if
+  it's a deep one. you'll hear from me — carry on."_
+- Second concurrent spawn: _"got it, that's two i'm running now. i'll bring both back to you."_
+- At the concurrency cap: _"i've got my hands full with three already — want me to swap one out,
+  or hold this till one finishes?"_ (main supplies this as a caption when `spawn_agent` is
   rejected at the cap; see §2.4.)
 
 ---
@@ -243,21 +244,21 @@ Shared, renderer-visible types (`AgentSummary`, `AgentStatus`, IPC) live in `src
 // provided by src/main/auth (parallel agent). Assumed shape:
 interface AuthSource {
   kind: 'codex-subscription' | 'api-key' | 'none';
-  isReady(): boolean;                       // signed in & token fresh
+  isReady(): boolean; // signed in & token fresh
   // POST chatgpt.com/backend-api/codex/responses, refreshing the token as needed.
   fetchResponses(body: object, signal: AbortSignal): Promise<Response>; // fetch-like
-  onChanged(cb: () => void): () => void;    // sign-in/out notifications
+  onChanged(cb: () => void): () => void; // sign-in/out notifications
 }
 ```
 
 `CodexBackend` speaks the **Responses API** (not chat-completions, not realtime):
 
 - **submit**: `POST …/codex/responses` with `{ model, instructions, input: [...], tools, store:
-  true, reasoning: { effort: 'medium' } }`. `store: true` + the returned `response.id` gives us
+true, reasoning: { effort: 'medium' } }`. `store: true` + the returned `response.id` gives us
   `previous_response_id` continuity so we never resend the growing tool-result history.
 - **continue**: after executing tool calls, `POST` again with
   `{ model, previous_response_id, input: [ {type:'function_call_output', call_id, output}, ... ],
-  tools }`. The server-side thread carries instructions + prior turns.
+tools }`. The server-side thread carries instructions + prior turns.
 - **Streaming**: phase 1 uses **non-streaming** responses (simpler; the user is not watching token
   by token — they get a final summary). A later phase can stream `output_text.delta` into the
   panel Card for a live "thinking…" feel, reusing the same SSE-parsing discipline `session.ts`
@@ -289,16 +290,17 @@ Model choice (from `docs/COORD-STUDY.md` §8–§9, the model sweep — the subs
 ```ts
 class Agent {
   async run(): Promise<void> {
-    let resp = await this.backend.submit(this.buildInitialRequest());   // brief → input[]
-    for (let step = 0; step < MAX_STEPS; step++) {                      // MAX_STEPS = 12
+    let resp = await this.backend.submit(this.buildInitialRequest()); // brief → input[]
+    for (let step = 0; step < MAX_STEPS; step++) {
+      // MAX_STEPS = 12
       if (this.cancelled) return this.finish('cancelled');
       const calls = resp.functionCalls();
       if (calls.length === 0) {
         // model produced final text → that's the answer
         return this.finish('done', resp.outputText());
       }
-      const outputs = await this.executeTools(calls);   // parallel where safe, each timeboxed
-      this.recordStep(calls, outputs);                  // → panel activity log
+      const outputs = await this.executeTools(calls); // parallel where safe, each timeboxed
+      this.recordStep(calls, outputs); // → panel activity log
       resp = await this.backend.continue(resp.id, outputs);
     }
     return this.finish('done', resp.outputText() || '(hit the step limit — here is what i found)');
@@ -321,11 +323,11 @@ class Agent {
 
 Three layers:
 
-| Layer | Limit | On breach |
-|---|---|---|
-| Per-tool call | 15s (`web_fetch` 20s) | tool returns `{error: 'timed out'}`; loop continues, model can retry/route around |
-| Per-backend request | 60s (an `AbortSignal`) | step fails → one retry with backoff; second failure ends the run as `failed` |
-| Whole-run wall clock | 4 min | manager aborts the agent, delivers partial (`status: 'timed_out'`) with whatever scratchpad/summary exists |
+| Layer                | Limit                  | On breach                                                                                                  |
+| -------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Per-tool call        | 15s (`web_fetch` 20s)  | tool returns `{error: 'timed out'}`; loop continues, model can retry/route around                          |
+| Per-backend request  | 60s (an `AbortSignal`) | step fails → one retry with backoff; second failure ends the run as `failed`                               |
+| Whole-run wall clock | 4 min                  | manager aborts the agent, delivers partial (`status: 'timed_out'`) with whatever scratchpad/summary exists |
 
 Wall-clock lives in the manager (a `setTimeout` per agent), so a wedged backend request cannot
 outlive the budget.
@@ -336,7 +338,7 @@ outlive the budget.
   rejected with a tool output `{error: 'at capacity'}`; `conversation.ts` turns that into the
   caption in §1.5 so Buddy asks whether to swap or hold. (Rationale: plan-quota politeness + main
   process is single-threaded for tool execution; 3 keeps the tray responsive. This does **not**
-  contradict "no subagent concurrency cap" for *dev* subagents — that is about the build process,
+  contradict "no subagent concurrency cap" for _dev_ subagents — that is about the build process,
   not the shipped product's runtime budget.)
 - **Cancellation**: each agent holds one `AbortController`; `manager.cancel(id)` aborts the
   in-flight backend request and any running tool, flips status to `cancelled`, and the loop's
@@ -360,20 +362,20 @@ outlive the budget.
 
 Design principle: **the MVP agent is read-only and user-local.** It gathers, reasons, and writes
 to its own notes. It does not touch the filesystem, run programs, or reach into the user's
-accounts. This matches the app's existing consent posture — Buddy today only ever *reads* the
-screen on an explicit hotkey hold and *points*; it never clicks or acts. Agent mode keeps that
+accounts. This matches the app's existing consent posture — Buddy today only ever _reads_ the
+screen on an explicit hotkey hold and _points_; it never clicks or acts. Agent mode keeps that
 "observe, don't act" contract for v1.
 
 ### 3.1 Proposed first set
 
 Each tool: id, what it does, safety class, complexity.
 
-| Tool | What it does | Safety class | Complexity |
-|---|---|---|---|
-| `web_search` | Query the web, return ranked result snippets (title, url, blurb). | **read-only, external** | S — wrap a search API (see §3.3) |
-| `web_fetch` | Fetch one URL, return cleaned/truncated main text (readability-style, ~8k char cap). | **read-only, external — injection surface** | M — fetch + HTML→text + sanitize |
-| `scratchpad_write` | Append/replace the agent's own working notes (the draft answer being assembled). | **user-local write, agent-private** | S — in-memory + persisted with the record |
-| `read_screen` | Return the handoff screenshot (the brief's capture) for vision reasoning. | **read-only, already-captured** | S — hand back the brief image, no new capture |
+| Tool               | What it does                                                                         | Safety class                                | Complexity                                    |
+| ------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------- | --------------------------------------------- |
+| `web_search`       | Query the web, return ranked result snippets (title, url, blurb).                    | **read-only, external**                     | S — wrap a search API (see §3.3)              |
+| `web_fetch`        | Fetch one URL, return cleaned/truncated main text (readability-style, ~8k char cap). | **read-only, external — injection surface** | M — fetch + HTML→text + sanitize              |
+| `scratchpad_write` | Append/replace the agent's own working notes (the draft answer being assembled).     | **user-local write, agent-private**         | S — in-memory + persisted with the record     |
+| `read_screen`      | Return the handoff screenshot (the brief's capture) for vision reasoning.            | **read-only, already-captured**             | S — hand back the brief image, no new capture |
 
 Notes per tool:
 
@@ -390,18 +392,18 @@ Notes per tool:
   one-paragraph summary. Not a user-file write — no path, no filesystem.
 - **`read_screen`** — cheap and safe: it hands back the image already in the brief (captured under
   the hotkey the user held), enabling "summarize what's on my screen" / "compare this listing to
-  what you find." No fresh capture, so no new privacy surface. (If a task truly needs a *fresh*
+  what you find." No fresh capture, so no new privacy surface. (If a task truly needs a _fresh_
   look, that is deferred — see §3.2 — because it would capture the screen without a hotkey hold.)
 
 ### 3.2 Explicitly deferred (with reasons)
 
-| Deferred capability | Why deferred |
-|---|---|
-| **Filesystem writes** (save a file, create a doc) | Irreversible, escapes the sandbox, needs a real permission dialog + path scoping. High blast radius; the app has never written user files. Post-MVP with an explicit per-write confirm. |
-| **Running programs / shell / mouse-keyboard automation** | Arbitrary code execution and UI actuation — the single biggest safety line. Clicky "points, doesn't act" is a deliberate product promise; breaking it needs its own design + consent model. Deferred hard. |
-| **Calendar / email / Notion / Linear integrations** | Each is an OAuth surface, a side-effecting write API, and a per-connector consent story. The real Clicky touts these, but each is a mini-product. Deferred to a "connectors" phase after the read-only agent proves the loop. |
-| **Fresh (non-handoff) screen capture by the agent** | Capturing the screen without a live hotkey hold violates the on-demand privacy posture (`docs/RESEARCH.md` §5, the #1 user concern). If ever added, it needs its own visible indicator + consent. |
-| **Sending anything on the user's behalf** | Messages/posts/emails are in the app-wide "explicit permission" category. No agent sends anything in v1. |
+| Deferred capability                                      | Why deferred                                                                                                                                                                                                                  |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Filesystem writes** (save a file, create a doc)        | Irreversible, escapes the sandbox, needs a real permission dialog + path scoping. High blast radius; the app has never written user files. Post-MVP with an explicit per-write confirm.                                       |
+| **Running programs / shell / mouse-keyboard automation** | Arbitrary code execution and UI actuation — the single biggest safety line. Clicky "points, doesn't act" is a deliberate product promise; breaking it needs its own design + consent model. Deferred hard.                    |
+| **Calendar / email / Notion / Linear integrations**      | Each is an OAuth surface, a side-effecting write API, and a per-connector consent story. The real Clicky touts these, but each is a mini-product. Deferred to a "connectors" phase after the read-only agent proves the loop. |
+| **Fresh (non-handoff) screen capture by the agent**      | Capturing the screen without a live hotkey hold violates the on-demand privacy posture (`docs/RESEARCH.md` §5, the #1 user concern). If ever added, it needs its own visible indicator + consent.                             |
+| **Sending anything on the user's behalf**                | Messages/posts/emails are in the app-wide "explicit permission" category. No agent sends anything in v1.                                                                                                                      |
 
 ### 3.3 A note on the search/fetch provider
 
@@ -415,16 +417,16 @@ Phase 1 needs a web source. Options, in order of preference:
    manage but keeps us provider-independent.
 3. **Fetch-only** (agent must be given/So finds URLs) as a stopgap — weak; not recommended.
 
-The tool *interface* (`web_search`/`web_fetch`) is identical regardless of provider, so this choice
+The tool _interface_ (`web_search`/`web_fetch`) is identical regardless of provider, so this choice
 is swappable and does not block the rest of the design.
 
 ### 3.4 Safety / permission model
 
 Aligning with the app's consent posture (`docs/ARCHITECTURE.md`; the instruction-source boundary):
 
-- **v1 tools are read-only or agent-private, so no per-action user confirm is required to *run*
+- **v1 tools are read-only or agent-private, so no per-action user confirm is required to _run_
   them** — consistent with how point-and-talk needs no confirm because it only observes. The one
-  gate that *does* exist is the sign-in gate on the whole feature (§5.4): sub-billed work cannot
+  gate that _does_ exist is the sign-in gate on the whole feature (§5.4): sub-billed work cannot
   start without the user's ChatGPT connection.
 - **The moment a tool would have a side effect the user can't undo** (any deferred tool above),
   the model must not be able to call it silently: those tools are simply **not registered** in v1.
@@ -448,7 +450,7 @@ panel closed, or (c) much later. All three are handled.
 ### 4.1 Voice summary (session live)
 
 When an agent finishes and `RealtimeSession` is connected (or can lazily connect), the manager asks
-`conversation.ts` to have Buddy *speak* the result. Mechanism reuses the realtime text path:
+`conversation.ts` to have Buddy _speak_ the result. Mechanism reuses the realtime text path:
 
 - `conversation.deliverAgentResult(summary)` injects a **system/context turn** and requests a
   response, so the model speaks a short spoken-style recap in its own voice rather than reading a
@@ -456,15 +458,15 @@ When an agent finishes and `RealtimeSession` is connected (or can lazily connect
   `context:`-prefixed `input_text`, matching the existing `CONTEXT_PREFIX` convention in
   `session.ts`) message like:
   `agent finished. task: "<task>". findings (speak a short, warm, spoken-style summary, then plant
-  one seed for what they could do next): <2–4 sentence summary>` → `response.create`.
+one seed for what they could do next): <2–4 sentence summary>` → `response.create`.
 - Guards: this only fires when **no turn is in flight** (`pendingResponses === 0` and not
   `holding`) — an agent result must never interrupt the user mid-sentence or barge into a live
   answer. If the user is mid-turn, delivery **queues** and fires on the next idle settle
   (`scheduleIdle` path), or degrades to §4.3 if the session closes first.
-- The spoken recap is capped (the summary is short by construction); the *full* output lives in the
-  panel. Buddy says something like: *"ok, back — for a 27-inch under $400 the dell s2725qc keeps
+- The spoken recap is capped (the summary is short by construction); the _full_ output lives in the
+  panel. Buddy says something like: _"ok, back — for a 27-inch under $400 the dell s2725qc keeps
   coming up as the best all-rounder, with the koorui 27e6qc as the budget pick. i dropped the full
-  rundown in the panel. want me to compare those two head to head?"*
+  rundown in the panel. want me to compare those two head to head?"_
 
 ### 4.2 The panel agents surface (always)
 
@@ -477,16 +479,16 @@ happened. Detailed UX in §5.
 
 Very common (agent outlives the 5-min keep-warm, or the user walked away). Layered fallback:
 
-1. **Tray balloon notification** (Windows `Tray.displayBalloon` / a `Notification`): *"buddy
-   finished: <short task>"* — clicking it opens the panel to that agent's Card. This is the primary
+1. **Tray balloon notification** (Windows `Tray.displayBalloon` / a `Notification`): _"buddy
+   finished: <short task>"_ — clicking it opens the panel to that agent's Card. This is the primary
    "ping you when it's done" for the closed-session case.
 2. **Panel badge**: the tray icon / panel header shows an unseen-results count; the agents tab
    shows a dot. Cleared when the user views the Card.
 3. **Next-time-you-talk spoken recap**: the finished-but-unspoken summary is stashed on the
    `AgentRecord` with `spoken: false`. On the **next** voice turn, before/after answering, Buddy
    can mention it — `conversation.ts` checks for undelivered results at turn settle and, if any,
-   injects the §4.1 context so the model weaves in *"oh — that monitor research finished while you
-   were away, by the way…"*. Capped to avoid nagging (only the most recent 1–2 undelivered, then
+   injects the §4.1 context so the model weaves in _"oh — that monitor research finished while you
+   were away, by the way…"_. Capped to avoid nagging (only the most recent 1–2 undelivered, then
    they're marked spoken).
 
 We deliberately do **not** force the panel open or speak unprompted into a silent room (the app is
@@ -539,14 +541,14 @@ findings":
 
 ### 5.3 States → shadcn `Badge` variants
 
-| Status | Badge | Substatus |
-|---|---|---|
-| `queued` | secondary "queued" | waiting for a slot (at cap) |
-| `running` | default + spinner (`lucide` `Loader2`) "working" | `step n/12 · m:ss` |
-| `done` | success/green "done" | `finished · m:ss · k sources` |
-| `failed` | destructive "failed" | short reason (lowercase catalog copy) |
-| `timed_out` | warning "stopped" | `hit the time limit · partial result below` |
-| `cancelled` | outline "cancelled" | `you stopped this` |
+| Status      | Badge                                            | Substatus                                   |
+| ----------- | ------------------------------------------------ | ------------------------------------------- |
+| `queued`    | secondary "queued"                               | waiting for a slot (at cap)                 |
+| `running`   | default + spinner (`lucide` `Loader2`) "working" | `step n/12 · m:ss`                          |
+| `done`      | success/green "done"                             | `finished · m:ss · k sources`               |
+| `failed`    | destructive "failed"                             | short reason (lowercase catalog copy)       |
+| `timed_out` | warning "stopped"                                | `hit the time limit · partial result below` |
+| `cancelled` | outline "cancelled"                              | `you stopped this`                          |
 
 Output rendering: the summary is plain text; "full findings" renders the scratchpad as light
 markdown (reuse whatever the transcript uses, or a minimal renderer — no heavy dependency).
@@ -560,11 +562,13 @@ Agent mode is sub-billed, so it is gated on the parallel-built Codex auth being 
 (§6.2). Two gated states:
 
 - **Not connected — empty state on the Agents tab:**
-  > *agent mode needs your chatgpt sign-in — it runs on your chatgpt plan, not your api key.
-  > connect it in settings and say "buddy, agent" to send one off.*  [ connect in settings ]
+
+  > _agent mode needs your chatgpt sign-in — it runs on your chatgpt plan, not your api key.
+  > connect it in settings and say "buddy, agent" to send one off._ [ connect in settings ]
 
   The button jumps to the Settings view's new "ChatGPT" section (owned by the auth agent; this
   design just links to it).
+
 - **Connected:** the normal agents list. `spawn_agent` is registered in the realtime session
   (§1.2) only in this state, so the voice model won't offer agents it can't start.
 
@@ -574,7 +578,7 @@ gated empty state (reusing `showPanelOnce`-style discoverability).
 
 ### 5.5 Overlay helper sprites (M19 — the non-technical face of agents)
 
-The panel list is the full record; the **overlay** is where a non-technical user actually *sees*
+The panel list is the full record; the **overlay** is where a non-technical user actually _sees_
 agents. Each visible agent is a tiny pastel "helper buddy" (22px triangle with eyes, stable
 per-agent tint) that pops out of the mascot and settles into a small arc anchored at the buddy's
 REST spot (the arc mirrors toward the roomy side of the screen). Implementation:
@@ -615,6 +619,7 @@ REST spot (the arc mirrors toward the roomy side of the screen). Implementation:
 ### 6.1 Hooks into existing code
 
 **`persona.ts`**
+
 - Replace the "coming soon" honesty clause with the agent-mode clause (§1.2).
 - Add `SPAWN_AGENT_TOOL`; make `getToolDefinitions()` take an `agentModeAvailable: boolean` and
   include `spawn_agent` only when true. `conversation.buildSession()` passes
@@ -622,6 +627,7 @@ REST spot (the arc mirrors toward the roomy side of the screen). Implementation:
   connection state.
 
 **`conversation.ts`**
+
 - `handleToolCall`: branch on `call.name === 'spawn_agent'` **before** the `point_at` path. Build
   the `AgentBrief` from `this.turnCaptures` (active display) + recent `this.entries`, call
   `this.agents.spawn(brief)`, and send the tool output back (`{ ok: true, agent_id }` or
@@ -636,8 +642,9 @@ REST spot (the arc mirrors toward the roomy side of the screen). Implementation:
   reuse the existing `onSettingsChanged` rebuild machinery (model/voice change already rebuilds).
 
 **`index.ts` (wiring only)**
+
 - Construct `AuthSource` (from `src/main/auth`, parallel agent), `AgentManager({ backend, panel,
-  onComplete })`, pass both into `Conversation`.
+onComplete })`, pass both into `Conversation`.
 - Wire new IPC: `agents:list` (invoke), `agents:cancel` / `agents:cancel-all` (send), and the
   main→panel `panel:agents` push. Tray balloon click → open panel to Agents tab.
 
@@ -655,42 +662,48 @@ tools, delivery, and UX are backend-agnostic.
 ```ts
 export type AgentStatus = 'queued' | 'running' | 'done' | 'failed' | 'timed_out' | 'cancelled';
 
-export interface AgentStep {                 // one loop iteration, for the activity log
+export interface AgentStep {
+  // one loop iteration, for the activity log
   kind: 'search' | 'fetch' | 'note' | 'think';
-  label: string;                             // "searched \"…\"", "read rtings.com/…"
+  label: string; // "searched \"…\"", "read rtings.com/…"
   at: number;
 }
 
-export interface AgentSummary {              // renderer-safe agent record (NO screenshot bytes)
+export interface AgentSummary {
+  // renderer-safe agent record (NO screenshot bytes)
   id: string;
   task: string;
   status: AgentStatus;
   createdAt: number;
   finishedAt?: number;
-  step?: number;                             // current step (running)
+  step?: number; // current step (running)
   maxSteps: number;
-  steps: AgentStep[];                        // capped activity log
-  summary?: string;                          // short recap (also the spoken text)
-  output?: string;                           // full findings (scratchpad, markdown)
-  sources?: string[];                        // fetched urls
-  error?: string;                            // lowercase, catalog-classified
-  spoken: boolean;                           // has voice delivered it yet
-  unseen: boolean;                           // panel badge
+  steps: AgentStep[]; // capped activity log
+  summary?: string; // short recap (also the spoken text)
+  output?: string; // full findings (scratchpad, markdown)
+  sources?: string[]; // fetched urls
+  error?: string; // lowercase, catalog-classified
+  spoken: boolean; // has voice delivered it yet
+  unseen: boolean; // panel badge
 }
 
 // Settings gains the connection flag (renderer-safe; never the token):
-interface Settings { /* … */ chatgptConnected: boolean; }
+interface Settings {
+  /* … */ chatgptConnected: boolean;
+}
 ```
 
 `src/shared/ipc.ts` (additions):
 
 ```ts
 // Main → Panel
-interface MainToPanelEvents { /* … */ 'panel:agents': AgentSummary[]; }   // full list upsert
+interface MainToPanelEvents {
+  /* … */ 'panel:agents': AgentSummary[];
+} // full list upsert
 // Renderer → Main (invoke)
 interface InvokeChannels {
   /* … */
-  'agents:list':   { args: []; result: AgentSummary[] };
+  'agents:list': { args: []; result: AgentSummary[] };
   'agents:cancel': { args: [id: string]; result: void };
   'agents:cancel-all': { args: []; result: void };
   'agents:mark-seen': { args: [id: string]; result: void };
@@ -713,7 +726,8 @@ the mock realtime server enables E2E today (`docs/ARCHITECTURE.md` §8). Debug-s
 
 ### 6.4 Phased build plan + effort
 
-**Phase 1 — research agent, voice + panel (MVP).**  ~**6–9 eng-days**.
+**Phase 1 — research agent, voice + panel (MVP).** ~**6–9 eng-days**.
+
 - `agents/backend.ts` over `AuthSource` (Responses submit/continue, `previous_response_id`). ~1.5d
   (assumes AuthSource lands; +1d of glue if its surface drifts).
 - `agents/agent.ts` loop + timeouts + cancellation. ~1.5d.
@@ -725,11 +739,13 @@ the mock realtime server enables E2E today (`docs/ARCHITECTURE.md` §8). Debug-s
 - Mock backend + debug routes + QA scenarios. ~1d.
 
 **Phase 2 — polish + reliability.**
+
 - Streaming `output_text.delta` into the Card ("thinking…" live). Undelivered-result nudge tuning.
   Remaining-quota display once the backend exposes it. Durable finished-agent history across
   restarts. Escalation heuristics for `gpt-5.6-terra`.
 
 **Phase 3 — more capability (each its own consent story).**
+
 - First side-effecting tool with an explicit per-action confirm (e.g. `save_note` to a chosen
   file). Then the connectors phase (Calendar/Gmail/Notion/Linear) — OAuth + write consent per
   connector. Then, far later and behind its own design, any "act on screen" automation.
@@ -738,7 +754,7 @@ the mock realtime server enables E2E today (`docs/ARCHITECTURE.md` §8). Debug-s
 
 1. **Long-running reliability** — an agent must survive tray idle, keep-warm socket closure, brief
    network blips, and OS sleep without wedging or double-delivering.
-   *Mitigation*: agents live in the main process, fully decoupled from windows and the realtime
+   _Mitigation_: agents live in the main process, fully decoupled from windows and the realtime
    socket; three-layer timeouts (§2.3) with a manager-owned wall clock; one bounded retry per
    backend step; idempotent delivery keyed on `AgentRecord.spoken`/`unseen` so a result is spoken
    at most once and always lands in the panel even if voice delivery is missed. `AbortController`
@@ -746,7 +762,7 @@ the mock realtime server enables E2E today (`docs/ARCHITECTURE.md` §8). Debug-s
 
 2. **Tool safety / blast radius** — an agent doing "real work" is where an assistant can do real
    damage.
-   *Mitigation*: v1 is **read-only and user-local by construction** — no filesystem writes, no
+   _Mitigation_: v1 is **read-only and user-local by construction** — no filesystem writes, no
    program execution, no account integrations, no sending (§3.2). The only external action is
    reading the web; the only writes are the agent's private scratchpad. Every future side-effecting
    tool is gated behind an explicit per-action panel confirm and is simply unregistered until then,
@@ -754,12 +770,12 @@ the mock realtime server enables E2E today (`docs/ARCHITECTURE.md` §8). Debug-s
 
 3. **Prompt injection from web content + plan-quota drain** (two failure modes of "the agent reads
    the internet on the user's dime").
-   *Mitigation (injection)*: `web_fetch` output is delimited and labeled reference-material; the
+   _Mitigation (injection)_: `web_fetch` output is delimited and labeled reference-material; the
    agent's system prompt enforces the instruction-source boundary — instructions found inside
    fetched pages are never followed (no tool the agent has can exfiltrate or act anyway, which caps
    the damage even on a successful injection). A mock injection scenario is a required QA gate
    (§6.3).
-   *Mitigation (quota)*: `MAX_STEPS=12`, per-run web-call caps, concurrency cap 3, and a whole-run
+   _Mitigation (quota)_: `MAX_STEPS=12`, per-run web-call caps, concurrency cap 3, and a whole-run
    wall clock bound the spend per task; the manager counts runs and surfaces a "quota" error class
    (§7) when the backend reports plan exhaustion; agents fail closed (clear message, no silent
    retry storm) — echoing the recent `Fail closed on GPT subscription pool outages` posture.
@@ -771,13 +787,13 @@ the mock realtime server enables E2E today (`docs/ARCHITECTURE.md` §8). Debug-s
 Agent failures route through the same philosophy as `src/main/errors.ts`: a classified kind →
 lowercase Buddy copy, surfaced in the Card (and spoken if a session is live). New kinds:
 
-| Kind | Copy (lowercase) | Trigger |
-|---|---|---|
-| `agent_not_signed_in` | *agent mode needs your chatgpt sign-in — connect it in settings.* | spawn while `!isReady()` (also blocked at the tool level) |
-| `agent_quota` | *your chatgpt plan is out of agent runs for now — voice still works.* | backend reports plan/quota exhaustion |
-| `agent_backend_down` | *couldn't reach chatgpt just now — i'll stop this one; try again in a bit.* | repeated backend request failure |
-| `agent_timed_out` | *that one ran long and i had to stop it — here's what i got so far.* | whole-run wall clock |
-| `agent_tool_failed` | (internal — the loop routes around it; only surfaced if it dominates the run) | tool errors |
+| Kind                  | Copy (lowercase)                                                              | Trigger                                                   |
+| --------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `agent_not_signed_in` | _agent mode needs your chatgpt sign-in — connect it in settings._             | spawn while `!isReady()` (also blocked at the tool level) |
+| `agent_quota`         | _your chatgpt plan is out of agent runs for now — voice still works._         | backend reports plan/quota exhaustion                     |
+| `agent_backend_down`  | _couldn't reach chatgpt just now — i'll stop this one; try again in a bit._   | repeated backend request failure                          |
+| `agent_timed_out`     | _that one ran long and i had to stop it — here's what i got so far._          | whole-run wall clock                                      |
+| `agent_tool_failed`   | (internal — the loop routes around it; only surfaced if it dominates the run) | tool errors                                               |
 
 `agent_quota` and `agent_backend_down` **fail closed**: the agent stops, the Card shows the
 reason, voice (if live) says it plainly — no retry loop that would hammer the plan or the pool
@@ -796,6 +812,7 @@ reason, voice (if live) says it plainly — no retry loop that would hammer the 
 4. **Responses API streaming shape on this backend** — needed for the phase-2 live Card; phase 1
    deliberately avoids it.
 5. **System-role vs `context:` framing for voice delivery** — pick whichever the realtime model
-   speaks most naturally from (§4.1); a small eval like the M8.6 framing work will settle it.
+speaks most naturally from (§4.1); a small eval like the M8.6 framing work will settle it.
 </content>
+
 </invoke>

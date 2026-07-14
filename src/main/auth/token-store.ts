@@ -64,8 +64,7 @@ export class CodexTokenStore {
   private readonly injectedCrypto: SafeStorageLike | undefined;
 
   constructor(options: CodexTokenStoreOptions = {}) {
-    this.path =
-      options.filePath ?? join(app.getPath('userData'), FILE_NAME);
+    this.path = options.filePath ?? join(app.getPath('userData'), FILE_NAME);
     this.injectedCrypto = options.safeStorageImpl;
   }
 
@@ -103,9 +102,7 @@ export class CodexTokenStore {
       ) {
         return null;
       }
-      const accessToken = crypto.decryptString(
-        Buffer.from(parsed.accessTokenEncrypted, 'base64'),
-      );
+      const accessToken = crypto.decryptString(Buffer.from(parsed.accessTokenEncrypted, 'base64'));
       const refreshToken = crypto.decryptString(
         Buffer.from(parsed.refreshTokenEncrypted, 'base64'),
       );

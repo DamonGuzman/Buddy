@@ -175,7 +175,11 @@ export class GroundingService {
     let debugList: SnapDebugCandidate[] | undefined;
     for (const radius of [query.radiusPx ?? RADIUS_PX, RETRY_RADIUS_PX]) {
       const remaining = deadline - Date.now();
-      if (remaining < 120) return { ...none(true, lastCount, lastDaemonMs), ...(debugList ? { debug: debugList } : {}) };
+      if (remaining < 120)
+        return {
+          ...none(true, lastCount, lastDaemonMs),
+          ...(debugList ? { debug: debugList } : {}),
+        };
       const resp = await this.request(
         {
           x: Math.round(query.x),
@@ -187,7 +191,11 @@ export class GroundingService {
         },
         remaining,
       );
-      if (resp === null) return { ...none(true, lastCount, lastDaemonMs), ...(debugList ? { debug: debugList } : {}) };
+      if (resp === null)
+        return {
+          ...none(true, lastCount, lastDaemonMs),
+          ...(debugList ? { debug: debugList } : {}),
+        };
       const candidates = normalizeCandidates(resp.candidates);
       lastCount = candidates.length;
       lastDaemonMs = typeof resp.elapsedMs === 'number' ? resp.elapsedMs : null;
@@ -235,7 +243,15 @@ export class GroundingService {
       const scriptPath = join(this.options.scriptDir, 'snapper.ps1');
       writeFileSync(scriptPath, snapperScript, 'utf8');
       command = 'powershell.exe';
-      args = ['-NoProfile', '-NonInteractive', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-File', scriptPath];
+      args = [
+        '-NoProfile',
+        '-NonInteractive',
+        '-NoLogo',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        scriptPath,
+      ];
     }
 
     const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
@@ -256,7 +272,8 @@ export class GroundingService {
     child.on('exit', (code) => {
       if (this.child === child) {
         this.child = null;
-        if (!this.disposed) console.warn(`[grounding] daemon exited (code ${code}); will respawn on demand`);
+        if (!this.disposed)
+          console.warn(`[grounding] daemon exited (code ${code}); will respawn on demand`);
       }
       this.flushPending();
     });
@@ -308,7 +325,10 @@ export class GroundingService {
     }
   }
 
-  private request(payload: Record<string, unknown>, timeoutMs: number): Promise<DaemonResponse | null> {
+  private request(
+    payload: Record<string, unknown>,
+    timeoutMs: number,
+  ): Promise<DaemonResponse | null> {
     return new Promise((resolve) => {
       let child: ChildProcessWithoutNullStreams;
       try {

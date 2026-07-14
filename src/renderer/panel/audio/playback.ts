@@ -110,10 +110,9 @@ export class AudioPlayer {
       if (this.ctx !== null && this.ctx.state === 'suspended') {
         void this.ctx.resume().catch(() => undefined);
       }
-      node.port.postMessage(
-        { type: 'chunk', samples: samples.buffer, itemId: delta.itemId },
-        [samples.buffer],
-      );
+      node.port.postMessage({ type: 'chunk', samples: samples.buffer, itemId: delta.itemId }, [
+        samples.buffer,
+      ]);
     });
   }
 

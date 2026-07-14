@@ -4,11 +4,13 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 
-const debugToken = process.env.CLICKY_DEBUG_TOKEN?.trim() || readFileSync(
-  process.env.CLICKY_DEBUG_TOKEN_FILE ??
-    join(process.env.TEMP ?? process.cwd(), 'clicky-phone-audio-e2e', 'debug-token.txt'),
-  'utf8',
-).trim();
+const debugToken =
+  process.env.CLICKY_DEBUG_TOKEN?.trim() ||
+  readFileSync(
+    process.env.CLICKY_DEBUG_TOKEN_FILE ??
+      join(process.env.TEMP ?? process.cwd(), 'clicky-phone-audio-e2e', 'debug-token.txt'),
+    'utf8',
+  ).trim();
 
 async function waitForDebug(timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
@@ -18,7 +20,9 @@ async function waitForDebug(timeoutMs = 20_000) {
         headers: { 'X-Debug-Token': debugToken },
       });
       if (response.ok) return;
-    } catch { /* Buddy still starting */ }
+    } catch {
+      /* Buddy still starting */
+    }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   throw new Error('Buddy debug server did not start');
@@ -30,7 +34,8 @@ async function debugPost(path) {
     headers: { 'Content-Type': 'application/json', 'X-Debug-Token': debugToken },
     body: '{}',
   });
-  if (!response.ok) throw new Error(`${path} failed (${response.status}): ${await response.text()}`);
+  if (!response.ok)
+    throw new Error(`${path} failed (${response.status}): ${await response.text()}`);
 }
 
 function makeToneChunk(phase) {
@@ -62,7 +67,9 @@ phone.on('message', (data, isBinary) => {
   try {
     const message = JSON.parse(data.toString());
     if (message.type === 'capture' && message.command === 'start') captureStarted = true;
-  } catch { /* diagnostic only */ }
+  } catch {
+    /* diagnostic only */
+  }
 });
 
 await debugPost('/hotkey/press');

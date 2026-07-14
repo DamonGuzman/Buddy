@@ -39,7 +39,11 @@ export class WindowsInputController {
       value.resolve({ ok: false, error: 'input controller stopped' });
     }
     this.pending.clear();
-    try { child?.kill(); } catch { /* already gone */ }
+    try {
+      child?.kill();
+    } catch {
+      /* already gone */
+    }
   }
 
   private ensureChild(): ChildProcessWithoutNullStreams {
@@ -48,9 +52,19 @@ export class WindowsInputController {
     mkdirSync(this.scriptDir, { recursive: true });
     const scriptPath = join(this.scriptDir, 'windows-input.ps1');
     writeFileSync(scriptPath, inputScript, 'utf8');
-    const child = spawn('powershell.exe', [
-      '-NoProfile', '-NonInteractive', '-NoLogo', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
-    ], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-NoLogo',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        scriptPath,
+      ],
+      { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
+    );
     this.child = child;
     this.buffer = '';
     child.stdout.setEncoding('utf8');
@@ -68,17 +82,28 @@ export class WindowsInputController {
   private request(payload: Record<string, unknown>): Promise<void> {
     return new Promise((resolve, reject) => {
       let child: ChildProcessWithoutNullStreams;
-      try { child = this.ensureChild(); } catch (error) { reject(error); return; }
+      try {
+        child = this.ensureChild();
+      } catch (error) {
+        reject(error);
+        return;
+      }
       const id = this.nextId++;
       const timer = setTimeout(() => {
         if (this.pending.delete(id)) reject(new Error('windows input timed out'));
       }, 5_000);
       this.pending.set(id, {
         timer,
-        resolve: (result) => result.ok ? resolve() : reject(new Error(result.error || 'windows input failed')),
+        resolve: (result) =>
+          result.ok ? resolve() : reject(new Error(result.error || 'windows input failed')),
       });
-      try { child.stdin.write(`${JSON.stringify({ id, ...payload })}\n`); }
-      catch (error) { clearTimeout(timer); this.pending.delete(id); reject(error); }
+      try {
+        child.stdin.write(`${JSON.stringify({ id, ...payload })}\n`);
+      } catch (error) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(error);
+      }
     });
   }
 
@@ -97,8 +122,13 @@ export class WindowsInputController {
         if (!pending) continue;
         this.pending.delete(response.id);
         clearTimeout(pending.timer);
-        pending.resolve({ ok: response.ok === true, ...(typeof response.error === 'string' ? { error: response.error } : {}) });
-      } catch { /* ignore non-protocol output */ }
+        pending.resolve({
+          ok: response.ok === true,
+          ...(typeof response.error === 'string' ? { error: response.error } : {}),
+        });
+      } catch {
+        /* ignore non-protocol output */
+      }
     }
   }
 

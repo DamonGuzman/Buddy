@@ -60,11 +60,7 @@ export function hoverInteractionEnabled(input: {
   state: AssistantState;
   fullRealtimeMode: boolean;
 }): boolean {
-  return (
-    input.visible &&
-    input.atRest &&
-    (input.state !== 'listening' || input.fullRealtimeMode)
-  );
+  return input.visible && input.atRest && (input.state !== 'listening' || input.fullRealtimeMode);
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +166,12 @@ export function mergedRegion(buddy: Vec, aux: AuxHoverGeometry | null): Rect {
   let region = base;
   const half = aux.targetRadius + AUX_PAD;
   for (const t of aux.targets) {
-    region = unionRects(region, { x: t.x - half, y: t.y - half, width: half * 2, height: half * 2 });
+    region = unionRects(region, {
+      x: t.x - half,
+      y: t.y - half,
+      width: half * 2,
+      height: half * 2,
+    });
   }
   if (aux.rect !== null) region = unionRects(region, padRect(aux.rect, AUX_PAD));
   // Per-axis cap: keep the base (buddy) span, trim the far side.
@@ -264,8 +265,7 @@ export function hintText(input: HintTextInput): { text: string; sub?: string } |
   if (input.captionShowing) return null;
   if (input.state !== 'idle') return null;
   const hk = input.hotkeyLabel.toLowerCase();
-  const recent =
-    input.lastSpokeAt !== null && input.now - input.lastSpokeAt < RECENT_RESPONSE_MS;
+  const recent = input.lastSpokeAt !== null && input.now - input.lastSpokeAt < RECENT_RESPONSE_MS;
   const text = input.fullRealtimeMode
     ? `press ${hk} to start realtime mode`
     : recent

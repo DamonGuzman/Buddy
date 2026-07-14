@@ -134,9 +134,7 @@ export function applySettingsPatch(current: Settings, patch: SettingsPatch): Set
     ...(patch.voice !== undefined ? { voice: patch.voice } : {}),
     ...(patch.captionsEnabled !== undefined ? { captionsEnabled: patch.captionsEnabled } : {}),
     ...(patch.micDeviceId !== undefined ? { micDeviceId: patch.micDeviceId } : {}),
-    ...(patch.fullRealtimeMode !== undefined
-      ? { fullRealtimeMode: patch.fullRealtimeMode }
-      : {}),
+    ...(patch.fullRealtimeMode !== undefined ? { fullRealtimeMode: patch.fullRealtimeMode } : {}),
     // M11: storing (or clearing) a key always resolves an unreadable blob.
     ...(patch.apiKey !== undefined
       ? { apiKeyPresent: patch.apiKey !== null, apiKeyUnreadable: false }

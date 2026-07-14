@@ -157,7 +157,11 @@ describe('RestGrounder: null paths', () => {
 
   it('returns null on an HTTP error status', async () => {
     const grounder = makeGrounder(async () => {
-      return { ok: false, status: 429, json: async () => ({ error: { message: 'quota' } }) } as unknown as Response;
+      return {
+        ok: false,
+        status: 429,
+        json: async () => ({ error: { message: 'quota' } }),
+      } as unknown as Response;
     });
     expect(await grounder.groundWithModel(QUERY)).toBeNull();
   });

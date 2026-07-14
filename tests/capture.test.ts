@@ -196,10 +196,13 @@ describe('matchSourcesToDisplays', () => {
   });
 
   it('never assigns the same source to two displays (duplicate ids)', () => {
-    const match = matchSourcesToDisplays([{ id: 100 }, { id: 100 }], [
-      { display_id: '100', name: 'A' },
-      { display_id: '100', name: 'B' },
-    ]);
+    const match = matchSourcesToDisplays(
+      [{ id: 100 }, { id: 100 }],
+      [
+        { display_id: '100', name: 'A' },
+        { display_id: '100', name: 'B' },
+      ],
+    );
     expect(match.matchedByDisplayId).toBe(true);
     expect(match.sourceIndexByDisplay).toEqual([0, 1]);
   });
@@ -243,7 +246,9 @@ describe('captureAllDisplays', () => {
     const d = display(1, 0, 0, 1920, 1080, 2);
     mockState.displays = [d];
     mockState.activeDisplay = d;
-    mockState.sources = [{ display_id: '1', name: 'Screen 1', thumbnail: fakeThumbnail(3840, 2160) }];
+    mockState.sources = [
+      { display_id: '1', name: 'Screen 1', thumbnail: fakeThumbnail(3840, 2160) },
+    ];
   }
 
   it('captures, resizes to <=2048 longest edge, and reports final size in meta', async () => {

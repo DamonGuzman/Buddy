@@ -19,7 +19,8 @@ const runs = files.map((f) => ({ file: f, ...JSON.parse(readFileSync(join(RES, f
 const q = (sorted, p) => {
   if (sorted.length === 0) return NaN;
   const i = (sorted.length - 1) * p;
-  const lo = Math.floor(i), hi = Math.ceil(i);
+  const lo = Math.floor(i),
+    hi = Math.ceil(i);
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
 };
 const r1 = (x) => Math.round(x * 10) / 10;
@@ -31,17 +32,33 @@ function affineFit(pairs) {
   if (n < 4) return null;
   const solve = (ys) => {
     // design matrix columns: gx, gy, 1
-    let sxx = 0, sxy = 0, sx1 = 0, syy = 0, sy1 = 0, s11 = n;
-    let bx = 0, by = 0, b1 = 0;
+    let sxx = 0,
+      sxy = 0,
+      sx1 = 0,
+      syy = 0,
+      sy1 = 0,
+      s11 = n;
+    let bx = 0,
+      by = 0,
+      b1 = 0;
     for (let i = 0; i < n; i++) {
       const { gx, gy } = pairs[i];
       const y = ys[i];
-      sxx += gx * gx; sxy += gx * gy; sx1 += gx;
-      syy += gy * gy; sy1 += gy;
-      bx += gx * y; by += gy * y; b1 += y;
+      sxx += gx * gx;
+      sxy += gx * gy;
+      sx1 += gx;
+      syy += gy * gy;
+      sy1 += gy;
+      bx += gx * y;
+      by += gy * y;
+      b1 += y;
     }
     // 3x3 normal equations via Cramer
-    const M = [ [sxx, sxy, sx1], [sxy, syy, sy1], [sx1, sy1, s11] ];
+    const M = [
+      [sxx, sxy, sx1],
+      [sxy, syy, sy1],
+      [sx1, sy1, s11],
+    ];
     const B = [bx, by, b1];
     const det3 = (m) =>
       m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
@@ -56,7 +73,9 @@ function affineFit(pairs) {
   const cy = solve(pairs.map((p) => p.py));
   if (!cx || !cy) return null;
   // R^2 over the combined residuals (vs identity-mean baseline), plus residual RMS
-  let ssRes = 0, ssTot = 0, rawSS = 0;
+  let ssRes = 0,
+    ssTot = 0,
+    rawSS = 0;
   const mpx = pairs.reduce((s, p) => s + p.px, 0) / n;
   const mpy = pairs.reduce((s, p) => s + p.py, 0) / n;
   for (const p of pairs) {
@@ -67,7 +86,8 @@ function affineFit(pairs) {
     rawSS += (p.px - p.gx) ** 2 + (p.py - p.gy) ** 2;
   }
   return {
-    xCoef: cx.map(r1), yCoef: cy.map(r1),
+    xCoef: cx.map(r1),
+    yCoef: cy.map(r1),
     r2: r1(1 - ssRes / ssTot),
     rawRmsPx: r1(Math.sqrt(rawSS / n)),
     residualRmsPx: r1(Math.sqrt(ssRes / n)),
@@ -125,9 +145,15 @@ for (const [key, runList] of [...groups.entries()].sort()) {
     const fit = affineFit(pairs);
     if (fit) affine[run.layout] = fit;
   }
-  const latencies = all.filter((r) => r.latencyMs).map((r) => r.latencyMs).sort((a, b) => a - b);
+  const latencies = all
+    .filter((r) => r.latencyMs)
+    .map((r) => r.latencyMs)
+    .sort((a, b) => a - b);
   // per-group token usage (REST runs: prompt/completion_tokens; realtime: input/output_tokens)
-  let tIn = 0, tOut = 0, tReason = 0, nCalls = 0;
+  let tIn = 0,
+    tOut = 0,
+    tReason = 0,
+    nCalls = 0;
   for (const run of runList) {
     for (const u of run.usage ?? []) {
       tIn += u.prompt_tokens ?? u.input_tokens ?? 0;
@@ -137,16 +163,27 @@ for (const [key, runList] of [...groups.entries()].sort()) {
     }
   }
   summary.push({
-    model, condition, ...s,
+    model,
+    condition,
+    ...s,
     latencyP50: Math.round(q(latencies, 0.5)),
     latencyP90: Math.round(q(latencies, 0.9)),
-    tokensPerCall: nCalls ? { in: Math.round(tIn / nCalls), out: Math.round(tOut / nCalls), reasoning: Math.round(tReason / nCalls) } : null,
-    zones, affine,
+    tokensPerCall: nCalls
+      ? {
+          in: Math.round(tIn / nCalls),
+          out: Math.round(tOut / nCalls),
+          reasoning: Math.round(tReason / nCalls),
+        }
+      : null,
+    zones,
+    affine,
   });
 }
 
 // usage/cost accounting
-let inputTok = 0, cachedTok = 0, outputTok = 0;
+let inputTok = 0,
+  cachedTok = 0,
+  outputTok = 0;
 for (const run of runs) {
   for (const u of run.usage ?? []) {
     inputTok += u.input_tokens ?? 0;
@@ -157,21 +194,38 @@ for (const run of runs) {
 
 console.log('=== coord-study summary ===\n');
 console.log(
-  'model'.padEnd(22) + 'condition'.padEnd(18) + 'n'.padStart(3) + 'ok'.padStart(4) +
-  'med'.padStart(7) + 'p90'.padStart(7) + 'max'.padStart(7) +
-  '<=40'.padStart(7) + '<=100'.padStart(7) + 'hit%'.padStart(7) + 'lat'.padStart(6),
+  'model'.padEnd(22) +
+    'condition'.padEnd(18) +
+    'n'.padStart(3) +
+    'ok'.padStart(4) +
+    'med'.padStart(7) +
+    'p90'.padStart(7) +
+    'max'.padStart(7) +
+    '<=40'.padStart(7) +
+    '<=100'.padStart(7) +
+    'hit%'.padStart(7) +
+    'lat'.padStart(6),
 );
 for (const s of summary) {
   console.log(
-    s.model.padEnd(22) + s.condition.padEnd(18) + String(s.n).padStart(3) + String(s.valid).padStart(4) +
-    String(s.medianErr).padStart(7) + String(s.p90Err).padStart(7) + String(s.maxErr).padStart(7) +
-    (s.within40 + '%').padStart(7) + (s.within100 + '%').padStart(7) + (s.hitRate + '%').padStart(7) +
-    String(s.latencyP50).padStart(6),
+    s.model.padEnd(22) +
+      s.condition.padEnd(18) +
+      String(s.n).padStart(3) +
+      String(s.valid).padStart(4) +
+      String(s.medianErr).padStart(7) +
+      String(s.p90Err).padStart(7) +
+      String(s.maxErr).padStart(7) +
+      (s.within40 + '%').padStart(7) +
+      (s.within100 + '%').padStart(7) +
+      (s.hitRate + '%').padStart(7) +
+      String(s.latencyP50).padStart(6),
   );
 }
 console.log('\nzones (median err px):');
 for (const s of summary) {
-  const z = Object.entries(s.zones).map(([k, v]) => `${k}=${v.median}`).join(' ');
+  const z = Object.entries(s.zones)
+    .map(([k, v]) => `${k}=${v.median}`)
+    .join(' ');
   console.log(`  ${s.model} ${s.condition}: ${z}`);
 }
 console.log('\naffine drift fits (gt->pred; identity = [1,0,0]/[0,1,0]):');
@@ -179,7 +233,7 @@ for (const s of summary) {
   for (const [layout, f] of Object.entries(s.affine)) {
     console.log(
       `  ${s.model} ${s.condition} [${layout}]: x=${JSON.stringify(f.xCoef)} y=${JSON.stringify(f.yCoef)} ` +
-      `R2=${f.r2} rawRMS=${f.rawRmsPx} residRMS=${f.residualRmsPx}`,
+        `R2=${f.r2} rawRMS=${f.rawRmsPx} residRMS=${f.residualRmsPx}`,
     );
   }
 }
@@ -188,5 +242,8 @@ console.log(`\nusage: input=${inputTok} (cached=${cachedTok}) output=${outputTok
 const cost = ((inputTok - cachedTok) * 4 + cachedTok * 0.4 + outputTok * 16) / 1e6;
 console.log(`approx cost at gpt-realtime full text rates: $${cost.toFixed(2)}`);
 
-writeFileSync(join(RES, 'summary.json'), JSON.stringify({ summary, usage: { inputTok, cachedTok, outputTok } }, null, 2));
+writeFileSync(
+  join(RES, 'summary.json'),
+  JSON.stringify({ summary, usage: { inputTok, cachedTok, outputTok } }, null, 2),
+);
 console.log('\nwrote results/summary.json');

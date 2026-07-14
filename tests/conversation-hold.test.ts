@@ -44,16 +44,20 @@ vi.mock('../src/main/windows/overlay', () => ({}));
 const { Conversation, MIN_COMMIT_AUDIO_MS } = await import('../src/main/conversation');
 
 const require = createRequire(import.meta.url);
-const mock = require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
+const mock =
+  require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
 type MockServer = Awaited<ReturnType<typeof mock.createMockServer>>;
 
 // ---------------------------------------------------------------------------
 
-function fakeDeps(phoneAudio?: {
-  capture: (command: 'start' | 'stop') => void;
-  playback: (command: 'stop' | 'flush') => void;
-  sendAudio: (chunk: ArrayBuffer) => void;
-}, fullRealtimeMode = false) {
+function fakeDeps(
+  phoneAudio?: {
+    capture: (command: 'start' | 'stop') => void;
+    playback: (command: 'stop' | 'flush') => void;
+    sendAudio: (chunk: ArrayBuffer) => void;
+  },
+  fullRealtimeMode = false,
+) {
   const settings = {
     get: () => ({
       apiKeyPresent: false,
@@ -188,9 +192,7 @@ describe('Conversation: quick barge-in tap commit guard (M9)', () => {
     const capture = vi.fn();
     const playback = vi.fn();
     const sendAudio = vi.fn();
-    const conversation = new Conversation(
-      fakeDeps({ capture, playback, sendAudio }, true),
-    );
+    const conversation = new Conversation(fakeDeps({ capture, playback, sendAudio }, true));
     conversations.push(conversation);
 
     await conversation.toggleFullRealtime();
@@ -220,19 +222,25 @@ describe('Conversation: quick barge-in tap commit guard (M9)', () => {
     const beforeTurns = server.clientEvents.length;
     const socket = [...server.wss.clients].at(-1);
     expect(socket).toBeDefined();
-    socket!.send(JSON.stringify({
-      type: 'input_audio_buffer.speech_started',
-      item_id: 'continuous_user_1',
-    }));
-    socket!.send(JSON.stringify({
-      type: 'input_audio_buffer.speech_stopped',
-      item_id: 'continuous_user_1',
-    }));
+    socket!.send(
+      JSON.stringify({
+        type: 'input_audio_buffer.speech_started',
+        item_id: 'continuous_user_1',
+      }),
+    );
+    socket!.send(
+      JSON.stringify({
+        type: 'input_audio_buffer.speech_stopped',
+        item_id: 'continuous_user_1',
+      }),
+    );
     await vi.waitFor(() => expect(conversation.assistantState()).toBe('thinking'));
-    socket!.send(JSON.stringify({
-      type: 'input_audio_buffer.committed',
-      item_id: 'continuous_user_1',
-    }));
+    socket!.send(
+      JSON.stringify({
+        type: 'input_audio_buffer.committed',
+        item_id: 'continuous_user_1',
+      }),
+    );
 
     await vi.waitFor(() => {
       expect(conversation.lastTurnTimings()?.tResponseDone).toBeTypeOf('number');
@@ -240,23 +248,29 @@ describe('Conversation: quick barge-in tap commit guard (M9)', () => {
     });
     expect(captureAllDisplaysMock).toHaveBeenCalledTimes(1);
 
-    socket!.send(JSON.stringify({
-      type: 'input_audio_buffer.speech_started',
-      item_id: 'continuous_user_2',
-    }));
-    socket!.send(JSON.stringify({
-      type: 'input_audio_buffer.speech_stopped',
-      item_id: 'continuous_user_2',
-    }));
-    socket!.send(JSON.stringify({
-      type: 'input_audio_buffer.committed',
-      item_id: 'continuous_user_2',
-    }));
+    socket!.send(
+      JSON.stringify({
+        type: 'input_audio_buffer.speech_started',
+        item_id: 'continuous_user_2',
+      }),
+    );
+    socket!.send(
+      JSON.stringify({
+        type: 'input_audio_buffer.speech_stopped',
+        item_id: 'continuous_user_2',
+      }),
+    );
+    socket!.send(
+      JSON.stringify({
+        type: 'input_audio_buffer.committed',
+        item_id: 'continuous_user_2',
+      }),
+    );
     await vi.waitFor(() => {
       expect(captureAllDisplaysMock).toHaveBeenCalledTimes(2);
-      expect(
-        server.clientEvents.filter((event) => event.type === 'response.create'),
-      ).toHaveLength(2);
+      expect(server.clientEvents.filter((event) => event.type === 'response.create')).toHaveLength(
+        2,
+      );
       expect(conversation.assistantState()).toBe('listening');
     });
 

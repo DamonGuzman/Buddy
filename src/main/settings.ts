@@ -74,8 +74,7 @@ export class SettingsStore {
 
   constructor(filePath?: string, codexSignIn?: () => CodexSignInState) {
     this.path = filePath ?? join(app.getPath('userData'), FILE_NAME);
-    this.resolveCodexSignIn =
-      codexSignIn ?? (() => getCodexAuthProvider().codexSignInState());
+    this.resolveCodexSignIn = codexSignIn ?? (() => getCodexAuthProvider().codexSignInState());
     this.file = this.load();
     if (this.needsMigration) this.persist();
     // M15 addition (orchestrator-approved): see getSettingsStore above.
@@ -292,7 +291,8 @@ export class SettingsStore {
           typeof parsed.captionsEnabled === 'boolean'
             ? parsed.captionsEnabled
             : fallback.captionsEnabled,
-        micDeviceId: typeof parsed.micDeviceId === 'string' ? parsed.micDeviceId : fallback.micDeviceId,
+        micDeviceId:
+          typeof parsed.micDeviceId === 'string' ? parsed.micDeviceId : fallback.micDeviceId,
         fullRealtimeMode:
           typeof parsed.fullRealtimeMode === 'boolean'
             ? parsed.fullRealtimeMode

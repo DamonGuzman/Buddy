@@ -40,10 +40,12 @@ describe('PhoneAudioBridgeClient', () => {
     });
     client.capture('start');
     client.playback('flush');
-    await vi.waitFor(() => expect(controls.slice(-2)).toEqual([
-      { type: 'capture', command: 'start' },
-      { type: 'playback', command: 'flush' },
-    ]));
+    await vi.waitFor(() =>
+      expect(controls.slice(-2)).toEqual([
+        { type: 'capture', command: 'start' },
+        { type: 'playback', command: 'flush' },
+      ]),
+    );
 
     const output = new Uint8Array([1, 2, 3, 4]).buffer;
     const outputPromise = new Promise<Buffer>((resolve) =>
@@ -84,13 +86,17 @@ describe('phone browser playback timeline', () => {
       document: { querySelector: element },
       window: { addEventListener: () => {}, isSecureContext: true },
       navigator: { mediaDevices: {} },
-      WebSocket: class { static readonly OPEN = 1; },
+      WebSocket: class {
+        static readonly OPEN = 1;
+      },
       console,
     });
     vm.runInContext(source, context);
 
-    const starts = Array.from({ length: 10 }, (_, index) =>
-      vm.runInContext(`schedulePlaybackSlot(${10 + index * 0.01}, 0.5)`, context) as number,
+    const starts = Array.from(
+      { length: 10 },
+      (_, index) =>
+        vm.runInContext(`schedulePlaybackSlot(${10 + index * 0.01}, 0.5)`, context) as number,
     );
 
     expect(starts[0]).toBeCloseTo(10.04);

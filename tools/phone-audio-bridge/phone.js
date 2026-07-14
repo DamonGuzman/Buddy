@@ -43,7 +43,11 @@ function setCapture(active) {
 
 function clearPlayback() {
   for (const source of playingSources) {
-    try { source.stop(); } catch { /* already ended */ }
+    try {
+      source.stop();
+    } catch {
+      /* already ended */
+    }
   }
   playingSources.clear();
   nextPlayAt = audioContext?.currentTime ?? 0;
@@ -138,7 +142,9 @@ function connectSocket() {
       if (message.type === 'status' && message.clickyConnected === false) {
         setStatus('phone connected', 'waiting for Buddy on the Windows PC', 'connected');
       }
-    } catch { /* ignore unknown diagnostic messages */ }
+    } catch {
+      /* ignore unknown diagnostic messages */
+    }
   };
   socket.onclose = () => {
     setCapture(false);
@@ -146,7 +152,8 @@ function connectSocket() {
     connectButton.disabled = false;
     connectButton.textContent = 'reconnect audio';
   };
-  socket.onerror = () => showError('Could not reach the Buddy bridge. Check that the tool is still running.');
+  socket.onerror = () =>
+    showError('Could not reach the Buddy bridge. Check that the tool is still running.');
 }
 
 connectButton.addEventListener('click', async () => {
@@ -154,7 +161,9 @@ connectButton.addEventListener('click', async () => {
   errorBox.hidden = true;
   try {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-      throw new Error('Safari does not trust this page yet. Install and fully trust the Buddy test certificate first.');
+      throw new Error(
+        'Safari does not trust this page yet. Install and fully trust the Buddy test certificate first.',
+      );
     }
     if (!audioContext) await prepareAudio();
     else await audioContext.resume();

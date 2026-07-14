@@ -155,7 +155,11 @@ async function main(): Promise<void> {
     },
     onFinished: (summary) => conversation.deliverAgentResult(summary),
     notify: (title, body) => {
-      try { tray?.displayBalloon({ title, content: body }); } catch { /* unavailable on some systems */ }
+      try {
+        tray?.displayBalloon({ title, content: body });
+      } catch {
+        /* unavailable on some systems */
+      }
     },
   });
   conversation = new Conversation({
@@ -227,7 +231,10 @@ async function main(): Promise<void> {
     try {
       state = getCodexAuthProvider().codexSignInState();
     } catch (err) {
-      console.warn('[boot] codex sign-in state unavailable:', err instanceof Error ? err.name : 'unknown');
+      console.warn(
+        '[boot] codex sign-in state unavailable:',
+        err instanceof Error ? err.name : 'unknown',
+      );
       return;
     }
     const key = JSON.stringify(state);
@@ -477,12 +484,13 @@ async function main(): Promise<void> {
       query: (q) => conversation.debugGroundingQuery(q),
     },
     agents: {
-      spawn: (task) => agents.spawn({
-        id: `agent_debug_${Date.now()}`,
-        task,
-        recentTranscript: '',
-        createdAt: Date.now(),
-      }),
+      spawn: (task) =>
+        agents.spawn({
+          id: `agent_debug_${Date.now()}`,
+          task,
+          recentTranscript: '',
+          createdAt: Date.now(),
+        }),
       list: () => agents.list(),
       cancel: (id) => agents.cancel(id),
     },
@@ -518,7 +526,8 @@ async function main(): Promise<void> {
     const { exemptFromCaptureProtection } = await import('./capture');
     const { mkdirSync, writeFileSync } = await import('node:fs');
     const { join } = await import('node:path');
-    const outDir = process.env['CLICKY_CAPTURE_OUT'] ?? join(app.getPath('temp'), 'clicky-capture-test');
+    const outDir =
+      process.env['CLICKY_CAPTURE_OUT'] ?? join(app.getPath('temp'), 'clicky-capture-test');
     mkdirSync(outDir, { recursive: true });
 
     const makeTestWin = (x: number, y: number, color: string, label: string) => {
@@ -568,7 +577,11 @@ async function main(): Promise<void> {
     }
     writeFileSync(
       join(outDir, 'meta.json'),
-      JSON.stringify({ elapsedMs, captures: results.map((r) => r.meta), displays: displayDump }, null, 2),
+      JSON.stringify(
+        { elapsedMs, captures: results.map((r) => r.meta), displays: displayDump },
+        null,
+        2,
+      ),
     );
     console.log(`[self-test] wrote output to ${outDir}`);
     protectedWin.destroy();

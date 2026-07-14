@@ -28,7 +28,8 @@ export class CodexOAuthLoopback {
   constructor(private readonly deps: OAuthLoopbackDeps) {}
 
   async start(): Promise<OAuthStartResult> {
-    if (this.server !== null) return { ok: false, error: 'a chatgpt sign-in is already in progress' };
+    if (this.server !== null)
+      return { ok: false, error: 'a chatgpt sign-in is already in progress' };
     const { verifier, challenge } = createPkcePair();
     const state = randomBytes(24).toString('base64url');
     const server = createServer((req, res) => {
@@ -46,7 +47,11 @@ export class CodexOAuthLoopback {
         return;
       }
       if (oauthError || !code) {
-        respond(res, 400, 'chatgpt sign-in was cancelled. you can close this tab and try again from buddy.');
+        respond(
+          res,
+          400,
+          'chatgpt sign-in was cancelled. you can close this tab and try again from buddy.',
+        );
         this.stop();
         return;
       }
@@ -66,10 +71,19 @@ export class CodexOAuthLoopback {
     });
     this.server = server;
     const listening = await new Promise<OAuthStartResult>((resolve) => {
-      server.once('error', () => resolve({ ok: false, error: 'buddy could not open its local sign-in callback. close any other codex sign-in and try again.' }));
+      server.once('error', () =>
+        resolve({
+          ok: false,
+          error:
+            'buddy could not open its local sign-in callback. close any other codex sign-in and try again.',
+        }),
+      );
       server.listen(CALLBACK_PORT, CALLBACK_HOST, () => resolve({ ok: true }));
     });
-    if (!listening.ok) { this.stop(); return listening; }
+    if (!listening.ok) {
+      this.stop();
+      return listening;
+    }
     this.timeout = setTimeout(() => this.stop(), FLOW_TIMEOUT_MS);
     this.timeout.unref?.();
     try {
@@ -86,7 +100,11 @@ export class CodexOAuthLoopback {
     this.timeout = null;
     const server = this.server;
     this.server = null;
-    try { server?.close(); } catch { /* already closed */ }
+    try {
+      server?.close();
+    } catch {
+      /* already closed */
+    }
   }
 
   private async exchange(code: string, verifier: string): Promise<boolean> {
@@ -139,7 +157,16 @@ export function buildAuthorizeUrl(input: { state: string; challenge: string }): 
 
 function respond(res: import('node:http').ServerResponse, status: number, message: string): void {
   const html = `<!doctype html><meta charset="utf-8"><title>buddy sign-in</title><body style="background:#09090b;color:#fafafa;font:16px system-ui;display:grid;place-items:center;min-height:100vh;margin:0"><main style="max-width:480px;padding:32px;text-align:center"><h1 style="font-size:22px">buddy</h1><p style="color:#a1a1aa;line-height:1.6">${escapeHtml(message)}</p></main></body>`;
-  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'content-length': Buffer.byteLength(html) });
+  res.writeHead(status, {
+    'content-type': 'text/html; charset=utf-8',
+    'content-length': Buffer.byteLength(html),
+  });
   res.end(html);
 }
-function escapeHtml(value: string): string { return value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char); }
+function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (char) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char,
+  );
+}

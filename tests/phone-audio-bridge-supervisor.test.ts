@@ -30,9 +30,7 @@ function makeSupervisor(options: {
     logPath: 'NUL',
     checkHealth: options.health,
     ...(options.spawn ? { spawnProcess: options.spawn } : {}),
-    ...(options.onStatus
-      ? { onStatus: (status) => options.onStatus?.(status.state) }
-      : {}),
+    ...(options.onStatus ? { onStatus: (status) => options.onStatus?.(status.state) } : {}),
     monitorMs: 50,
     startupPollMs: 10,
     startupGraceMs: 100,

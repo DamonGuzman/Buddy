@@ -115,7 +115,11 @@ export const SPAWN_AGENT_TOOL: ToolDefinition = {
     type: 'object',
     properties: {
       task: { type: 'string', description: 'A clear self-contained one or two sentence task.' },
-      why: { type: 'string', description: 'Optional screen or conversation context that resolves references like this or that.' },
+      why: {
+        type: 'string',
+        description:
+          'Optional screen or conversation context that resolves references like this or that.',
+      },
     },
     required: ['task'],
   },
@@ -143,25 +147,37 @@ export const USE_COMPUTER_TOOL: ToolDefinition = {
   name: 'use_computer',
   description:
     'Ask the gpt-5.6-sol operator to click or use the keyboard for the user. You only pass the ' +
-    'user\'s intended outcome; Sol independently inspects fresh screenshots and decides every action.',
+    "user's intended outcome; Sol independently inspects fresh screenshots and decides every action.",
   parameters: {
     type: 'object',
     properties: {
-      task: { type: 'string', description: 'The user\'s requested computer outcome in plain language.' },
+      task: {
+        type: 'string',
+        description: "The user's requested computer outcome in plain language.",
+      },
     },
     required: ['task'],
   },
 };
 
 /** System instructions for session.update (consumed by realtime/session.ts). */
-export function getSessionInstructions(agentModeAvailable = false, computerUseAvailable = false): string {
-  return SYSTEM_PROMPT + PLATFORM_REMINDER_PROMPT +
+export function getSessionInstructions(
+  agentModeAvailable = false,
+  computerUseAvailable = false,
+): string {
+  return (
+    SYSTEM_PROMPT +
+    PLATFORM_REMINDER_PROMPT +
     (agentModeAvailable ? AGENT_AVAILABLE_PROMPT : AGENT_UNAVAILABLE_PROMPT) +
-    (computerUseAvailable ? COMPUTER_USE_PROMPT : '');
+    (computerUseAvailable ? COMPUTER_USE_PROMPT : '')
+  );
 }
 
 /** Tool definitions for session.update (consumed by realtime/session.ts). */
-export function getToolDefinitions(agentModeAvailable = false, computerUseAvailable = false): ToolDefinition[] {
+export function getToolDefinitions(
+  agentModeAvailable = false,
+  computerUseAvailable = false,
+): ToolDefinition[] {
   const tools = agentModeAvailable ? [...TOOLS, SPAWN_AGENT_TOOL, CHECK_AGENTS_TOOL] : [...TOOLS];
   if (computerUseAvailable) tools.push(USE_COMPUTER_TOOL);
   return tools;
@@ -204,10 +220,16 @@ honesty:
 - if you can't see something or aren't sure, say so plainly and suggest how to find out.`;
 
 /** System instructions for the text (Codex) path — consumed by conversation.ts. */
-export function getTextInstructions(agentModeAvailable = false, computerUseAvailable = false): string {
-  return TEXT_SYSTEM_PROMPT + PLATFORM_REMINDER_PROMPT +
+export function getTextInstructions(
+  agentModeAvailable = false,
+  computerUseAvailable = false,
+): string {
+  return (
+    TEXT_SYSTEM_PROMPT +
+    PLATFORM_REMINDER_PROMPT +
     (agentModeAvailable ? AGENT_AVAILABLE_PROMPT : AGENT_UNAVAILABLE_PROMPT) +
-    (computerUseAvailable ? COMPUTER_USE_PROMPT : '');
+    (computerUseAvailable ? COMPUTER_USE_PROMPT : '')
+  );
 }
 
 /**
@@ -215,7 +237,10 @@ export function getTextInstructions(agentModeAvailable = false, computerUseAvail
  * function-tool shape is structurally identical to the realtime one, so the
  * SAME definitions are reused for point_at and the background-agent controls.
  */
-export function getTextToolDefinitions(agentModeAvailable = false, computerUseAvailable = false): ToolDefinition[] {
+export function getTextToolDefinitions(
+  agentModeAvailable = false,
+  computerUseAvailable = false,
+): ToolDefinition[] {
   const tools = agentModeAvailable ? [...TOOLS, SPAWN_AGENT_TOOL, CHECK_AGENTS_TOOL] : [...TOOLS];
   if (computerUseAvailable) tools.push(USE_COMPUTER_TOOL);
   return tools;

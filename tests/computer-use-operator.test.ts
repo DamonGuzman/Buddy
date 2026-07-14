@@ -47,8 +47,15 @@ describe('ComputerUseOperator', () => {
       request += 1;
       if (request === 1) {
         return response([
-          { type: 'response.output_item.added', item: { id: 'fc1', type: 'function_call', call_id: 'call1', name: 'click_at' } },
-          { type: 'response.function_call_arguments.done', item_id: 'fc1', arguments: '{"screen":0,"x":25,"y":50,"label":"save"}' },
+          {
+            type: 'response.output_item.added',
+            item: { id: 'fc1', type: 'function_call', call_id: 'call1', name: 'click_at' },
+          },
+          {
+            type: 'response.function_call_arguments.done',
+            item_id: 'fc1',
+            arguments: '{"screen":0,"x":25,"y":50,"label":"save"}',
+          },
           { type: 'response.completed', response: { id: 'r1' } },
         ]);
       }
@@ -58,7 +65,9 @@ describe('ComputerUseOperator', () => {
       ]);
     });
     const input = {
-      click: async (...args: unknown[]) => { clicks.push(args); },
+      click: async (...args: unknown[]) => {
+        clicks.push(args);
+      },
       typeText: async () => undefined,
       pressKeys: async () => undefined,
     } as unknown as WindowsInputController;
@@ -68,15 +77,19 @@ describe('ComputerUseOperator', () => {
       input,
       initialCaptures: [CAPTURE],
       isAllowed: () => true,
-      capture: async () => { captures += 1; return [CAPTURE]; },
-      buildSession: (auth) => new CodexResponsesSession({
-        auth,
-        instructions: 'operator',
-        tools: [],
-        serviceTier: 'priority',
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-        env: {},
-      }),
+      capture: async () => {
+        captures += 1;
+        return [CAPTURE];
+      },
+      buildSession: (auth) =>
+        new CodexResponsesSession({
+          auth,
+          instructions: 'operator',
+          tools: [],
+          serviceTier: 'priority',
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+          env: {},
+        }),
     });
 
     const result = await operator.run('click save');
@@ -93,7 +106,12 @@ describe('ComputerUseOperator', () => {
 
   it('fails closed before inference when the setting is not allowed', async () => {
     const input = {} as WindowsInputController;
-    const operator = new ComputerUseOperator({ auth: AUTH, input, initialCaptures: [CAPTURE], isAllowed: () => false });
+    const operator = new ComputerUseOperator({
+      auth: AUTH,
+      input,
+      initialCaptures: [CAPTURE],
+      isAllowed: () => false,
+    });
     await expect(operator.run('click')).resolves.toMatchObject({ ok: false, actions: 0 });
   });
 });

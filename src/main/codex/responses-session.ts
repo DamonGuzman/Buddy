@@ -237,10 +237,7 @@ export class CodexResponsesSession {
   }
 
   /** Send a new user turn with the complete client-side history for memory. */
-  async submit(
-    turn: CodexUserTurn,
-    cb: CodexResponsesCallbacks = {},
-  ): Promise<CodexTurnResult> {
+  async submit(turn: CodexUserTurn, cb: CodexResponsesCallbacks = {}): Promise<CodexTurnResult> {
     const userItem = this.buildUserItem(turn);
     const result = await this.runRequest([...this.history, userItem], cb);
     if (shouldCommit(result)) this.history.push(userItem, ...result.outputItems);
@@ -537,7 +534,8 @@ export class CodexResponsesSession {
       case 'response.output_text.done': {
         const itemId = str(evt['item_id']);
         state.markOutput(itemId, 'message');
-        const text = typeof evt['text'] === 'string' ? evt['text'] : (state.textAccum.get(itemId) ?? '');
+        const text =
+          typeof evt['text'] === 'string' ? evt['text'] : (state.textAccum.get(itemId) ?? '');
         state.textAccum.set(itemId, text);
         state.textDone.add(itemId);
         cb.onTextDone?.(itemId, text);

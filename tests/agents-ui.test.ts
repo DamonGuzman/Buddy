@@ -119,9 +119,9 @@ describe('helperPhase / nextHelperTransition (celebrate, then leave)', () => {
 
   it('viewed-in-panel and cancelled helpers are gone immediately', () => {
     expect(helperPhase({ ...done, unseen: false }, NOW)).toBe('gone');
-    expect(
-      helperPhase(agent({ status: 'cancelled', unseen: true, finishedAt: FIN }), NOW),
-    ).toBe('gone');
+    expect(helperPhase(agent({ status: 'cancelled', unseen: true, finishedAt: FIN }), NOW)).toBe(
+      'gone',
+    );
   });
 
   it('keepId freezes the hovered helper at settled', () => {
@@ -204,7 +204,9 @@ describe('helperStatus (non-technical copy)', () => {
   });
 
   it('failed/timed_out read as friendly trouble, queued as waiting', () => {
-    expect(helperStatus(agent({ status: 'failed', error: 'the web search service said no' }))).toMatchObject({
+    expect(
+      helperStatus(agent({ status: 'failed', error: 'the web search service said no' })),
+    ).toMatchObject({
       kind: 'trouble',
       line: 'the web search service said no',
     });
@@ -226,7 +228,10 @@ describe('elapsedPhrase / sourcesPhrase / truncate', () => {
       'working for 3 minutes',
     );
     expect(
-      elapsedPhrase(agent({ status: 'done', createdAt: NOW - 50_000, finishedAt: NOW - 10_000 }), NOW),
+      elapsedPhrase(
+        agent({ status: 'done', createdAt: NOW - 50_000, finishedAt: NOW - 10_000 }),
+        NOW,
+      ),
     ).toBe('took under a minute');
     expect(
       elapsedPhrase(
@@ -239,9 +244,7 @@ describe('elapsedPhrase / sourcesPhrase / truncate', () => {
   it('counts places, not "sources"', () => {
     expect(sourcesPhrase(agent({}))).toBeNull();
     expect(sourcesPhrase(agent({ sources: ['a'] }))).toBe('checked 1 place on the web');
-    expect(sourcesPhrase(agent({ sources: ['a', 'b', 'c'] }))).toBe(
-      'checked 3 places on the web',
-    );
+    expect(sourcesPhrase(agent({ sources: ['a', 'b', 'c'] }))).toBe('checked 3 places on the web');
   });
 
   it('truncate collapses whitespace and appends an ellipsis', () => {

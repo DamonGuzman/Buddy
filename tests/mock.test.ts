@@ -10,7 +10,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 
 const require = createRequire(import.meta.url);
-const mock = require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
+const mock =
+  require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
 type MockServer = Awaited<ReturnType<typeof mock.createMockServer>>;
 
 interface AnyEvent {
@@ -22,7 +23,8 @@ interface AnyEvent {
 class RawClient {
   events: AnyEvent[] = [];
   private ws: WebSocket;
-  private waiters: Array<{ predicate: (e: AnyEvent) => boolean; resolve: (e: AnyEvent) => void }> = [];
+  private waiters: Array<{ predicate: (e: AnyEvent) => boolean; resolve: (e: AnyEvent) => void }> =
+    [];
 
   constructor(url: string) {
     this.ws = new WebSocket(url);
@@ -69,7 +71,8 @@ describe('tone synthesis', () => {
     expect(seconds).toBeGreaterThan(1.2);
     expect(seconds).toBeLessThan(1.8);
     let maxAbs = 0;
-    for (let i = 0; i < tone.length; i += 2) maxAbs = Math.max(maxAbs, Math.abs(tone.readInt16LE(i)));
+    for (let i = 0; i < tone.length; i += 2)
+      maxAbs = Math.max(maxAbs, Math.abs(tone.readInt16LE(i)));
     expect(maxAbs).toBeGreaterThan(3000); // audible
     expect(maxAbs).toBeLessThan(16000); // moderate volume
   });
@@ -108,7 +111,10 @@ describe('mock realtime server', () => {
         type: 'message',
         role: 'user',
         content: [
-          { type: 'input_text', text: 'context: 1 screenshot(s) attached. screen0 is 1000x600 pixels.' },
+          {
+            type: 'input_text',
+            text: 'context: 1 screenshot(s) attached. screen0 is 1000x600 pixels.',
+          },
           { type: 'input_image', image_url: 'data:image/jpeg;base64,AAAA' },
           { type: 'input_text', text: 'where is the button?' },
         ],
@@ -161,7 +167,11 @@ describe('mock realtime server', () => {
 
     client.send({
       type: 'conversation.item.create',
-      item: { type: 'function_call_output', call_id: String(call['call_id']), output: '{"ok":true}' },
+      item: {
+        type: 'function_call_output',
+        call_id: String(call['call_id']),
+        output: '{"ok":true}',
+      },
     });
     client.send({ type: 'response.create' });
     await client.waitFor(
@@ -242,8 +252,7 @@ describe('mock realtime server', () => {
     ).toBe(false);
     await client.waitFor(
       (e) =>
-        e.type === 'response.done' &&
-        (e['response'] as { status: string }).status === 'completed',
+        e.type === 'response.done' && (e['response'] as { status: string }).status === 'completed',
     );
     client.close();
   });
@@ -252,7 +261,11 @@ describe('mock realtime server', () => {
     const client = await connect();
     client.send({
       type: 'conversation.item.create',
-      item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'error please' }] },
+      item: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'error please' }],
+      },
     });
     client.send({ type: 'response.create' });
     const err = await client.waitFor((e) => e.type === 'error');
@@ -264,7 +277,10 @@ describe('mock realtime server', () => {
 
   it('committed audio with no text gets the canned nudge', async () => {
     const client = await connect();
-    client.send({ type: 'input_audio_buffer.append', audio: Buffer.alloc(4800).toString('base64') });
+    client.send({
+      type: 'input_audio_buffer.append',
+      audio: Buffer.alloc(4800).toString('base64'),
+    });
     client.send({ type: 'input_audio_buffer.commit' });
     const transcription = await client.waitFor(
       (e) => e.type === 'conversation.item.input_audio_transcription.completed',

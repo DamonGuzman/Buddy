@@ -6,77 +6,182 @@
      window.screenX/screenY + chrome height), and POSTs the ground truth to
      the Clicky debug server (?token= and optional ?port= query params). -->
 <html lang="en">
-<head>
-<meta charset="utf-8" />
-<title>Scribble — untitled document</title>
-<style>
-  * { margin: 0; box-sizing: border-box; font-family: "Segoe UI", sans-serif; }
-  body { background: #f4f6f9; height: 100vh; display: flex; flex-direction: column; }
-  .menubar { background: #ffffff; border-bottom: 1px solid #d9dee7; padding: 10px 24px; display: flex; gap: 28px; font-size: 20px; color: #333; }
-  .menubar span { cursor: default; }
-  .toolbar { background: #ffffff; border-bottom: 1px solid #d9dee7; padding: 18px 24px; display: flex; gap: 24px; align-items: center; }
-  .tbtn { display: flex; align-items: center; gap: 12px; font-size: 24px; padding: 16px 30px; border-radius: 10px; border: 2px solid transparent; cursor: pointer; color: #fff; }
-  .tbtn .ic { font-size: 28px; }
-  #btn-save { background: #2563eb; }
-  #btn-open { background: #059669; }
-  #btn-export { background: #d97706; }
-  #btn-settings { background: #7c3aed; }
-  #btn-share { background: #db2777; }
-  .editor { flex: 1; margin: 32px auto; width: 62%; background: #ffffff; border: 1px solid #d9dee7; border-radius: 8px; padding: 48px; font-size: 22px; line-height: 1.7; color: #444; }
-  .editor h1 { color: #222; margin-bottom: 18px; }
-</style>
-</head>
-<body>
-  <nav class="menubar" id="menubar">
-    <span id="menu-file" data-target="menu-file" data-desc="the File menu">File</span>
-    <span>Edit</span><span>View</span><span>Insert</span><span>Help</span>
-  </nav>
-  <div class="toolbar">
-    <button class="tbtn" id="btn-save" data-target="save" data-desc="the save button in the toolbar"><span class="ic">&#128190;</span>Save</button>
-    <button class="tbtn" id="btn-open" data-target="open" data-desc="the open button in the toolbar"><span class="ic">&#128194;</span>Open</button>
-    <button class="tbtn" id="btn-export" data-target="export" data-desc="the export button in the toolbar"><span class="ic">&#8686;</span>Export</button>
-    <button class="tbtn" id="btn-settings" data-target="settings" data-desc="the settings button in the toolbar"><span class="ic">&#9881;</span>Settings</button>
-    <button class="tbtn" id="btn-share" data-target="share" data-desc="the share button in the toolbar"><span class="ic">&#128279;</span>Share</button>
-  </div>
-  <main class="editor">
-    <h1>Quarterly planning notes</h1>
-    <p>The launch checklist still needs owners for the migration steps. Ana volunteered to
-    draft the rollout note, and the beta group meets Thursday to review the pricing page.
-    Remember to export the final copy before the review.</p>
-  </main>
-<script>
-  const SCENE = 'app-toolbar';
-  const q = new URLSearchParams(location.search);
-  const token = q.get('token') || '';
-  const port = q.get('port') || '8199';
-  function report() {
-    const chromeY = window.outerHeight - window.innerHeight;
-    const chromeX = Math.round((window.outerWidth - window.innerWidth) / 2);
-    const targets = [...document.querySelectorAll('[data-target]')].map((el) => {
-      const r = el.getBoundingClientRect();
-      return {
-        name: el.dataset.target,
-        desc: el.dataset.desc || el.dataset.target,
-        rect: {
-          x: Math.round(window.screenX + chromeX + r.left),
-          y: Math.round(window.screenY + chromeY + r.top),
-          width: Math.round(r.width),
-          height: Math.round(r.height),
-        },
-      };
-    });
-    fetch('http://127.0.0.1:' + port + '/eval/ground-truth?token=' + encodeURIComponent(token), {
-      method: 'POST',
-      mode: 'no-cors',
-      body: JSON.stringify({
-        scene: SCENE,
-        dpr: window.devicePixelRatio,
-        window: { screenX, screenY, innerWidth, innerHeight, outerWidth, outerHeight },
-        targets,
-      }),
-    }).catch(() => {});
-  }
-  window.addEventListener('load', () => { setTimeout(report, 400); setTimeout(report, 1500); });
-</script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <title>Scribble — untitled document</title>
+    <style>
+      * {
+        margin: 0;
+        box-sizing: border-box;
+        font-family: 'Segoe UI', sans-serif;
+      }
+      body {
+        background: #f4f6f9;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .menubar {
+        background: #ffffff;
+        border-bottom: 1px solid #d9dee7;
+        padding: 10px 24px;
+        display: flex;
+        gap: 28px;
+        font-size: 20px;
+        color: #333;
+      }
+      .menubar span {
+        cursor: default;
+      }
+      .toolbar {
+        background: #ffffff;
+        border-bottom: 1px solid #d9dee7;
+        padding: 18px 24px;
+        display: flex;
+        gap: 24px;
+        align-items: center;
+      }
+      .tbtn {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 24px;
+        padding: 16px 30px;
+        border-radius: 10px;
+        border: 2px solid transparent;
+        cursor: pointer;
+        color: #fff;
+      }
+      .tbtn .ic {
+        font-size: 28px;
+      }
+      #btn-save {
+        background: #2563eb;
+      }
+      #btn-open {
+        background: #059669;
+      }
+      #btn-export {
+        background: #d97706;
+      }
+      #btn-settings {
+        background: #7c3aed;
+      }
+      #btn-share {
+        background: #db2777;
+      }
+      .editor {
+        flex: 1;
+        margin: 32px auto;
+        width: 62%;
+        background: #ffffff;
+        border: 1px solid #d9dee7;
+        border-radius: 8px;
+        padding: 48px;
+        font-size: 22px;
+        line-height: 1.7;
+        color: #444;
+      }
+      .editor h1 {
+        color: #222;
+        margin-bottom: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="menubar" id="menubar">
+      <span id="menu-file" data-target="menu-file" data-desc="the File menu">File</span>
+      <span>Edit</span><span>View</span><span>Insert</span><span>Help</span>
+    </nav>
+    <div class="toolbar">
+      <button
+        class="tbtn"
+        id="btn-save"
+        data-target="save"
+        data-desc="the save button in the toolbar"
+      >
+        <span class="ic">&#128190;</span>Save
+      </button>
+      <button
+        class="tbtn"
+        id="btn-open"
+        data-target="open"
+        data-desc="the open button in the toolbar"
+      >
+        <span class="ic">&#128194;</span>Open
+      </button>
+      <button
+        class="tbtn"
+        id="btn-export"
+        data-target="export"
+        data-desc="the export button in the toolbar"
+      >
+        <span class="ic">&#8686;</span>Export
+      </button>
+      <button
+        class="tbtn"
+        id="btn-settings"
+        data-target="settings"
+        data-desc="the settings button in the toolbar"
+      >
+        <span class="ic">&#9881;</span>Settings
+      </button>
+      <button
+        class="tbtn"
+        id="btn-share"
+        data-target="share"
+        data-desc="the share button in the toolbar"
+      >
+        <span class="ic">&#128279;</span>Share
+      </button>
+    </div>
+    <main class="editor">
+      <h1>Quarterly planning notes</h1>
+      <p>
+        The launch checklist still needs owners for the migration steps. Ana volunteered to draft
+        the rollout note, and the beta group meets Thursday to review the pricing page. Remember to
+        export the final copy before the review.
+      </p>
+    </main>
+    <script>
+      const SCENE = 'app-toolbar';
+      const q = new URLSearchParams(location.search);
+      const token = q.get('token') || '';
+      const port = q.get('port') || '8199';
+      function report() {
+        const chromeY = window.outerHeight - window.innerHeight;
+        const chromeX = Math.round((window.outerWidth - window.innerWidth) / 2);
+        const targets = [...document.querySelectorAll('[data-target]')].map((el) => {
+          const r = el.getBoundingClientRect();
+          return {
+            name: el.dataset.target,
+            desc: el.dataset.desc || el.dataset.target,
+            rect: {
+              x: Math.round(window.screenX + chromeX + r.left),
+              y: Math.round(window.screenY + chromeY + r.top),
+              width: Math.round(r.width),
+              height: Math.round(r.height),
+            },
+          };
+        });
+        fetch(
+          'http://127.0.0.1:' + port + '/eval/ground-truth?token=' + encodeURIComponent(token),
+          {
+            method: 'POST',
+            mode: 'no-cors',
+            body: JSON.stringify({
+              scene: SCENE,
+              dpr: window.devicePixelRatio,
+              window: { screenX, screenY, innerWidth, innerHeight, outerWidth, outerHeight },
+              targets,
+            }),
+          },
+        ).catch(() => {});
+      }
+      window.addEventListener('load', () => {
+        setTimeout(report, 400);
+        setTimeout(report, 1500);
+      });
+    </script>
+  </body>
 </html>

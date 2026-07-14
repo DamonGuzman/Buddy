@@ -26,8 +26,14 @@
     { "id": "tricky--save", "text": "point at the save button, not save as" },
     { "id": "tricky--save-as", "text": "point at the save as button" },
     { "id": "tricky--small-icon", "text": "point at the small bell notification icon" },
-    { "id": "tricky--edge-button", "text": "point at the help button in the bottom right corner of the screen" },
+    {
+      "id": "tricky--edge-button",
+      "text": "point at the help button in the bottom right corner of the screen"
+    },
 
-    { "id": "calibration--calibration-center", "text": "point at the big square in the center of the screen" }
+    {
+      "id": "calibration--calibration-center",
+      "text": "point at the big square in the center of the screen"
+    }
   ]
 }

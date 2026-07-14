@@ -116,9 +116,20 @@ export function Header(props: HeaderProps): React.JSX.Element {
         {view === 'chat' ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button type="button" variant="ghost" size="icon" aria-label="agents" className="relative size-7 text-muted-foreground" onClick={() => onView('agents')}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="agents"
+                className="relative size-7 text-muted-foreground"
+                onClick={() => onView('agents')}
+              >
                 <Bot className="size-4" />
-                {agentCount > 0 ? <span className="absolute -top-1 -right-1 grid min-w-4 place-items-center rounded-full bg-clicky px-1 text-[9px] leading-4 text-primary-foreground">{agentCount}</span> : null}
+                {agentCount > 0 ? (
+                  <span className="absolute -top-1 -right-1 grid min-w-4 place-items-center rounded-full bg-clicky px-1 text-[9px] leading-4 text-primary-foreground">
+                    {agentCount}
+                  </span>
+                ) : null}
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">agents</TooltipContent>
@@ -131,7 +142,10 @@ export function Header(props: HeaderProps): React.JSX.Element {
               variant="ghost"
               size="icon"
               aria-label={view !== 'chat' ? 'back to chat' : 'settings'}
-              className={cn('size-7 text-muted-foreground', view !== 'chat' && 'bg-accent text-accent-foreground')}
+              className={cn(
+                'size-7 text-muted-foreground',
+                view !== 'chat' && 'bg-accent text-accent-foreground',
+              )}
               onClick={() => onView(view === 'chat' ? 'settings' : 'chat')}
             >
               {view !== 'chat' ? <ArrowLeft className="size-4" /> : <Settings className="size-4" />}

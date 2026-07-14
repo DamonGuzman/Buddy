@@ -16,6 +16,7 @@ typed action** and is always signposted by a visible indicator.
 ## 2. MVP scope
 
 **In:**
+
 - Hold-to-talk global hotkey (default **Ctrl+Alt**, both held; release = send). Only the LEFT
   Alt participates — Right Alt is AltGr on international layouts and never triggers.
 - Opt-in full realtime mode: press the hotkey once to connect and keep the mic streaming with
@@ -44,6 +45,7 @@ typed action** and is always signposted by a visible indicator.
 - **Mock Realtime server** (local WS, speaks the same protocol subset) + **debug harness** for QA.
 
 **Out (stub or defer):**
+
 - Agent mode ("Buddy, agent") — main-process, read-only research agents with hosted web search,
   guarded web fetch, persisted panel results, cancellation, and voice handoff/return.
 - Cloudflare Worker / ephemeral-token proxy (MVP is local-key, single user).
@@ -110,7 +112,7 @@ tests/               vitest unit tests (coords, protocol framing, settings, hotk
 ## 6. Coordinate contract (the hard part — get this exact)
 
 - Each capture produces, per display: `{ screenIndex, displayId, imageW, imageH, displayBounds
-  (DIP), scaleFactor }`. Images are labeled `screen0..N` in the prompt, with the cursor's display
+(DIP), scaleFactor }`. Images are labeled `screen0..N` in the prompt, with the cursor's display
   flagged as active.
 - The model is told image dimensions and must call `point_at` with **pixel coords in that
   screenshot's space** plus the screen index.

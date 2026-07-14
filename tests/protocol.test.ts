@@ -152,7 +152,9 @@ describe('validatePointAtArgs', () => {
   ];
 
   it('accepts well-formed args unchanged', () => {
-    expect(validatePointAtArgs({ x: 100, y: 200, label: 'save button', screen: 1 }, capture)).toEqual({
+    expect(
+      validatePointAtArgs({ x: 100, y: 200, label: 'save button', screen: 1 }, capture),
+    ).toEqual({
       x: 100,
       y: 200,
       label: 'save button',
@@ -219,7 +221,9 @@ describe('validatePointAtArgs', () => {
   });
 
   it('drops non-string labels and caps long ones', () => {
-    expect(validatePointAtArgs({ x: 1, y: 1, screen: 0, label: 42 }, capture)?.label).toBeUndefined();
+    expect(
+      validatePointAtArgs({ x: 1, y: 1, screen: 0, label: 42 }, capture)?.label,
+    ).toBeUndefined();
     const long = validatePointAtArgs({ x: 1, y: 1, screen: 0, label: 'a'.repeat(500) }, capture);
     expect(long?.label?.length).toBe(120);
   });
@@ -258,10 +262,14 @@ describe('persona tool definition', () => {
       'check_agents',
       'use_computer',
     ]);
-    const computerTool = getToolDefinitions(true, true).find((tool) => tool.name === 'use_computer');
+    const computerTool = getToolDefinitions(true, true).find(
+      (tool) => tool.name === 'use_computer',
+    );
     expect(computerTool?.parameters).not.toHaveProperty('properties.x');
     expect(computerTool?.parameters).not.toHaveProperty('properties.keys');
-    expect(getSessionInstructions(true, true)).toContain('you have no direct click or keyboard tools');
+    expect(getSessionInstructions(true, true)).toContain(
+      'you have no direct click or keyboard tools',
+    );
     expect(getTextToolDefinitions(true).map((t) => t.name)).toEqual([
       'point_at',
       'spawn_agent',

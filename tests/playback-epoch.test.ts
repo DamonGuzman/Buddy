@@ -18,7 +18,7 @@ describe('PlaybackEpochGate', () => {
     expect(gate.admitDelta(2)).toBe(true);
   });
 
-  it('drops a cancelled response\'s burst that arrives after the flush', () => {
+  it("drops a cancelled response's burst that arrives after the flush", () => {
     const gate = new PlaybackEpochGate();
     // Response A (epoch 0) starts; user barges in before any chunk arrived.
     gate.flush(1); // cancel bumps the epoch and flushes

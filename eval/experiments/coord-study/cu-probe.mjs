@@ -26,7 +26,8 @@ const model = args.model ?? 'computer-use-preview';
 const limit = args.limit ? Number(args.limit) : Infinity;
 const apiKey = getApiKey();
 const spec = JSON.parse(readFileSync(join(ROOT, 'layouts.json'), 'utf8'));
-const W = spec.width, H = spec.height;
+const W = spec.width,
+  H = spec.height;
 
 async function clickOnce(imageB64, ask) {
   const t0 = Date.now();
@@ -35,7 +36,14 @@ async function clickOnce(imageB64, ask) {
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
-      tools: [{ type: 'computer_use_preview', display_width: W, display_height: H, environment: 'windows' }],
+      tools: [
+        {
+          type: 'computer_use_preview',
+          display_width: W,
+          display_height: H,
+          environment: 'windows',
+        },
+      ],
       truncation: 'auto',
       input: [
         {
@@ -76,7 +84,11 @@ if (args.real !== undefined) {
   jobs.push({ layoutName: 'real', imageFile: 'real-plain.jpg', targets: rt.targets });
 } else {
   for (const layoutName of (args.layouts ?? 'A').split(',')) {
-    jobs.push({ layoutName, imageFile: `${layoutName}-plain.jpg`, targets: spec.layouts[layoutName].targets });
+    jobs.push({
+      layoutName,
+      imageFile: `${layoutName}-plain.jpg`,
+      targets: spec.layouts[layoutName].targets,
+    });
   }
 }
 
@@ -105,7 +117,9 @@ for (const { layoutName, imageFile, targets: allTargets } of jobs) {
       rec.latencyMs = res.latencyMs;
       rec.status = 'completed';
       if (res.usage) usage.push(res.usage);
-      console.log(`  ${t.id.padEnd(8)} gt(${t.cx},${t.cy}) -> ${rec.pred ? `(${rec.pred.x},${rec.pred.y})` : 'NO-CLICK'} err=${rec.err !== undefined ? Math.round(rec.err) + 'px' : '-'}`);
+      console.log(
+        `  ${t.id.padEnd(8)} gt(${t.cx},${t.cy}) -> ${rec.pred ? `(${rec.pred.x},${rec.pred.y})` : 'NO-CLICK'} err=${rec.err !== undefined ? Math.round(rec.err) + 'px' : '-'}`,
+      );
     } catch (err) {
       rec.error = String(err.message ?? err);
       rec.status = 'failed';
@@ -115,9 +129,21 @@ for (const { layoutName, imageFile, targets: allTargets } of jobs) {
   }
   const outPath = join(ROOT, 'results', `${model}--cu-click--${layoutName}.json`);
   mkdirSync(dirname(outPath), { recursive: true });
-  writeFileSync(outPath, JSON.stringify({
-    model, condition: 'cu-click', layout: layoutName, imageDims: { W, H },
-    timestamp: new Date().toISOString(), records, usage,
-  }, null, 2));
+  writeFileSync(
+    outPath,
+    JSON.stringify(
+      {
+        model,
+        condition: 'cu-click',
+        layout: layoutName,
+        imageDims: { W, H },
+        timestamp: new Date().toISOString(),
+        records,
+        usage,
+      },
+      null,
+      2,
+    ),
+  );
   console.log(`  -> ${outPath}`);
 }

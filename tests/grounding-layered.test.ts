@@ -46,9 +46,12 @@ const ctl = vi.hoisted(() => {
     restQuota: false,
     restUsedPercent: null as { primary: number | null; secondary: number | null } | null,
     // M13-core: controllable Codex sign-in state for resolveGroundingAuth.
-    codexInfo: null as
-      | { accessToken: string; accountId: string; planType: string; expiresAt: number }
-      | null,
+    codexInfo: null as {
+      accessToken: string;
+      accountId: string;
+      planType: string;
+      expiresAt: number;
+    } | null,
   };
 });
 
@@ -130,7 +133,8 @@ vi.mock('../src/main/windows/overlay', () => ({}));
 const { Conversation } = await import('../src/main/conversation');
 
 const require = createRequire(import.meta.url);
-const mock = require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
+const mock =
+  require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
 type MockServer = Awaited<ReturnType<typeof mock.createMockServer>>;
 
 // ---------------------------------------------------------------------------
@@ -267,7 +271,7 @@ describe('Conversation: layered grounding dispatch (M10)', () => {
     expect(cmd.points[0]!.label).toBe('the button');
   });
 
-  it('REST null -> raw model point (today\'s fallback)', async () => {
+  it("REST null -> raw model point (today's fallback)", async () => {
     const pointers: PointerCommand[] = [];
     const conversation = makeConversation(pointers);
     const cmd = await askAndAwaitPointer(conversation, pointers);

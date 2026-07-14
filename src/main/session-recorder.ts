@@ -26,7 +26,8 @@ import type { CaptureResult } from './capture';
 import type { Settings } from '../shared/types';
 
 const FORMAT_VERSION = 1;
-const SECRET_KEY = /^(?:api.?key(?:encrypted)?|authorization|cookie|password|secret|.*[_-]?token)$/i;
+const SECRET_KEY =
+  /^(?:api.?key(?:encrypted)?|authorization|cookie|password|secret|.*[_-]?token)$/i;
 const SECRET_TEXT = /\b(?:bearer\s+\S+|sk-[a-z0-9_-]{8,})\b/gi;
 
 export type AudioDirection = 'input' | 'output';
@@ -264,7 +265,10 @@ export class SessionRecorder {
 }
 
 function fileTimestamp(date: Date): string {
-  return date.toISOString().replaceAll(':', '-').replace(/\.\d{3}Z$/, 'Z');
+  return date
+    .toISOString()
+    .replaceAll(':', '-')
+    .replace(/\.\d{3}Z$/, 'Z');
 }
 
 function safeSegment(value: string): string {

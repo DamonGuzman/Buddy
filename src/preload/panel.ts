@@ -5,12 +5,7 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 import type { IpcRendererEvent } from 'electron';
-import type {
-  MainToPanelChannel,
-  MainToPanelEvents,
-  PanelApi,
-  Unsubscribe,
-} from '../shared/ipc';
+import type { MainToPanelChannel, MainToPanelEvents, PanelApi, Unsubscribe } from '../shared/ipc';
 
 function subscribe<C extends MainToPanelChannel>(
   channel: C,

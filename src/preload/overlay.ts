@@ -16,8 +16,7 @@ function subscribe<C extends MainToOverlayChannel>(
   channel: C,
   cb: (payload: MainToOverlayEvents[C]) => void,
 ): Unsubscribe {
-  const listener = (_event: IpcRendererEvent, payload: MainToOverlayEvents[C]): void =>
-    cb(payload);
+  const listener = (_event: IpcRendererEvent, payload: MainToOverlayEvents[C]): void => cb(payload);
   ipcRenderer.on(channel, listener);
   return () => ipcRenderer.removeListener(channel, listener);
 }

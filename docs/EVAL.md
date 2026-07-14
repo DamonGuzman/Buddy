@@ -11,14 +11,14 @@ Node 24, production build (`npm run build`).
 
 ## 1. Architecture
 
-| Piece | Where | What it does |
-|---|---|---|
-| Fake-mic injection | `src/main/index.ts` (bootstrap) | `CLICKY_FAKE_MIC=<path.wav>` routes Chromium's `getUserMedia` to a fake capture device playing that WAV (16-bit PCM, mono 24kHz preferred). Real renderer capture path end-to-end; only the physical microphone is substituted. Chromium **loops** the file; the push-to-talk hold window defines what is sent (utterances ~2–3s, hold ~3.5s). |
-| Playback tap | `pcm-player.worklet.js` → `playback.ts` → IPC `audio:playback-stats` / `audio:playback-ring` | The worklet accounts every sample it actually renders per response item (`samplesPlayed`, `rms`, `peak`, `underruns`, first-played wall time) and streams played Float32 back; the panel keeps a ~15s ring buffer of PLAYED audio and reports to main on first play, ~1s cadence, and item end. |
-| Turn timings | `src/main/conversation.ts` (`TurnTimings`) | Per-turn epoch-ms marks: hold start/end (or ask), capture done, commit sent, first user/assistant transcript, first audio delta, **first audio actually played**, first tool call, response done, chunk counts, `bargeInStopMs`. Last 20 turns kept. |
-| Debug routes | `src/main/debug-server.ts` | `GET /timings`, `GET /audio/output-stats`, `GET /audio/last-output.wav` (ring as 24k mono s16 WAV), `POST/GET /eval/ground-truth`. Light auth: when `CLICKY_DEBUG_TOKEN` is set, every route requires `X-Debug-Token` (or `?token=`). `CLICKY_DEBUG_PORT` overrides 8199 for parallel instances. |
-| Eval scenes | `eval/scenes/*.html` | Self-contained pages; every `[data-target]` measures its rect onload, converts to **global DIP** (CSS px == DIP at default zoom, offset by `screenX/screenY` + window chrome), and POSTs ground truth to the debug server. |
-| Runners | `eval/run.mjs`, `eval/voice-roundtrip.mjs`, `eval/verify-audio.mjs`, `eval/tts.mjs` | See §3. |
+| Piece              | Where                                                                                        | What it does                                                                                                                                                                                                                                                                                                                                   |
+| ------------------ | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fake-mic injection | `src/main/index.ts` (bootstrap)                                                              | `CLICKY_FAKE_MIC=<path.wav>` routes Chromium's `getUserMedia` to a fake capture device playing that WAV (16-bit PCM, mono 24kHz preferred). Real renderer capture path end-to-end; only the physical microphone is substituted. Chromium **loops** the file; the push-to-talk hold window defines what is sent (utterances ~2–3s, hold ~3.5s). |
+| Playback tap       | `pcm-player.worklet.js` → `playback.ts` → IPC `audio:playback-stats` / `audio:playback-ring` | The worklet accounts every sample it actually renders per response item (`samplesPlayed`, `rms`, `peak`, `underruns`, first-played wall time) and streams played Float32 back; the panel keeps a ~15s ring buffer of PLAYED audio and reports to main on first play, ~1s cadence, and item end.                                                |
+| Turn timings       | `src/main/conversation.ts` (`TurnTimings`)                                                   | Per-turn epoch-ms marks: hold start/end (or ask), capture done, commit sent, first user/assistant transcript, first audio delta, **first audio actually played**, first tool call, response done, chunk counts, `bargeInStopMs`. Last 20 turns kept.                                                                                           |
+| Debug routes       | `src/main/debug-server.ts`                                                                   | `GET /timings`, `GET /audio/output-stats`, `GET /audio/last-output.wav` (ring as 24k mono s16 WAV), `POST/GET /eval/ground-truth`. Light auth: when `CLICKY_DEBUG_TOKEN` is set, every route requires `X-Debug-Token` (or `?token=`). `CLICKY_DEBUG_PORT` overrides 8199 for parallel instances.                                               |
+| Eval scenes        | `eval/scenes/*.html`                                                                         | Self-contained pages; every `[data-target]` measures its rect onload, converts to **global DIP** (CSS px == DIP at default zoom, offset by `screenX/screenY` + window chrome), and POSTs ground truth to the debug server.                                                                                                                     |
+| Runners            | `eval/run.mjs`, `eval/voice-roundtrip.mjs`, `eval/verify-audio.mjs`, `eval/tts.mjs`          | See §3.                                                                                                                                                                                                                                                                                                                                        |
 
 ## 2. Metrics — targets vs. measured
 
@@ -28,25 +28,25 @@ Mock column measured 2026-07-12 (results in `eval/results/2026-07-12T07-31-18-vo
 
 ### 2a. Voice round-trip (×5, fake mic `ask-point-save.wav`, 3.5s hold) — medians
 
-| Metric | Target | Mock | Pass | Live (2026-07-12, gpt-realtime-2.1-mini) |
-|---|---|---|---|---|
-| Audio IN: mic chunks per hold | > 0 | 57 chunks | PASS | 57 chunks — PASS |
-| Audio IN: committed audio per 3.5s hold | > 2.5s | 3.42 s | PASS | n/a (mock-only metric) — real ASR transcribed the WAV verbatim 5/5 — PASS |
-| Screenshot capture (kicked at hold-start) | < 1000ms | 411 ms | PASS | 589 ms — PASS |
-| Release → commit sent | < 100ms | 1 ms | PASS | 1 ms — PASS |
-| Release → first USER (ASR) transcript | report | n/a | | 449 ms (p90 568) |
-| Release → first audio delta (server overhead) | report | 570 ms | n/a (mock pacing) | **1496 ms** (p50 < 2.5s PASS; p90 incl. voice-pointing turns 2981 ms < 4s PASS) |
-| **First audio delta → first audio PLAYED** (our playback pipeline) | < 150ms | **10 ms** | PASS | 65 ms — PASS |
-| Release → response done | report | 787 ms | n/a (mock pacing) | 4136 ms (p90 4705) |
-| Played RMS | > 0.05 | 0.168 | PASS | 0.066 — PASS |
-| Underruns per turn | == 0 | 0 | PASS | 0 — PASS |
-| Spectral check (melody notes > 20dB over noise floor) | all 3 notes | 26.9 / 24.5 / 27.7 dB | PASS | n/a (speech, not the mock melody) — audible speech played 5/5 — PASS |
-| Played duration vs expected (5 turns × 1.4s melody) | ±15% | 7.14s ≈ 5.1 melodies | PASS | n/a (speech; drained in full each turn) |
+| Metric                                                             | Target      | Mock                  | Pass              | Live (2026-07-12, gpt-realtime-2.1-mini)                                        |
+| ------------------------------------------------------------------ | ----------- | --------------------- | ----------------- | ------------------------------------------------------------------------------- |
+| Audio IN: mic chunks per hold                                      | > 0         | 57 chunks             | PASS              | 57 chunks — PASS                                                                |
+| Audio IN: committed audio per 3.5s hold                            | > 2.5s      | 3.42 s                | PASS              | n/a (mock-only metric) — real ASR transcribed the WAV verbatim 5/5 — PASS       |
+| Screenshot capture (kicked at hold-start)                          | < 1000ms    | 411 ms                | PASS              | 589 ms — PASS                                                                   |
+| Release → commit sent                                              | < 100ms     | 1 ms                  | PASS              | 1 ms — PASS                                                                     |
+| Release → first USER (ASR) transcript                              | report      | n/a                   |                   | 449 ms (p90 568)                                                                |
+| Release → first audio delta (server overhead)                      | report      | 570 ms                | n/a (mock pacing) | **1496 ms** (p50 < 2.5s PASS; p90 incl. voice-pointing turns 2981 ms < 4s PASS) |
+| **First audio delta → first audio PLAYED** (our playback pipeline) | < 150ms     | **10 ms**             | PASS              | 65 ms — PASS                                                                    |
+| Release → response done                                            | report      | 787 ms                | n/a (mock pacing) | 4136 ms (p90 4705)                                                              |
+| Played RMS                                                         | > 0.05      | 0.168                 | PASS              | 0.066 — PASS                                                                    |
+| Underruns per turn                                                 | == 0        | 0                     | PASS              | 0 — PASS                                                                        |
+| Spectral check (melody notes > 20dB over noise floor)              | all 3 notes | 26.9 / 24.5 / 27.7 dB | PASS              | n/a (speech, not the mock melody) — audible speech played 5/5 — PASS            |
+| Played duration vs expected (5 turns × 1.4s melody)                | ±15%        | 7.14s ≈ 5.1 melodies  | PASS              | n/a (speech; drained in full each turn)                                         |
 
 ### 2b. Barge-in (×3: /ask a spoken response, hotkey press mid-speech)
 
-| Metric | Target | Mock | Pass | Live (2026-07-12) |
-|---|---|---|---|---|
+| Metric                                                | Target  | Mock  | Pass | Live (2026-07-12)                                                                     |
+| ----------------------------------------------------- | ------- | ----- | ---- | ------------------------------------------------------------------------------------- |
 | Cancel requested → playback actually stopped (median) | < 300ms | 25 ms | PASS | 16 ms (16/16/16) — PASS, no post-cancel bleed (next turn's delta→played stayed 65 ms) |
 
 Note: `bargeInStopMs` is now derived from the playback tap (`firstPlayedAt + samplesPlayed/rate`
@@ -57,18 +57,18 @@ a 4K display; the renderer itself stops rendering ~10-25ms after the press.
 
 ### 2c. Text turn (×3, `/ask "hello there friend"`) — medians
 
-| Metric | Target | Mock | Pass | Live (2026-07-12) |
-|---|---|---|---|---|
-| Capture (blocking, pre-send) | < 1000ms | 370 ms | PASS | 745 ms — PASS |
-| Ask → first audio delta | report | 895 ms | n/a (mock pacing) | 1972 ms |
-| First delta → first played | < 150ms | 9 ms | PASS | 141 ms — PASS |
-| Ask → response done | report | 1090 ms | n/a (mock pacing) | 3241 ms |
+| Metric                       | Target   | Mock    | Pass              | Live (2026-07-12) |
+| ---------------------------- | -------- | ------- | ----------------- | ----------------- |
+| Capture (blocking, pre-send) | < 1000ms | 370 ms  | PASS              | 745 ms — PASS     |
+| Ask → first audio delta      | report   | 895 ms  | n/a (mock pacing) | 1972 ms           |
+| First delta → first played   | < 150ms  | 9 ms    | PASS              | 141 ms — PASS     |
+| Ask → response done          | report   | 1090 ms | n/a (mock pacing) | 3241 ms           |
 
 ### 2d. Guard rails
 
-| Check | Target | Mock | Pass | Live (2026-07-12) |
-|---|---|---|---|---|
-| Short hold (100ms) | no turn created, state returns idle | no turn, idle | PASS | no turn, idle — PASS |
+| Check                               | Target                                    | Mock                          | Pass | Live (2026-07-12)                                    |
+| ----------------------------------- | ----------------------------------------- | ----------------------------- | ---- | ---------------------------------------------------- |
+| Short hold (100ms)                  | no turn created, state returns idle       | no turn, idle                 | PASS | no turn, idle — PASS                                 |
 | Silent hold (3.5s of `silence.wav`) | commits gracefully, reply, no error state | 3.42s committed, mock replied | PASS | committed, model replied gracefully, no error — PASS |
 
 ### 2e. Pointing (20 targets across 5 scenes)
@@ -78,12 +78,12 @@ the mock run validates PLUMBING (pointer fires per turn, screenshot-px → globa
 ground-truth reporting, scoring math) — **not model accuracy**. The `calibration` scene's target
 covers the display center and MUST hit.
 
-| Check | Target | Mock | Pass | Live (2026-07-12) |
-|---|---|---|---|---|
-| Every ask produces a mapped pointer command | 20/20 | 20/20 (0 errors) | PASS | 20/20 after the persona no-refusal fix (8/20 refusal/timeout errors before it) — PASS |
-| Calibration target (display center) | hit | HIT, 0px error | PASS | HIT, **0px error** (model pointed exactly at 1280,720) — PASS |
-| Mapped point == display center on 2560×1440@150% | (1280,720) | (1280,720) every turn | PASS | n/a (real model points at real targets) |
-| Hit rate on real targets | ≥ 80% hit+near (live only) | 1 hit / 2 near / 17 miss (expected: center-pointing) | n/a on mock | mini: 2 hit / 3 near / 13 miss / 1 honest "can't see" on 19 scene targets (26% hit+near) — **FAIL** (model localization; labels correct on all 18 pointed — see §7.4) |
+| Check                                            | Target                     | Mock                                                 | Pass        | Live (2026-07-12)                                                                                                                                                     |
+| ------------------------------------------------ | -------------------------- | ---------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Every ask produces a mapped pointer command      | 20/20                      | 20/20 (0 errors)                                     | PASS        | 20/20 after the persona no-refusal fix (8/20 refusal/timeout errors before it) — PASS                                                                                 |
+| Calibration target (display center)              | hit                        | HIT, 0px error                                       | PASS        | HIT, **0px error** (model pointed exactly at 1280,720) — PASS                                                                                                         |
+| Mapped point == display center on 2560×1440@150% | (1280,720)                 | (1280,720) every turn                                | PASS        | n/a (real model points at real targets)                                                                                                                               |
+| Hit rate on real targets                         | ≥ 80% hit+near (live only) | 1 hit / 2 near / 17 miss (expected: center-pointing) | n/a on mock | mini: 2 hit / 3 near / 13 miss / 1 honest "can't see" on 19 scene targets (26% hit+near) — **FAIL** (model localization; labels correct on all 18 pointed — see §7.4) |
 
 Scoring: **hit** = mapped global-DIP point inside the target rect; **near** = within 40 DIP of
 the rect; **miss** otherwise; plus px error from rect center. Results:
@@ -140,13 +140,13 @@ durations 1.9–3.5s). Core: `ask-point-save`, `ask-what-screen`, `ask-point-two
 
 ## 5. Scene catalog (`eval/scenes/`)
 
-| Scene | Targets (`data-target`) | Notes |
-|---|---|---|
-| `calibration` | calibration-center | 40vw×34vh block over the display center; the mock MUST hit it (pipeline proof). |
-| `app-toolbar` | menu-file, save, open, export, settings, share | Fake editor chrome; large distinct colored toolbar buttons + menu bar. |
-| `form` | email, password, subscribe, submit | Labeled signup form; includes a small 26px checkbox. |
-| `shop` | search, cart, price, add-to-cart, reviews | Realistic product page; header search + cart icon, price, reviews link. |
-| `tricky` | save, save-as, small-icon, edge-button | Adjacent near-identical buttons, a 24px icon, a control at the screen corner. |
+| Scene         | Targets (`data-target`)                        | Notes                                                                           |
+| ------------- | ---------------------------------------------- | ------------------------------------------------------------------------------- |
+| `calibration` | calibration-center                             | 40vw×34vh block over the display center; the mock MUST hit it (pipeline proof). |
+| `app-toolbar` | menu-file, save, open, export, settings, share | Fake editor chrome; large distinct colored toolbar buttons + menu bar.          |
+| `form`        | email, password, subscribe, submit             | Labeled signup form; includes a small 26px checkbox.                            |
+| `shop`        | search, cart, price, add-to-cart, reviews      | Realistic product page; header search + cart icon, price, reviews link.         |
+| `tricky`      | save, save-as, small-icon, edge-button         | Adjacent near-identical buttons, a 24px icon, a control at the screen corner.   |
 
 Each page reports ground truth on load (twice, 400ms/1500ms) to
 `POST /eval/ground-truth?token=…&port=…` as `{scene, targets:[{name, desc, rect}]}` in global
@@ -185,14 +185,14 @@ voice turn, states settled idle. No session errors in any of the ~15 live app la
 
 Voice (n=5 round-trip + 4 voice-pointing turns), medians / p90:
 
-| Metric | p50 | p90 | Gate |
-|---|---:|---:|---|
-| release → commit | 1 ms | 2 ms | PASS (<100ms) |
-| release → first user (ASR) transcript | 449 ms | 568 ms | report |
-| release → first pointer (tool call, pointing asks) | 1306 ms | 2468 ms | report |
-| release → first audio delta | 1623 ms | 2981 ms | **PASS** (p50<2.5s, p90<4s) |
-| first delta → first played | 65 ms | 97 ms | PASS (<150ms) |
-| release → response done | 3911 ms | 4705 ms | report |
+| Metric                                             |     p50 |     p90 | Gate                        |
+| -------------------------------------------------- | ------: | ------: | --------------------------- |
+| release → commit                                   |    1 ms |    2 ms | PASS (<100ms)               |
+| release → first user (ASR) transcript              |  449 ms |  568 ms | report                      |
+| release → first pointer (tool call, pointing asks) | 1306 ms | 2468 ms | report                      |
+| release → first audio delta                        | 1623 ms | 2981 ms | **PASS** (p50<2.5s, p90<4s) |
+| first delta → first played                         |   65 ms |   97 ms | PASS (<150ms)               |
+| release → response done                            | 3911 ms | 4705 ms | report                      |
 
 Text pointing turns (n=18): ask→pointer p50 1507 ms (p90 7292); ask→first delta p50 2446 ms
 (p90 8541 — the p90 tail is multi-response tool-continuation turns). Text chat turns (n=3):
@@ -211,14 +211,14 @@ holdStart/askText), verified: delta→played back to 38 ms in the same scenario.
 Calibration: HIT with **0px error** (coord pipeline proven live). Real scenes, text mode
 ("point at the …"), fresh app+session per scene:
 
-| scene | model | hit | near (≤40 DIP) | miss | error | median err px (pointed turns) |
-|---|---|---:|---:|---:|---:|---:|
-| app-toolbar | mini | 2 | 0 | 4 | 0 | 109 |
-| form | mini | 0 | 2 | 2 | 0 | 81 |
-| shop | mini | 0 | 1 | 4 | 0 | 210 |
-| tricky | mini | 0 | 0 | 3 | 1 ("can't see" the 8px bell) | 609 |
-| tricky | full | 0 | 2 | 2 | 0 | 143 |
-| shop | full | 2 | 0 | 3 | 0 | 144 |
+| scene       | model | hit | near (≤40 DIP) | miss |                        error | median err px (pointed turns) |
+| ----------- | ----- | --: | -------------: | ---: | ---------------------------: | ----------------------------: |
+| app-toolbar | mini  |   2 |              0 |    4 |                            0 |                           109 |
+| form        | mini  |   0 |              2 |    2 |                            0 |                            81 |
+| shop        | mini  |   0 |              1 |    4 |                            0 |                           210 |
+| tricky      | mini  |   0 |              0 |    3 | 1 ("can't see" the 8px bell) |                           609 |
+| tricky      | full  |   0 |              2 |    2 |                            0 |                           143 |
+| shop        | full  |   2 |              0 |    3 |                            0 |                           144 |
 
 Gates: unambiguous scenes (toolbar/form/shop) mini strict 2/15 (13%) — **FAIL** (≥70%);
 strict+near 6/15 (40%) — **FAIL** (≥90%). Tricky (reported separately): mini 0/4,
@@ -254,13 +254,13 @@ no pointing degradation.
 
 ### 7.5 Persona rubric (33 live responses)
 
-| Check | Result | Gate |
-|---|---|---|
-| brevity (≤~4 sentences) | 33/33 | PASS |
-| ear-not-eye (no lists/URLs/markdown) | 33/33 | PASS |
-| plants-a-seed | 33/33 (even the refusals planted seeds) | PASS (≥60%) |
-| all-lowercase (raw transcript) | 13/33 (39%) | **FAIL as raw text** — but every user-visible surface (overlay caption, panel) enforces lowercase via CSS `text-transform`, and spoken audio carries no case. Classified: uncontrollable ASR-style casing in the audio transcript, already mitigated by design. |
-| "clicky, agent" stub | friendly coming-soon line, lowercase | PASS |
+| Check                                | Result                                  | Gate                                                                                                                                                                                                                                                            |
+| ------------------------------------ | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| brevity (≤~4 sentences)              | 33/33                                   | PASS                                                                                                                                                                                                                                                            |
+| ear-not-eye (no lists/URLs/markdown) | 33/33                                   | PASS                                                                                                                                                                                                                                                            |
+| plants-a-seed                        | 33/33 (even the refusals planted seeds) | PASS (≥60%)                                                                                                                                                                                                                                                     |
+| all-lowercase (raw transcript)       | 13/33 (39%)                             | **FAIL as raw text** — but every user-visible surface (overlay caption, panel) enforces lowercase via CSS `text-transform`, and spoken audio carries no case. Classified: uncontrollable ASR-style casing in the audio transcript, already mitigated by design. |
+| "clicky, agent" stub                 | friendly coming-soon line, lowercase    | PASS                                                                                                                                                                                                                                                            |
 
 Verbatim examples:
 
@@ -277,9 +277,9 @@ Verbatim examples:
 ### 7.6 Cost + usage (measured via new `TurnTimings.usage` wiring)
 
 | model | responses | input tok (cached) | image in | audio in | output tok (audio) |
-|---|---:|---:|---:|---:|---:|
-| mini | 34 | 126,572 (99,589) | 50,711 | 859 | 17,541 (10,062) |
-| full | 9 | 38,550 (32,282) | 16,150 | 0 | 3,286 (2,192) |
+| ----- | --------: | -----------------: | -------: | -------: | -----------------: |
+| mini  |        34 |   126,572 (99,589) |   50,711 |      859 |    17,541 (10,062) |
+| full  |         9 |    38,550 (32,282) |   16,150 |        0 |      3,286 (2,192) |
 
 ≈55-60 model responses total (a few error/cancelled turns aren't in the usage rows).
 Estimated spend at published gpt-realtime(-mini) rates: **≈ $0.50–0.75 total** (audio-out
@@ -330,13 +330,13 @@ Strict / strict+near on the 15 unambiguous targets; "median err" is over pointed
 those scenes (px, global DIP). Calibration hit in every run (0-30px), so the mapping pipeline
 stayed exact throughout.
 
-| config (resolution × model × lever) | strict | strict+near | median err | worst err | tricky (4) | evidence |
-|---|---:|---:|---:|---:|---|---|
-| 1280 × mini × none (§7.3 baseline) | 13% | 40% | ~110 | 714 | 0 hit | §7.7 |
-| 2048 × mini × none | **0%** | 27% | 150 | 615 | 0 hit, all miss | `results/2026-07-12T16-59-46` |
-| 2048 × full × none | 33% | 53% | 105 | 239 | 2 hit (24px icon at 10px err) | `results/2026-07-12T17-03-09` |
-| 2048 × full × anchors v1 (incl. center landmark) | 27% | 47% | 88 | 482 | 2 hit 2 near | `results/2026-07-12T17-07-31` |
-| 2048 × full × anchors v2 (corners only, final) | 40-47% | 53% | 90 | 533 | 1 hit 2 near | `results/2026-07-12T17-10-12`, shop re-run `…T17-12-58` |
+| config (resolution × model × lever)              | strict | strict+near | median err | worst err | tricky (4)                    | evidence                                                |
+| ------------------------------------------------ | -----: | ----------: | ---------: | --------: | ----------------------------- | ------------------------------------------------------- |
+| 1280 × mini × none (§7.3 baseline)               |    13% |         40% |       ~110 |       714 | 0 hit                         | §7.7                                                    |
+| 2048 × mini × none                               | **0%** |         27% |        150 |       615 | 0 hit, all miss               | `results/2026-07-12T16-59-46`                           |
+| 2048 × full × none                               |    33% |         53% |        105 |       239 | 2 hit (24px icon at 10px err) | `results/2026-07-12T17-03-09`                           |
+| 2048 × full × anchors v1 (incl. center landmark) |    27% |         47% |         88 |       482 | 2 hit 2 near                  | `results/2026-07-12T17-07-31`                           |
+| 2048 × full × anchors v2 (corners only, final)   | 40-47% |         53% |         90 |       533 | 1 hit 2 near                  | `results/2026-07-12T17-10-12`, shop re-run `…T17-12-58` |
 
 Per-scene notes (why the lever is a wash overall but ships anyway):
 
@@ -348,7 +348,7 @@ Per-scene notes (why the lever is a wash overall but ships anyway):
   1280), and its worst-case error dropped ~3x vs mini.
 - **anchors lever**: dramatic on top-left-anchored UI — toolbar went 2 hit → 5 hit + 1 near
   (errors 2-90px), form errors halved, tricky's twin save/save-as disambiguated — but it
-  *pulls left-column targets toward the horizontal center* on the realistic shop page
+  _pulls left-column targets toward the horizontal center_ on the realistic shop page
   (reviews/price/add-to-cart missed right by 180-530px in both lever runs; without the lever
   shop was full's best scene). v1's explicit "center (1024,576)" landmark caused literal
   center-snapping (3 targets pointed at exactly x=1024) and was removed in v2.
@@ -373,20 +373,20 @@ Per-scene notes (why the lever is a wash overall but ships anyway):
 
 ### 8.3 Gate verdicts at the final configuration
 
-| Gate | Target | Measured | Verdict |
-|---|---|---|---|
-| Pointing strict (unambiguous) | ≥70% | 40-47% (6-7/15) | **FAIL** |
-| Pointing strict+near | ≥90% | 53% (8/15) | **FAIL** |
-| Capture latency at 2048 | <800ms | 564ms median voice-path (487-1094; one outlier >800), 436-446ms text-path (vs 343-411ms at 1280) | PASS (median) |
-| Release → first audio delta (voice ×5, full model) | p50 <2.5s | **p50 1997ms** (1693-2513) | PASS |
-| First delta → first played | <150ms | 10-65ms | PASS |
-| Barge-in stop | <300ms | 26ms ×3 | PASS |
-| Voice-driven pointing loop (toolbar, fake mic) | loop completes | 5/5 attempted turns: real ASR verbatim, pointer fired, audio played (2 hit / 3 miss — in line with text mode) | PASS (loop), accuracy as above |
-| Ask → first pointer (text) | report | p50 ~1.7s, p90 ~2.4s (full; mini 2.1/2.8) | — |
+| Gate                                               | Target         | Measured                                                                                                      | Verdict                        |
+| -------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Pointing strict (unambiguous)                      | ≥70%           | 40-47% (6-7/15)                                                                                               | **FAIL**                       |
+| Pointing strict+near                               | ≥90%           | 53% (8/15)                                                                                                    | **FAIL**                       |
+| Capture latency at 2048                            | <800ms         | 564ms median voice-path (487-1094; one outlier >800), 436-446ms text-path (vs 343-411ms at 1280)              | PASS (median)                  |
+| Release → first audio delta (voice ×5, full model) | p50 <2.5s      | **p50 1997ms** (1693-2513)                                                                                    | PASS                           |
+| First delta → first played                         | <150ms         | 10-65ms                                                                                                       | PASS                           |
+| Barge-in stop                                      | <300ms         | 26ms ×3                                                                                                       | PASS                           |
+| Voice-driven pointing loop (toolbar, fake mic)     | loop completes | 5/5 attempted turns: real ASR verbatim, pointer fired, audio played (2 hit / 3 miss — in line with text mode) | PASS (loop), accuracy as above |
+| Ask → first pointer (text)                         | report         | p50 ~1.7s, p90 ~2.4s (full; mini 2.1/2.8)                                                                     | —                              |
 
 Token/latency cost of 2048: ~3.4k image tokens/response (~2.3x the 1280 cost), absorbed
 almost entirely by caching within a session (94% of input tokens cached across the runs);
-ask→pointer p50 actually *improved* on full (1.7s at 2048 vs mini's 1.5s at 1280 §7.2, and
+ask→pointer p50 actually _improved_ on full (1.7s at 2048 vs mini's 1.5s at 1280 §7.2, and
 full-at-2048 beat mini-at-2048's 2.1s). The full model adds no measurable latency penalty
 over mini on this workload — the p50 voice gate passes with 500ms of headroom.
 
@@ -473,14 +473,14 @@ snapper scopes the covering window — the same thing the capture (and user) see
 `node eval/run.mjs --live`, all 5 scenes (20 targets), final §8.2 config + snapping ON,
 2026-07-12 (`eval/results/2026-07-12T20-23-46/`):
 
-| scene | hit | near | miss | notes |
-|---|---:|---:|---:|---|
-| calibration | 1 | 0 | 0 | 0px error — mapping pipeline still exact |
-| app-toolbar | 6 | 0 | 0 | every snap @1.0 incl. the 30px File menu item |
-| form | 4 | 0 | 0 | incl. the 26px checkbox (label→"Send me the monthly product newsletter" @0.7) |
-| shop | 4 | 0 | 1 | miss = price (model label carried no "$249.00" this run → no name match → raw point, 168px off); cart HIT on the raw point (emoji-only name, unsnappable) |
-| tricky | 3 | 1 | 0 | save/save-as twins both disambiguated @1.0; near = the 24px emoji bell (no UIA name → raw point, 19px off) |
-| **total** | **18** | **1** | **1** | 0 errors |
+| scene       |    hit |  near |  miss | notes                                                                                                                                                     |
+| ----------- | -----: | ----: | ----: | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| calibration |      1 |     0 |     0 | 0px error — mapping pipeline still exact                                                                                                                  |
+| app-toolbar |      6 |     0 |     0 | every snap @1.0 incl. the 30px File menu item                                                                                                             |
+| form        |      4 |     0 |     0 | incl. the 26px checkbox (label→"Send me the monthly product newsletter" @0.7)                                                                             |
+| shop        |      4 |     0 |     1 | miss = price (model label carried no "$249.00" this run → no name match → raw point, 168px off); cart HIT on the raw point (emoji-only name, unsnappable) |
+| tricky      |      3 |     1 |     0 | save/save-as twins both disambiguated @1.0; near = the 24px emoji bell (no UIA name → raw point, 19px off)                                                |
+| **total**   | **18** | **1** | **1** | 0 errors                                                                                                                                                  |
 
 **Unambiguous scenes (toolbar/form/shop, 15 targets): strict 14/15 = 93% (gate ≥70%),
 strict+near 14/15 = 93% (gate ≥90%) — BOTH PASS**, for the first time in any
@@ -522,14 +522,14 @@ completed.
 
 ### 9.6 Gate verdicts
 
-| Gate | Target | Measured | Verdict |
-|---|---|---|---|
-| Pointing strict (unambiguous) | ≥70% | **93%** (14/15) | **PASS** |
-| Pointing strict+near | ≥90% | **93%** (14/15) | **PASS** |
-| Snap overhead on pointer arrival | <300ms p90 | 90ms p90 (49ms p50) | PASS |
-| Release → first audio delta | p50 <2.5s | ~2.1s median over 6 turns (informal) | PENDING (formal 5-turn pass interrupted) |
-| Voice loop spot-check + live quick-tap barge-in | no wedge | guard fired live once, clean recovery (accidental coverage); dedicated spot-check not run | PENDING |
-| Unit tests / build | green | 152/152, build green | PASS |
+| Gate                                            | Target     | Measured                                                                                  | Verdict                                  |
+| ----------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------- | ---------------------------------------- |
+| Pointing strict (unambiguous)                   | ≥70%       | **93%** (14/15)                                                                           | **PASS**                                 |
+| Pointing strict+near                            | ≥90%       | **93%** (14/15)                                                                           | **PASS**                                 |
+| Snap overhead on pointer arrival                | <300ms p90 | 90ms p90 (49ms p50)                                                                       | PASS                                     |
+| Release → first audio delta                     | p50 <2.5s  | ~2.1s median over 6 turns (informal)                                                      | PENDING (formal 5-turn pass interrupted) |
+| Voice loop spot-check + live quick-tap barge-in | no wedge   | guard fired live once, clean recovery (accidental coverage); dedicated spot-check not run | PENDING                                  |
+| Unit tests / build                              | green      | 152/152, build green                                                                      | PASS                                     |
 
 **Live re-gate status: pointing PASSED as above; the remaining latency/voice-loop passes
 were interrupted by the user (on-screen kiosk testing while the machine was in active use)
@@ -569,23 +569,23 @@ model saw.
 coord-study ground truth — 12 synthetic layout-A targets (exact by construction) + 3
 hand-measured real-screenshot targets, all 2048x1152:
 
-| target | kind | err px | in-element | latency |
-|---|---|---:|---|---:|
-| save | synthetic | 1 | yes | 2023ms |
-| open | synthetic | 16 | yes | 1407ms |
-| help | synthetic | 3 | yes | 1470ms |
-| exit | synthetic | 1 | yes | 1647ms |
-| start | synthetic | 20 | yes | 1548ms |
-| cart | synthetic | 10 | yes | 1444ms |
-| send | synthetic | 7 | yes | 1635ms |
-| copy | synthetic | 2 | yes | 1713ms |
-| paste | synthetic | 1 | yes | 2081ms |
-| cut | synthetic | 5 | yes | 1330ms |
-| dot (24px) | synthetic | 17 | no | 1429ms |
-| square (16px) | synthetic | 8 | yes | 1418ms |
-| clock | real | 24 | yes | 1996ms |
-| review | real | 13 | yes | 1768ms |
-| openin | real | 12 | yes | 1556ms |
+| target        | kind      | err px | in-element | latency |
+| ------------- | --------- | -----: | ---------- | ------: |
+| save          | synthetic |      1 | yes        |  2023ms |
+| open          | synthetic |     16 | yes        |  1407ms |
+| help          | synthetic |      3 | yes        |  1470ms |
+| exit          | synthetic |      1 | yes        |  1647ms |
+| start         | synthetic |     20 | yes        |  1548ms |
+| cart          | synthetic |     10 | yes        |  1444ms |
+| send          | synthetic |      7 | yes        |  1635ms |
+| copy          | synthetic |      2 | yes        |  1713ms |
+| paste         | synthetic |      1 | yes        |  2081ms |
+| cut           | synthetic |      5 | yes        |  1330ms |
+| dot (24px)    | synthetic |     17 | no         |  1429ms |
+| square (16px) | synthetic |      8 | yes        |  1418ms |
+| clock         | real      |     24 | yes        |  1996ms |
+| review        | real      |     13 | yes        |  1768ms |
+| openin        | real      |     12 | yes        |  1556ms |
 
 **Summary: 15/15 valid responses, median 8px, max 24px, 14/15 in-element (93%), latency p50
 1556ms / max 2081ms** (raw records: `eval/experiments/coord-study/results/

@@ -1,9 +1,15 @@
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildAuthorizeUrl, CodexOAuthLoopback, createPkcePair } from '../src/main/auth/oauth-loopback';
+import {
+  buildAuthorizeUrl,
+  CodexOAuthLoopback,
+  createPkcePair,
+} from '../src/main/auth/oauth-loopback';
 
 const controllers: CodexOAuthLoopback[] = [];
-afterEach(() => { for (const controller of controllers.splice(0)) controller.stop(); });
+afterEach(() => {
+  for (const controller of controllers.splice(0)) controller.stop();
+});
 
 describe('ChatGPT loopback PKCE', () => {
   it('builds a strong S256 pair and the expected native-app authorization request', () => {
@@ -25,15 +31,22 @@ describe('ChatGPT loopback PKCE', () => {
     const complete = vi.fn();
     const controller = new CodexOAuthLoopback({
       auth: { acceptOAuthTokens: accept },
-      openExternal: async (url) => { opened = url; },
-      fetchImpl: (async () => new Response(JSON.stringify({ access_token: 'access', refresh_token: 'refresh' }), { status: 200 })) as typeof fetch,
+      openExternal: async (url) => {
+        opened = url;
+      },
+      fetchImpl: (async () =>
+        new Response(JSON.stringify({ access_token: 'access', refresh_token: 'refresh' }), {
+          status: 200,
+        })) as typeof fetch,
       onComplete: complete,
     });
     controllers.push(controller);
     await expect(controller.start()).resolves.toEqual({ ok: true });
     const state = new URL(opened).searchParams.get('state');
     expect(state).toBeTruthy();
-    const callback = await fetch(`http://127.0.0.1:1455/auth/callback?code=code-1&state=${encodeURIComponent(state!)}`);
+    const callback = await fetch(
+      `http://127.0.0.1:1455/auth/callback?code=code-1&state=${encodeURIComponent(state!)}`,
+    );
     expect(callback.status).toBe(200);
     expect(await callback.text()).toContain('signed in');
     expect(accept).toHaveBeenCalledWith('access', 'refresh');

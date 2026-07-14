@@ -215,7 +215,10 @@ export function SettingsView({
                   openai api key.
                 </p>
                 <div className="flex min-h-7 items-center gap-2.5 border-t pt-2.5">
-                  <Label htmlFor="prefer-api-grounding" className="flex-1 text-xs font-normal text-muted-foreground">
+                  <Label
+                    htmlFor="prefer-api-grounding"
+                    className="flex-1 text-xs font-normal text-muted-foreground"
+                  >
                     use api key for pointing
                   </Label>
                   <Switch
@@ -226,7 +229,10 @@ export function SettingsView({
                 </div>
                 <div className="flex min-h-7 items-center gap-2.5 border-t pt-2.5">
                   <div className="flex flex-1 flex-col gap-0.5">
-                    <Label htmlFor="computer-use" className="text-xs font-normal text-muted-foreground">
+                    <Label
+                      htmlFor="computer-use"
+                      className="text-xs font-normal text-muted-foreground"
+                    >
                       let sol click &amp; type
                     </Label>
                     <span className="text-[10px] leading-relaxed text-muted-foreground/70">
@@ -247,11 +253,21 @@ export function SettingsView({
               </p>
             )}
             {!settings.codexValid ? (
-              <Button type="button" size="sm" className="self-start rounded-full" disabled={signingIn} onClick={() => void signIn()}>
+              <Button
+                type="button"
+                size="sm"
+                className="self-start rounded-full"
+                disabled={signingIn}
+                onClick={() => void signIn()}
+              >
                 {signingIn ? 'opening browser…' : 'connect chatgpt'}
               </Button>
             ) : null}
-            {signInMessage ? <p className="text-[11px] leading-relaxed text-muted-foreground/80">{signInMessage}</p> : null}
+            {signInMessage ? (
+              <p className="text-[11px] leading-relaxed text-muted-foreground/80">
+                {signInMessage}
+              </p>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -350,8 +366,8 @@ export function SettingsView({
               />
             </div>
             <p className="text-[11px] leading-relaxed text-muted-foreground/80">
-              keeps the mic open and uses voice activity detection for a natural back-and-forth.
-              a fresh screen capture is attached to every speech turn.
+              keeps the mic open and uses voice activity detection for a natural back-and-forth. a
+              fresh screen capture is attached to every speech turn.
             </p>
             <div className="flex min-h-7 items-center gap-2.5">
               <Label className="flex-1 text-xs font-normal text-muted-foreground">

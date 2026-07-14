@@ -228,7 +228,12 @@ export function App(): React.JSX.Element {
           <span className="flex-1 text-xs leading-relaxed">
             add your openai key to give buddy a voice
           </span>
-          <Button type="button" size="sm" className="h-7 rounded-full px-3 text-xs" onClick={() => setView('settings')}>
+          <Button
+            type="button"
+            size="sm"
+            className="h-7 rounded-full px-3 text-xs"
+            onClick={() => setView('settings')}
+          >
             open settings
           </Button>
         </Card>
@@ -242,7 +247,10 @@ export function App(): React.JSX.Element {
         ) : view === 'agents' ? (
           <AgentsView
             agents={agents}
-            connected={(settings?.codexSignedIn === true && settings.codexValid) || (runtime?.devFlags.includes('agent_mock') ?? false)}
+            connected={
+              (settings?.codexSignedIn === true && settings.codexValid) ||
+              (runtime?.devFlags.includes('agent_mock') ?? false)
+            }
             onOpenSettings={() => setView('settings')}
           />
         ) : (

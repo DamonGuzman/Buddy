@@ -6,50 +6,82 @@
      mapping, global-DIP ground truth, hit math) end to end.
      See app-toolbar.html for the ground-truth reporting contract. -->
 <html lang="en">
-<head>
-<meta charset="utf-8" />
-<title>Clicky eval — calibration</title>
-<style>
-  * { margin: 0; box-sizing: border-box; font-family: "Segoe UI", sans-serif; }
-  body { background: #eef2f7; height: 100vh; display: grid; place-items: center; }
-  #center-target { width: 40vw; height: 34vh; background: #16a34a; border: 6px dashed #14532d; border-radius: 18px; display: grid; place-items: center; color: #fff; font-size: 34px; font-weight: 700; }
-</style>
-</head>
-<body>
-  <div id="center-target" data-target="calibration-center" data-desc="the big green square in the center of the screen">CALIBRATION — display center</div>
-<script>
-  const SCENE = 'calibration';
-  const q = new URLSearchParams(location.search);
-  const token = q.get('token') || '';
-  const port = q.get('port') || '8199';
-  function report() {
-    const chromeY = window.outerHeight - window.innerHeight;
-    const chromeX = Math.round((window.outerWidth - window.innerWidth) / 2);
-    const targets = [...document.querySelectorAll('[data-target]')].map((el) => {
-      const r = el.getBoundingClientRect();
-      return {
-        name: el.dataset.target,
-        desc: el.dataset.desc || el.dataset.target,
-        rect: {
-          x: Math.round(window.screenX + chromeX + r.left),
-          y: Math.round(window.screenY + chromeY + r.top),
-          width: Math.round(r.width),
-          height: Math.round(r.height),
-        },
-      };
-    });
-    fetch('http://127.0.0.1:' + port + '/eval/ground-truth?token=' + encodeURIComponent(token), {
-      method: 'POST',
-      mode: 'no-cors',
-      body: JSON.stringify({
-        scene: SCENE,
-        dpr: window.devicePixelRatio,
-        window: { screenX, screenY, innerWidth, innerHeight, outerWidth, outerHeight },
-        targets,
-      }),
-    }).catch(() => {});
-  }
-  window.addEventListener('load', () => { setTimeout(report, 400); setTimeout(report, 1500); });
-</script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <title>Clicky eval — calibration</title>
+    <style>
+      * {
+        margin: 0;
+        box-sizing: border-box;
+        font-family: 'Segoe UI', sans-serif;
+      }
+      body {
+        background: #eef2f7;
+        height: 100vh;
+        display: grid;
+        place-items: center;
+      }
+      #center-target {
+        width: 40vw;
+        height: 34vh;
+        background: #16a34a;
+        border: 6px dashed #14532d;
+        border-radius: 18px;
+        display: grid;
+        place-items: center;
+        color: #fff;
+        font-size: 34px;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="center-target"
+      data-target="calibration-center"
+      data-desc="the big green square in the center of the screen"
+    >
+      CALIBRATION — display center
+    </div>
+    <script>
+      const SCENE = 'calibration';
+      const q = new URLSearchParams(location.search);
+      const token = q.get('token') || '';
+      const port = q.get('port') || '8199';
+      function report() {
+        const chromeY = window.outerHeight - window.innerHeight;
+        const chromeX = Math.round((window.outerWidth - window.innerWidth) / 2);
+        const targets = [...document.querySelectorAll('[data-target]')].map((el) => {
+          const r = el.getBoundingClientRect();
+          return {
+            name: el.dataset.target,
+            desc: el.dataset.desc || el.dataset.target,
+            rect: {
+              x: Math.round(window.screenX + chromeX + r.left),
+              y: Math.round(window.screenY + chromeY + r.top),
+              width: Math.round(r.width),
+              height: Math.round(r.height),
+            },
+          };
+        });
+        fetch(
+          'http://127.0.0.1:' + port + '/eval/ground-truth?token=' + encodeURIComponent(token),
+          {
+            method: 'POST',
+            mode: 'no-cors',
+            body: JSON.stringify({
+              scene: SCENE,
+              dpr: window.devicePixelRatio,
+              window: { screenX, screenY, innerWidth, innerHeight, outerWidth, outerHeight },
+              targets,
+            }),
+          },
+        ).catch(() => {});
+      }
+      window.addEventListener('load', () => {
+        setTimeout(report, 400);
+        setTimeout(report, 1500);
+      });
+    </script>
+  </body>
 </html>

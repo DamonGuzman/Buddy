@@ -18,11 +18,15 @@ const certDir = join(process.env.LOCALAPPDATA ?? repoRoot, 'ClickyPhoneAudioBrid
 const args = new Set(process.argv.slice(2));
 
 function powershell(script, options = {}) {
-  return execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    stdio: options.stdio ?? ['ignore', 'pipe', 'pipe'],
-  }).trim();
+  return execFileSync(
+    'powershell.exe',
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script],
+    {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: options.stdio ?? ['ignore', 'pipe', 'pipe'],
+    },
+  ).trim();
 }
 
 function findLanIp() {
@@ -33,7 +37,9 @@ function findLanIp() {
       "$c=Get-NetIPConfiguration | Where-Object {$_.IPv4DefaultGateway -ne $null -and $_.NetAdapter.Status -eq 'Up'} | Sort-Object {$_.NetIPv4Interface.RouteMetric} | Select-Object -First 1; $c.IPv4Address.IPAddress",
     );
     if (/^\d{1,3}(\.\d{1,3}){3}$/.test(result)) return result;
-  } catch { /* fall back to Node's adapter list */ }
+  } catch {
+    /* fall back to Node's adapter list */
+  }
   for (const entries of Object.values(networkInterfaces())) {
     for (const entry of entries ?? []) {
       if (entry.family === 'IPv4' && !entry.internal && !entry.address.startsWith('169.254.')) {
@@ -50,16 +56,29 @@ function ensureCertificates(ipAddress) {
   const passPath = join(certDir, 'server-pass.txt');
   const caPath = join(certDir, 'clicky-audio-ca.cer');
   let currentIp = '';
-  try { currentIp = JSON.parse(readFileSync(metadataPath, 'utf8').replace(/^\uFEFF/, '')).ipAddress; } catch { /* regenerate */ }
-  if (currentIp !== ipAddress || !existsSync(pfxPath) || !existsSync(passPath) || !existsSync(caPath)) {
+  try {
+    currentIp = JSON.parse(readFileSync(metadataPath, 'utf8').replace(/^\uFEFF/, '')).ipAddress;
+  } catch {
+    /* regenerate */
+  }
+  if (
+    currentIp !== ipAddress ||
+    !existsSync(pfxPath) ||
+    !existsSync(passPath) ||
+    !existsSync(caPath)
+  ) {
     execFileSync(
       'powershell.exe',
       [
         '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', join(here, 'setup-cert.ps1'),
-        '-IpAddress', ipAddress,
-        '-OutputDir', certDir,
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        join(here, 'setup-cert.ps1'),
+        '-IpAddress',
+        ipAddress,
+        '-OutputDir',
+        certDir,
       ],
       { cwd: repoRoot, stdio: 'inherit' },
     );
@@ -87,7 +106,11 @@ function send(res, statusCode, body, headers = {}) {
 }
 
 function configurationProfile(caPath) {
-  const certificate = readFileSync(caPath).toString('base64').match(/.{1,68}/g)?.join('\n') ?? '';
+  const certificate =
+    readFileSync(caPath)
+      .toString('base64')
+      .match(/.{1,68}/g)
+      ?.join('\n') ?? '';
   const profileUuid = randomUUID().toUpperCase();
   const certificateUuid = randomUUID().toUpperCase();
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -164,8 +187,12 @@ function isLoopback(address = '') {
 
 function killExistingClicky() {
   try {
-    powershell("Get-Process -Name 'Buddy','Buddy App','Clicky' -ErrorAction SilentlyContinue | Stop-Process -Force");
-  } catch { /* no existing process */ }
+    powershell(
+      "Get-Process -Name 'Buddy','Buddy App','Clicky' -ErrorAction SilentlyContinue | Stop-Process -Force",
+    );
+  } catch {
+    /* no existing process */
+  }
 }
 
 function launchClicky() {
@@ -182,7 +209,8 @@ function launchClicky() {
     join(programsDir, 'heyclicky', 'Buddy App.exe'),
     join(programsDir, 'heyclicky', 'Clicky.exe'),
   ];
-  const installed = installedCandidates.find((candidate) => existsSync(candidate)) ?? installedCandidates[0];
+  const installed =
+    installedCandidates.find((candidate) => existsSync(candidate)) ?? installedCandidates[0];
   const useDev = args.has('--dev') || !existsSync(installed);
   const command = useDev ? 'npm.cmd' : installed;
   const commandArgs = useDev ? ['run', 'dev'] : [];
@@ -219,7 +247,19 @@ const setupServer = createHttpServer((req, res) => {
     return;
   }
   if (pathname === '/health') {
-    send(res, 200, JSON.stringify({ ok: true, clickyConnected: clickySocket !== null, phoneConnected: phoneSocket !== null, captureActive, micChunks, outputChunks }), { 'Content-Type': 'application/json' });
+    send(
+      res,
+      200,
+      JSON.stringify({
+        ok: true,
+        clickyConnected: clickySocket !== null,
+        phoneConnected: phoneSocket !== null,
+        captureActive,
+        micChunks,
+        outputChunks,
+      }),
+      { 'Content-Type': 'application/json' },
+    );
     return;
   }
   send(res, 200, setupPage(ipAddress), { 'Content-Type': 'text/html; charset=utf-8' });
@@ -237,15 +277,24 @@ const secureServer = createHttpsServer(
     const body = readFileSync(join(here, asset));
     send(res, 200, body, {
       'Content-Type': contentType(asset),
-      'Content-Security-Policy': "default-src 'self'; connect-src 'self' wss:; media-src 'self'; style-src 'self'; script-src 'self'; worker-src 'self' blob:;",
+      'Content-Security-Policy':
+        "default-src 'self'; connect-src 'self' wss:; media-src 'self'; style-src 'self'; script-src 'self'; worker-src 'self' blob:;",
       'Permissions-Policy': 'microphone=(self)',
       'X-Content-Type-Options': 'nosniff',
     });
   },
 );
 
-const clickyWss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: 1024 * 1024 });
-const phoneWss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: 1024 * 1024 });
+const clickyWss = new WebSocketServer({
+  noServer: true,
+  perMessageDeflate: false,
+  maxPayload: 1024 * 1024,
+});
+const phoneWss = new WebSocketServer({
+  noServer: true,
+  perMessageDeflate: false,
+  maxPayload: 1024 * 1024,
+});
 
 setupServer.on('upgrade', (req, socket, head) => {
   const pathname = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`).pathname;
@@ -284,7 +333,9 @@ clickyWss.on('connection', (ws) => {
       if (message.type === 'playback' && ['stop', 'flush'].includes(message.command)) {
         sendJson(phoneSocket, message);
       }
-    } catch { /* ignore invalid local diagnostics */ }
+    } catch {
+      /* ignore invalid local diagnostics */
+    }
   });
   ws.on('close', () => {
     if (clickySocket !== ws) return;
@@ -321,7 +372,9 @@ const setupUrl = `http://${ipAddress}:${SETUP_PORT}/`;
 const secureUrl = `https://${ipAddress}:${HTTPS_PORT}/`;
 console.log('\nBuddy throwaway phone-audio bridge');
 console.log(`1. On the iPhone, open: ${setupUrl}`);
-console.log('2. Download, install, and fully trust the iPhone profile, then use the secure-page link.');
+console.log(
+  '2. Download, install, and fully trust the iPhone profile, then use the secure-page link.',
+);
 console.log(`3. Direct secure URL: ${secureUrl}`);
 console.log('4. Tap "connect audio", then use Ctrl+Alt on this PC.\n');
 
@@ -342,4 +395,6 @@ function shutdown() {
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
-clickyProcess?.on('exit', (code) => console.log(`[phone-audio] Buddy exited (${code ?? 'signal'})`));
+clickyProcess?.on('exit', (code) =>
+  console.log(`[phone-audio] Buddy exited (${code ?? 'signal'})`),
+);

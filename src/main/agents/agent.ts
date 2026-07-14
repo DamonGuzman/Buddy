@@ -1,7 +1,13 @@
 import { describeKind } from '../errors';
 import type { AgentSummary, AgentStep } from '../../shared/types';
 import { agentToolDefinitions, findAgentTool } from './tools';
-import type { AgentBackend, AgentBackendResult, AgentBrief, AgentToolContext, ResponseItem } from './types';
+import type {
+  AgentBackend,
+  AgentBackendResult,
+  AgentBrief,
+  AgentToolContext,
+  ResponseItem,
+} from './types';
 import {
   AGENT_BACKEND_TIMEOUT_MS,
   AGENT_DEFAULT_MODEL,
@@ -65,11 +71,14 @@ export class AgentRunner {
       if (!result.ok) return this.finishFailure(result.errorKind);
       history.push(...result.outputItems);
       if (result.text) this.lastText = result.text;
-      for (const query of result.searchQueries) this.addStep('search', `searched “${query.slice(0, 120)}”`);
+      for (const query of result.searchQueries)
+        this.addStep('search', `searched “${query.slice(0, 120)}”`);
       for (const url of result.citations) this.sources.add(url);
 
       if (result.functionCalls.length === 0) {
-        return this.finishDone(result.text || this.scratchpad || 'i finished, but there was no written result.');
+        return this.finishDone(
+          result.text || this.scratchpad || 'i finished, but there was no written result.',
+        );
       }
 
       const outputs = await Promise.all(
@@ -95,11 +104,17 @@ export class AgentRunner {
         effort: AGENT_REASONING_EFFORT,
         signal,
       });
-      const canRetry = !result.ok && (result.retryable || result.errorKind === 'agent_backend_down');
+      const canRetry =
+        !result.ok && (result.retryable || result.errorKind === 'agent_backend_down');
       if (result.ok || !canRetry || attempt === 1 || this.controller.signal.aborted) return result;
       await delay(500 * (attempt + 1), this.controller.signal);
     }
-    return { ok: false, errorKind: 'agent_backend_down', detail: 'retry exhausted', retryable: false };
+    return {
+      ok: false,
+      errorKind: 'agent_backend_down',
+      detail: 'retry exhausted',
+      retryable: false,
+    };
   }
 
   private async executeTool(name: string, argsJson: string): Promise<string> {
@@ -108,9 +123,10 @@ export class AgentRunner {
     let args: Record<string, unknown>;
     try {
       const parsed: unknown = JSON.parse(argsJson || '{}');
-      args = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : {};
+      args =
+        parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)
+          : {};
     } catch {
       return JSON.stringify({ error: 'arguments were not valid json' });
     }
@@ -121,12 +137,18 @@ export class AgentRunner {
       signal: AbortSignal.any([this.controller.signal, timeout]),
       scratchpad: {
         get: () => this.scratchpad,
-        set: (text) => { this.scratchpad = text; },
-        append: (text) => { this.scratchpad = this.scratchpad ? `${this.scratchpad}\n${text}` : text; },
+        set: (text) => {
+          this.scratchpad = text;
+        },
+        append: (text) => {
+          this.scratchpad = this.scratchpad ? `${this.scratchpad}\n${text}` : text;
+        },
       },
       addSource: (url) => this.sources.add(url),
       fetchCount: () => this.fetches,
-      noteFetch: () => { this.fetches += 1; },
+      noteFetch: () => {
+        this.fetches += 1;
+      },
     };
     try {
       return await tool.execute(args, ctx);
@@ -141,9 +163,15 @@ export class AgentRunner {
   }
 
   private finishDone(text: string): AgentSummary {
-    return this.finish({ status: 'done', summary: concise(stripLinks(text)), output: this.scratchpad || text });
+    return this.finish({
+      status: 'done',
+      summary: concise(stripLinks(text)),
+      output: this.scratchpad || text,
+    });
   }
-  private finishFailure(kind: 'agent_not_signed_in' | 'agent_quota' | 'agent_backend_down'): AgentSummary {
+  private finishFailure(
+    kind: 'agent_not_signed_in' | 'agent_quota' | 'agent_backend_down',
+  ): AgentSummary {
     return this.finish({ status: 'failed', error: describeKind(kind).message });
   }
   private finishStopped(): AgentSummary {
@@ -151,33 +179,54 @@ export class AgentRunner {
     return this.finish({
       status,
       ...(status === 'timed_out'
-        ? { error: describeKind('agent_timed_out').message, summary: concise(this.lastText || this.scratchpad) }
+        ? {
+            error: describeKind('agent_timed_out').message,
+            summary: concise(this.lastText || this.scratchpad),
+          }
         : {}),
     });
   }
   private finish(patch: Partial<AgentSummary>): AgentSummary {
     this.patch({ ...patch, finishedAt: this.now(), sources: [...this.sources], unseen: true });
-    return { ...this.summary, steps: [...this.summary.steps], sources: [...(this.summary.sources ?? [])] };
+    return {
+      ...this.summary,
+      steps: [...this.summary.steps],
+      sources: [...(this.summary.sources ?? [])],
+    };
   }
   private patch(patch: Partial<AgentSummary>): void {
     Object.assign(this.summary, patch);
-    this.options.onUpdate({ ...this.summary, steps: [...this.summary.steps], sources: [...(this.summary.sources ?? [])] });
+    this.options.onUpdate({
+      ...this.summary,
+      steps: [...this.summary.steps],
+      sources: [...(this.summary.sources ?? [])],
+    });
   }
 }
 
 function buildInitialMessage(brief: AgentBrief): ResponseItem {
-  const content: ResponseItem[] = [{
-    type: 'input_text',
-    text: [
-      `task: ${brief.task}`,
-      brief.why ? `why/context: ${brief.why}` : '',
-      brief.recentTranscript ? `recent conversation:\n${brief.recentTranscript}` : '',
-    ].filter(Boolean).join('\n\n'),
-  }];
-  if (brief.screenshot) content.push({ type: 'input_image', image_url: `data:image/jpeg;base64,${brief.screenshot.jpegBase64}` });
+  const content: ResponseItem[] = [
+    {
+      type: 'input_text',
+      text: [
+        `task: ${brief.task}`,
+        brief.why ? `why/context: ${brief.why}` : '',
+        brief.recentTranscript ? `recent conversation:\n${brief.recentTranscript}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+    },
+  ];
+  if (brief.screenshot)
+    content.push({
+      type: 'input_image',
+      image_url: `data:image/jpeg;base64,${brief.screenshot.jpegBase64}`,
+    });
   return { type: 'message', role: 'user', content };
 }
-function isTerminal(status: AgentSummary['status']): boolean { return ['done', 'failed', 'timed_out', 'cancelled'].includes(status); }
+function isTerminal(status: AgentSummary['status']): boolean {
+  return ['done', 'failed', 'timed_out', 'cancelled'].includes(status);
+}
 function concise(text: string): string {
   const clean = text.trim();
   if (clean.length <= 500) return clean;
@@ -196,6 +245,13 @@ function stripLinks(text: string): string {
 function delay(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
-    signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
   });
 }

@@ -230,7 +230,9 @@ export async function captureAllDisplays(): Promise<CaptureResult[]> {
     const sourceIndex = match.sourceIndexByDisplay[screenIndex] ?? null;
     const source = sourceIndex === null ? undefined : sources[sourceIndex];
     if (!source) {
-      console.warn(`[capture] no source for display ${display.id} (screen${screenIndex}) — skipped`);
+      console.warn(
+        `[capture] no source for display ${display.id} (screen${screenIndex}) — skipped`,
+      );
       return;
     }
 

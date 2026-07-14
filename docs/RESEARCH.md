@@ -9,7 +9,7 @@
 
 ## 1. TL;DR
 
-**Clicky** is a Mac-native AI assistant that lives *next to your cursor* instead of in a chat
+**Clicky** is a Mac-native AI assistant that lives _next to your cursor_ instead of in a chat
 window. You hold a hotkey, talk to it out loud, and it (a) sees your screen, (b) answers in a
 spoken voice, and (c) flies a little animated pointer across the screen to physically point at
 the button/menu it's describing. Say **"Clicky, agent"** and it spawns a background agent to
@@ -23,16 +23,16 @@ with a reported **$10.1M** raised. Free tier + **$20/mo Pro**.
 
 ## 2. Company & Traction
 
-| | |
-|---|---|
+|                 |                                                                                |
+| --------------- | ------------------------------------------------------------------------------ |
 | **Founder/CEO** | Farza Majeed (previously founded Buildspace, ~100k+ builders, wound down 2024) |
-| **Batch** | Y Combinator, Spring 2026 (partner: Aaron Epstein) |
-| **Location** | San Francisco |
-| **Funding** | ~$10.1M reported |
-| **Positioning** | "The simplest AI interface in the world for consumers to spawn agents" |
-| **Target user** | Everyday **consumers**, explicitly *not* developers |
+| **Batch**       | Y Combinator, Spring 2026 (partner: Aaron Epstein)                             |
+| **Location**    | San Francisco                                                                  |
+| **Funding**     | ~$10.1M reported                                                               |
+| **Positioning** | "The simplest AI interface in the world for consumers to spawn agents"         |
+| **Target user** | Everyday **consumers**, explicitly _not_ developers                            |
 
-**Origin story:** Started as a *weekend side project* in 2026. The demo video hit **~3M views**,
+**Origin story:** Started as a _weekend side project_ in 2026. The demo video hit **~3M views**,
 the open-source repo crossed **6,300+ GitHub stars**, and it went "tweet → YC company in weeks."
 Farza's large existing audience (from Buildspace) is effectively the distribution channel — demos
 reach millions organically.
@@ -52,7 +52,7 @@ Two modes:
    - Marketed use cases: learning FL Studio, explaining an After Effects panel, Figma→code,
      comparing camera prices, designing a logo in Figma, summarizing a PDF then emailing it to a
      team.
-2. **Agent mode** — Say *"Clicky, agent"* and it spins up a background agent that can research,
+2. **Agent mode** — Say _"Clicky, agent"_ and it spins up a background agent that can research,
    manage your calendar, or even build local Mac apps.
    - Native integrations touted: **Notion, Gmail, Google Calendar, Linear**.
 
@@ -70,14 +70,14 @@ teardown by Isaac Flath.
   "buddy" follows you between desktops. It never moves the real system cursor — it **draws its own
   blue triangle** inside the invisible overlay.
 - **Pointing mechanism:** Claude (original stack) is prompted to emit coordinate tags like
-  `[POINT:x,y:label:screenN]` *after* its spoken text. Clicky strips the tag with regex — text
+  `[POINT:x,y:label:screenN]` _after_ its spoken text. Clicky strips the tag with regex — text
   goes to TTS, the coordinates drive the pointer. The triangle **arcs** to its target along a
   quadratic bezier (lifts a midpoint so the motion feels alive rather than linear).
 - **Coordinate wrangling** (the hard part): screenshots are top-left origin, macOS displays are
   bottom-left origin on one shared multi-monitor grid, so it flips Y, scales to display size,
   applies per-monitor offsets, then converts AppKit→SwiftUI space.
 - **Vision pipeline:** on hotkey, one screenshot per monitor, resized to max 1280px/dim at 80%
-  quality, labeled so the model knows *which* screen holds the cursor and prioritizes it. It
+  quality, labeled so the model knows _which_ screen holds the cursor and prioritizes it. It
   filters out Clicky's own windows. Context sent = screenshots + live transcript + last 10
   exchanges.
 - **Security:** API keys never ship in the binary — a **Cloudflare Worker** proxies the model
@@ -101,13 +101,15 @@ teardown by Isaac Flath.
 ## 5. UI/UX Analysis
 
 ### The core interaction model
+
 The defining decision is **removing the chat window entirely**. Traditional assistants impose an
 "Alt-Tab tax": screenshot → switch to ChatGPT → paste → read → switch back → find the thing.
-Clicky collapses that to **hold key, talk, watch the pointer**. Assistance is *in situ*, spatially
+Clicky collapses that to **hold key, talk, watch the pointer**. Assistance is _in situ_, spatially
 anchored to what you're looking at. This is genuinely novel and is the product's entire reason to
 exist — reviewers frame it as "a new interface for interacting with AI," not a better chatbot.
 
 ### The "buddy" as a character
+
 The pointer isn't a utilitarian crosshair — it's a **friendly blue triangle "buddy"** with
 personality-driven motion (the upward-arcing glide). Deliberate emotional design: the
 anthropomorphized cursor makes the AI feel like a companion beside you rather than a tool you
@@ -115,6 +117,7 @@ query. The name ("buddy"), the cartoon aesthetic, and the follow-you-across-desk
 reinforce presence and warmth.
 
 ### Voice & personality design (underrated UX layer)
+
 The **system prompt is itself a UX artifact.** The model is instructed to speak in
 **all-lowercase, casual, warm** tone, "written for the ear, not the eye," and — notably — to
 **never end on a dead-end yes/no question.** Instead it must "plant a seed" by suggesting something
@@ -123,14 +126,16 @@ interaction nudges toward the next. Combined with natural voice output, it feels
 your shoulder.
 
 ### Friction & onboarding
+
 The softest spot. It needs **mic + accessibility + screen-recording + screen-capture** permissions
 and is a menu-bar app, so first-run setup is heavier than the "zero technical setup" marketing
 implies. The **freemium** model lets people try the voice/guide loop before hitting the metered
 agent wall.
 
 ### Where the UX wins
+
 - **No context switching** — help arrives where you already are.
-- **Multimodal at once** — it sees (vision), speaks (voice), *and* gestures (pointing)
+- **Multimodal at once** — it sees (vision), speaks (voice), _and_ gestures (pointing)
   simultaneously. The pointing closes the "which button do you mean?" gap that plain text/voice
   can't.
 - **Non-intrusive by default** — click-through overlay, hidden until summoned, hotkey doesn't
@@ -139,10 +144,11 @@ agent wall.
 - **Emotional design** — character + warm voice create attachment a text box can't.
 
 ### Where users & reviewers push back
+
 - **Privacy optics.** Constant screen-capture spooks people even though capture is only on-hotkey.
   Repeated asks for a **local-only / on-device** option and "a timed context window, not always-on
   capture." The #1 recurring concern and a real enterprise blocker.
-- **It points but doesn't *act* (in guide mode).** Users want it to **control the mouse** to
+- **It points but doesn't _act_ (in guide mode).** Users want it to **control the mouse** to
   automate multi-step tasks, not just point. (Agent mode partially answers this.)
 - **Distraction risk** — a cursor-adjacent, personality-forward presence can pull focus.
 - **Shallow skill coverage** — great on mainstream apps (Figma, After Effects, DaVinci Resolve, FL
@@ -169,32 +175,37 @@ The latest version replaces the AssemblyAI → Claude → ElevenLabs pipeline wi
 **async function calling**, **configurable reasoning effort**, 128k context, 32k max output.
 
 ### The pipeline collapses 3 services → 1
+
 One **persistent streaming session** handles transcription, reasoning, vision, and voice output.
 Lower latency, less glue code, one bill, fewer failure points (recall the ElevenLabs-blocked
 complaint).
 
 ### Pointing gets cleaner, not just ported
+
 Instead of emitting `[POINT:x,y:label:screenN]` text tags and regex-stripping them, define a
 **tool** like `point_at(x, y, label, screen)` and let the model call it. **Async function calling**
 means the model keeps talking fluidly while the pointer animates. Structured args > parsing
 coordinates out of prose.
 
 ### Connection model is different — plan for it
+
 This is a **stateful streaming session** (WebRTC for the audio path in a native/desktop client, or
 WebSocket), not request/response. The proxy's job changes: it **mints an ephemeral session token**
 and the client connects directly to OpenAI, keeping the real API key server-side without putting
 the proxy in the hot audio path.
 
 ### Vision: push frames on-demand
+
 Feed screenshots as image input **on the hotkey** (Clicky's on-capture model). Don't stream every
 frame — images are token-heavy against the 128k context. On-demand capture also happens to answer
 Clicky's #1 privacy complaint.
 
 ### Trade-offs
+
 - **Lose ElevenLabs' voice range/cloning.** Realtime ships a fixed set of OpenAI voices. If a
   branded voice was part of the "personality" moat, that's a downgrade.
-- **Audio tokens aren't cheap.** ~$32 / $64 per 1M input/output audio tokens on 2.1; realistic
-  speech-to-speech runs **~$0.04/min** with VAD + prompt caching; the **mini** tier cuts it
+- **Audio tokens aren't cheap.** ~~$32 / $64 per 1M input/output audio tokens on 2.1; realistic
+  speech-to-speech runs **~~$0.04/min** with VAD + prompt caching; the **mini** tier cuts it
   further. Cache the system prompt + tool defs (cached audio ~$0.30–0.40/1M) since they resend
   every turn. Image input ~$5/1M. Use `-mini` for the fast point-and-talk loop, reserve full 2.1
   (or higher reasoning effort) for agent mode.
@@ -205,7 +216,7 @@ Clicky's #1 privacy complaint.
 
 ## 8. Landscape Note (naming is crowded)
 
-- **Official product:** **heyclicky.com** (Farza's, Mac; Windows is *waitlist-only*).
+- **Official product:** **heyclicky.com** (Farza's, Mac; Windows is _waitlist-only_).
 - Likely copycats/clones riding the name: `clicky.foo` ("Free AI Assistant for Windows"),
   `clicky-ai.com` ("Push-to-Talk AI Assistant for Chrome"), `clicky-six.vercel.app`.
 - **Unrelated:** `clicky.com` is a web-analytics company.
@@ -222,7 +233,7 @@ Don't conflate them when researching further.
 - Their coordinate-transform pain is macOS-specific, but there's a Windows analog (per-monitor DPI
   scaling, virtual-desktop origin). Budget for it.
 - Their biggest unresolved UX problem — **privacy of always-visible / screen-capturing overlays**
-  — should be designed *around from day one*: explicit capture indicator, on-demand only, local
+  — should be designed _around from day one_: explicit capture indicator, on-demand only, local
   option.
 - Clicky's **Windows version is waitlist-only** — there's an open lane.
 - On GPT-Realtime-2.1, the "point and talk" core gets **simpler and faster**; the main thing given

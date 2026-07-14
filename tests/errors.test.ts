@@ -162,14 +162,18 @@ describe('classifyError mapping table', () => {
       withErrorCode(new Error('You exceeded your current quota'), 'insufficient_quota'),
       'insufficient_quota',
     ],
-    [new Error('connection closed during handshake (code 1013: insufficient_quota)'),
-      'insufficient_quota'],
+    [
+      new Error('connection closed during handshake (code 1013: insufficient_quota)'),
+      'insufficient_quota',
+    ],
     // -- model access ------------------------------------------------------
     [withErrorCode(new Error('The model does not exist'), 'model_not_found'), 'model_unavailable'],
     [new Error('Unexpected server response: 403'), 'model_unavailable'],
     [new Error('Unexpected server response: 404'), 'model_unavailable'],
-    [new Error('Project proj_x does not have access to model gpt-realtime-2.1'),
-      'model_unavailable'],
+    [
+      new Error('Project proj_x does not have access to model gpt-realtime-2.1'),
+      'model_unavailable',
+    ],
     // -- rate limiting -----------------------------------------------------
     [withErrorCode(new Error('Rate limit reached'), 'rate_limit_exceeded'), 'rate_limited'],
     [new Error('Unexpected server response: 429'), 'rate_limited'],
@@ -188,12 +192,9 @@ describe('classifyError mapping table', () => {
     ['a plain string failure', 'unknown'],
   ];
 
-  it.each(table.map(([err, kind]) => [kind, err] as const))(
-    'maps to %s',
-    (kind, err) => {
-      expect(classifyError(err).kind).toBe(kind);
-    },
-  );
+  it.each(table.map(([err, kind]) => [kind, err] as const))('maps to %s', (kind, err) => {
+    expect(classifyError(err).kind).toBe(kind);
+  });
 
   it('unclassified fallback keeps `something went wrong: <single line>`', () => {
     const pres = classifyError(new Error('weird\n  multi-line\nfailure'));

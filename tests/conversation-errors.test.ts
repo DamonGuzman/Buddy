@@ -47,7 +47,8 @@ const { Conversation } = await import('../src/main/conversation');
 const { describeKind } = await import('../src/main/errors');
 
 const require = createRequire(import.meta.url);
-const mock = require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
+const mock =
+  require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
 const rejectMod = require('../tools/mock-realtime/reject-server') as {
   createRejectServer: (opts?: {
     port?: number;
@@ -95,14 +96,22 @@ function fakeDeps(): FakeDeps {
   // ~/.codex/auth.json sign-in state.
   const codexAuth = { getCodexAuth: () => null, getBearer: async () => '' };
   return {
-    deps: { settings: settings as never, overlays: overlays as never, panel: panel as never, codexAuth: codexAuth as never },
+    deps: {
+      settings: settings as never,
+      overlays: overlays as never,
+      panel: panel as never,
+      codexAuth: codexAuth as never,
+    },
     captions,
     flags,
   };
 }
 
 const sysTexts = (c: InstanceType<typeof Conversation>): string[] =>
-  c.transcript().filter((e) => e.role === 'system').map((e) => e.text);
+  c
+    .transcript()
+    .filter((e) => e.role === 'system')
+    .map((e) => e.text);
 
 describe('conversation error catalog (M11)', () => {
   let server: MockServer;
@@ -257,10 +266,9 @@ describe('conversation error catalog (M11)', () => {
   it('rate_limited mid-session: classified copy, exactly ONE error entry (dedupe)', async () => {
     const { c } = makeConversation(server.url);
     await c.askText('please rate limit me');
-    await vi.waitFor(
-      () => expect(sysTexts(c)).toContain(describeKind('rate_limited').message),
-      { timeout: 5_000 },
-    );
+    await vi.waitFor(() => expect(sysTexts(c)).toContain(describeKind('rate_limited').message), {
+      timeout: 5_000,
+    });
     // The failed response.done that follows must not add a second entry.
     await new Promise((r) => setTimeout(r, 200));
     const texts = sysTexts(c);
@@ -271,10 +279,9 @@ describe('conversation error catalog (M11)', () => {
   it('server_error mid-session: classified copy reaches the transcript', async () => {
     const { c } = makeConversation(server.url);
     await c.askText('give me a servererror please');
-    await vi.waitFor(
-      () => expect(sysTexts(c)).toContain(describeKind('server_error').message),
-      { timeout: 5_000 },
-    );
+    await vi.waitFor(() => expect(sysTexts(c)).toContain(describeKind('server_error').message), {
+      timeout: 5_000,
+    });
   });
 
   it('unclassified mid-session error still reaches the transcript (fallback line)', async () => {
@@ -319,9 +326,7 @@ describe('conversation error catalog (M11)', () => {
           return item?.content ?? [];
         })
         .filter((p) => p.type === 'input_text' && (p.text ?? '').startsWith('context:'));
-      expect(
-        contextParts.some((p) => (p.text ?? '').includes('screen capture failed')),
-      ).toBe(true);
+      expect(contextParts.some((p) => (p.text ?? '').includes('screen capture failed'))).toBe(true);
     });
     // No error state for an informational failure.
     expect(c.assistantState()).not.toBe('error');

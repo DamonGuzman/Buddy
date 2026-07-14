@@ -81,7 +81,9 @@ async function getAuth() {
     if (c2.chatgpt_account_id) accountId = c2.chatgpt_account_id;
     console.log('[auth] refreshed OK (NOT written back to auth.json)');
   } else {
-    console.log(`[auth] file token valid until ${new Date(expMs).toISOString()}, plan=${claim.chatgpt_plan_type ?? '?'}`);
+    console.log(
+      `[auth] file token valid until ${new Date(expMs).toISOString()}, plan=${claim.chatgpt_plan_type ?? '?'}`,
+    );
   }
   return { accessToken, accountId };
 }
@@ -138,10 +140,15 @@ async function codexPost(auth, label, body) {
     const data = t.slice(5).trim();
     if (!data || data === '[DONE]') continue;
     let evt;
-    try { evt = JSON.parse(data); } catch { continue; }
+    try {
+      evt = JSON.parse(data);
+    } catch {
+      continue;
+    }
     const type = evt.type ?? '?';
     eventTypes.set(type, (eventTypes.get(type) ?? 0) + 1);
-    if (type === 'response.output_text.delta' && typeof evt.delta === 'string') outputText += evt.delta;
+    if (type === 'response.output_text.delta' && typeof evt.delta === 'string')
+      outputText += evt.delta;
     if (type === 'response.completed') completed = evt.response;
     if (type === 'response.failed' || type === 'error') failed = evt;
   }
@@ -153,10 +160,15 @@ async function codexPost(auth, label, body) {
       ...(it.type === 'web_search_call' ? { status: it.status, action: it.action } : {}),
     }));
     console.log('[response.id]', completed.id);
-    console.log('[response.store-related fields]', JSON.stringify({
-      store: completed.store, previous_response_id: completed.previous_response_id,
-      status: completed.status, model: completed.model,
-    }));
+    console.log(
+      '[response.store-related fields]',
+      JSON.stringify({
+        store: completed.store,
+        previous_response_id: completed.previous_response_id,
+        status: completed.status,
+        model: completed.model,
+      }),
+    );
     console.log('[output items]', JSON.stringify(items, null, 2).slice(0, 2000));
     console.log('[usage]', JSON.stringify(completed.usage));
   }
@@ -178,11 +190,18 @@ const baseBody = {
   store: false,
   reasoning: { effort: 'low' },
 };
-const q1Input = [{
-  type: 'message',
-  role: 'user',
-  content: [{ type: 'input_text', text: 'in one sentence, what is the latest stable Node.js LTS version? use web search' }],
-}];
+const q1Input = [
+  {
+    type: 'message',
+    role: 'user',
+    content: [
+      {
+        type: 'input_text',
+        text: 'in one sentence, what is the latest stable Node.js LTS version? use web search',
+      },
+    ],
+  },
+];
 
 // POST 1: hosted web_search, store:true.
 let r1 = await codexPost(auth, 'POST 1: tools=[web_search], store:true', {
@@ -197,19 +216,23 @@ const rejectedToolType = (r) =>
   (r.ok && r.failed && /web_search|tool/i.test(JSON.stringify(r.failed)));
 // Fallback B: if store:true was rejected, retry web_search with store:false.
 const rejectedStore = (r) =>
-  (!r.ok && /store/i.test(r.raw)) ||
-  (r.ok && r.failed && /store/i.test(JSON.stringify(r.failed)));
+  (!r.ok && /store/i.test(r.raw)) || (r.ok && r.failed && /store/i.test(JSON.stringify(r.failed)));
 
 let usedToolType = 'web_search';
 if (!r1.ok || r1.failed) {
   if (rejectedStore(r1) && !rejectedToolType(r1)) {
     r1 = await codexPost(auth, 'POST 1b: tools=[web_search], store:false (store rejected)', {
-      ...baseBody, store: false, input: q1Input, tools: [{ type: 'web_search' }],
+      ...baseBody,
+      store: false,
+      input: q1Input,
+      tools: [{ type: 'web_search' }],
     });
   } else {
     usedToolType = 'web_search_preview';
     r1 = await codexPost(auth, 'POST 1b: tools=[web_search_preview], store:true', {
-      ...baseBody, input: q1Input, tools: [{ type: 'web_search_preview' }],
+      ...baseBody,
+      input: q1Input,
+      tools: [{ type: 'web_search_preview' }],
     });
   }
 }
@@ -220,18 +243,28 @@ if (r1.ok && r1.completed?.id) {
   const r2 = await codexPost(auth, `POST 2: previous_response_id=${r1.completed.id}`, {
     ...baseBody,
     previous_response_id: r1.completed.id,
-    input: [{
-      type: 'message',
-      role: 'user',
-      content: [{ type: 'input_text', text: 'thanks — and in one sentence, when was it released?' }],
-    }],
+    input: [
+      {
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'thanks — and in one sentence, when was it released?' },
+        ],
+      },
+    ],
   });
   if (r2.ok && r2.completed) {
-    console.log('\n[continuation verdict] answered without re-sending context:',
-      /release|20\d\d|\bnov|\boct|\bapr/i.test(r2.outputText) ? 'LOOKS CONTEXTUAL' : 'CHECK TEXT ABOVE');
+    console.log(
+      '\n[continuation verdict] answered without re-sending context:',
+      /release|20\d\d|\bnov|\boct|\bapr/i.test(r2.outputText)
+        ? 'LOOKS CONTEXTUAL'
+        : 'CHECK TEXT ABOVE',
+    );
   }
 } else {
   console.log('\n[continuation] skipped — POST 1 did not yield a stored response id');
 }
 
-console.log(`\nDone. Tool type that worked (if any): ${usedToolType}. Live calls used: ${liveCalls}`);
+console.log(
+  `\nDone. Tool type that worked (if any): ${usedToolType}. Live calls used: ${liveCalls}`,
+);

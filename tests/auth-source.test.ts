@@ -49,12 +49,8 @@ describe('resolveGroundingAuth', () => {
   });
 
   it('returns null when neither the sub nor a key is available', () => {
-    expect(
-      resolveGroundingAuth({ getApiKey: () => null, codex: codexProvider(null) }),
-    ).toBeNull();
-    expect(
-      resolveGroundingAuth({ getApiKey: () => '', codex: codexProvider(null) }),
-    ).toBeNull();
+    expect(resolveGroundingAuth({ getApiKey: () => null, codex: codexProvider(null) })).toBeNull();
+    expect(resolveGroundingAuth({ getApiKey: () => '', codex: codexProvider(null) })).toBeNull();
   });
 
   it('preferApiKey demotes the sub below the key (eval A/B)', () => {

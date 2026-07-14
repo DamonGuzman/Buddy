@@ -37,7 +37,9 @@ function decodeJwtExp(jwt) {
     const pad = p.length % 4;
     const b64 = p + (pad === 2 ? '==' : pad === 3 ? '=' : '');
     return JSON.parse(Buffer.from(b64, 'base64').toString('utf8')).exp ?? 0;
-  } catch { return 0; }
+  } catch {
+    return 0;
+  }
 }
 async function loadAuth() {
   const raw = JSON.parse(readFileSync(authPath(), 'utf8'));
@@ -133,11 +135,18 @@ async function pointOnce({ auth, model, effort, imageB64, ask, W, H }) {
     throw new Error(`fetch failed: ${err.message}`);
   }
   const quota = {};
-  for (const h of QUOTA_HEADERS) { const v = res.headers.get(h); if (v != null) quota[h] = v; }
+  for (const h of QUOTA_HEADERS) {
+    const v = res.headers.get(h);
+    if (v != null) quota[h] = v;
+  }
   if (!res.ok) {
     clearTimeout(timer);
     let detail = '';
-    try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ }
+    try {
+      detail = (await res.text()).slice(0, 300);
+    } catch {
+      /* ignore */
+    }
     const e = new Error(`http ${res.status}: ${detail}`);
     e.status = res.status;
     e.quota = quota;
@@ -153,7 +162,11 @@ async function pointOnce({ auth, model, effort, imageB64, ask, W, H }) {
   const handleEvent = (payload) => {
     if (payload === '[DONE]') return;
     let evt;
-    try { evt = JSON.parse(payload); } catch { return; }
+    try {
+      evt = JSON.parse(payload);
+    } catch {
+      return;
+    }
     const type = evt.type ?? '';
     if (type === 'response.output_text.delta' && typeof evt.delta === 'string') {
       if (ttfbMs == null) ttfbMs = Date.now() - t0;
@@ -161,7 +174,8 @@ async function pointOnce({ auth, model, effort, imageB64, ask, W, H }) {
     } else if (type === 'response.output_item.done' && evt.item?.type === 'message') {
       // fallback: assemble from final item content if deltas were missed
       for (const c of evt.item.content ?? []) {
-        if ((c.type === 'output_text' || c.type === 'text') && typeof c.text === 'string' && !text) text += c.text;
+        if ((c.type === 'output_text' || c.type === 'text') && typeof c.text === 'string' && !text)
+          text += c.text;
       }
     } else if (type === 'response.completed' || type === 'response.done') {
       sawCompleted = true;
@@ -189,13 +203,23 @@ async function pointOnce({ auth, model, effort, imageB64, ask, W, H }) {
   let parsed = null;
   const m = text.match(/\{[\s\S]*?\}/);
   const candidate = m ? m[0] : text;
-  try { parsed = JSON.parse(candidate); } catch {
+  try {
+    parsed = JSON.parse(candidate);
+  } catch {
     // try to pull x/y with regex as last resort
     const mx = text.match(/"?x"?\s*[:=]\s*(-?\d+(?:\.\d+)?)/i);
     const my = text.match(/"?y"?\s*[:=]\s*(-?\d+(?:\.\d+)?)/i);
     if (mx && my) parsed = { x: Number(mx[1]), y: Number(my[1]) };
   }
-  return { parsed, text, usage, latencyMs: Date.now() - t0, ttfbMs, quota, status: sawCompleted ? 'completed' : 'incomplete' };
+  return {
+    parsed,
+    text,
+    usage,
+    latencyMs: Date.now() - t0,
+    ttfbMs,
+    quota,
+    status: sawCompleted ? 'completed' : 'incomplete',
+  };
 }
 
 // normalize Responses-API usage → { in, out, reasoning }
@@ -203,9 +227,10 @@ function normUsage(u) {
   if (!u) return null;
   const inp = u.input_tokens ?? u.prompt_tokens ?? 0;
   const out = u.output_tokens ?? u.completion_tokens ?? 0;
-  const reasoning = u.output_tokens_details?.reasoning_tokens
-    ?? u.completion_tokens_details?.reasoning_tokens ?? 0;
-  const cached = u.input_tokens_details?.cached_tokens ?? u.prompt_tokens_details?.cached_tokens ?? 0;
+  const reasoning =
+    u.output_tokens_details?.reasoning_tokens ?? u.completion_tokens_details?.reasoning_tokens ?? 0;
+  const cached =
+    u.input_tokens_details?.cached_tokens ?? u.prompt_tokens_details?.cached_tokens ?? 0;
   return { in: inp, out, reasoning, cached };
 }
 
@@ -231,7 +256,14 @@ async function callWithRetry(opts, label) {
     } catch (err) {
       lastErr = err;
       const st = err.status;
-      const retryable = st === 429 || st === 401 || st === 403 || st === 500 || st === 502 || st === 503 || /fetch failed|aborted/.test(err.message);
+      const retryable =
+        st === 429 ||
+        st === 401 ||
+        st === 403 ||
+        st === 500 ||
+        st === 502 ||
+        st === 503 ||
+        /fetch failed|aborted/.test(err.message);
       if (!retryable || attempt === 2) throw err;
       const backoff = 2000 * (attempt + 1);
       console.log(`  ${label} retry ${attempt + 1} after ${st ?? 'net'} (${backoff}ms)`);
@@ -244,16 +276,32 @@ async function callWithRetry(opts, label) {
 async function main() {
   const args = parseArgs(process.argv);
   const spec = JSON.parse(readFileSync(join(ROOT, 'layouts.json'), 'utf8'));
-  const W = spec.width, H = spec.height;
+  const W = spec.width,
+    H = spec.height;
   const auth = await loadAuth();
 
   if (args.probe) {
     const image = readFileSync(join(ROOT, 'images', 'A-plain.jpg')).toString('base64');
     console.log('[probe] gpt-5.6-luna low, target=SAVE (gt 180,96)');
-    const r = await pointOnce({ auth, model: 'gpt-5.6-luna', effort: 'low', imageB64: image, ask: 'the SAVE button', W, H });
+    const r = await pointOnce({
+      auth,
+      model: 'gpt-5.6-luna',
+      effort: 'low',
+      imageB64: image,
+      ask: 'the SAVE button',
+      W,
+      H,
+    });
     console.log('  status:', r.status, '| text:', JSON.stringify(r.text));
     console.log('  parsed:', JSON.stringify(r.parsed));
-    console.log('  usage:', JSON.stringify(normUsage(r.usage)), '| latency:', r.latencyMs, 'ttfb:', r.ttfbMs);
+    console.log(
+      '  usage:',
+      JSON.stringify(normUsage(r.usage)),
+      '| latency:',
+      r.latencyMs,
+      'ttfb:',
+      r.ttfbMs,
+    );
     console.log('  quota:', JSON.stringify(r.quota));
     return;
   }
@@ -269,7 +317,11 @@ async function main() {
     jobs.push({ layoutName: 'real', imageFile: 'real-plain.jpg', targets: rt.targets });
   } else {
     for (const layoutName of (args.layouts ?? 'A,B').split(',')) {
-      jobs.push({ layoutName, imageFile: `${layoutName}-plain.jpg`, targets: spec.layouts[layoutName].targets });
+      jobs.push({
+        layoutName,
+        imageFile: `${layoutName}-plain.jpg`,
+        targets: spec.layouts[layoutName].targets,
+      });
     }
   }
 
@@ -282,11 +334,23 @@ async function main() {
     const usage = [];
     console.log(`[${model} | ${condition} | ${layoutName}] ${targets.length} targets`);
     for (const t of targets) {
-      const rec = { id: t.id, ask: t.ask, zone: t.zone, kind: t.kind, gt: { x: t.cx, y: t.cy }, w: t.w, h: t.h };
+      const rec = {
+        id: t.id,
+        ask: t.ask,
+        zone: t.zone,
+        kind: t.kind,
+        gt: { x: t.cx, y: t.cy },
+        w: t.w,
+        h: t.h,
+      };
       try {
-        const res = await callWithRetry({ auth, model, effort, imageB64: image, ask: t.ask, W, H }, t.id);
+        const res = await callWithRetry(
+          { auth, model, effort, imageB64: image, ask: t.ask, W, H },
+          t.id,
+        );
         if (res.parsed && typeof res.parsed.x === 'number' && typeof res.parsed.y === 'number') {
-          const px = res.parsed.x, py = res.parsed.y;
+          const px = res.parsed.x,
+            py = res.parsed.y;
           rec.pred = { x: px, y: py };
           rec.rawArgs = res.parsed;
           rec.errX = px - t.cx;
@@ -300,10 +364,16 @@ async function main() {
         rec.ttfbMs = res.ttfbMs;
         rec.status = res.status;
         const nu = normUsage(res.usage);
-        if (nu) { rec.usage = nu; usage.push(nu); }
+        if (nu) {
+          rec.usage = nu;
+          usage.push(nu);
+        }
         if (Object.keys(res.quota).length) lastQuota = res.quota;
-        const errStr = rec.err !== undefined ? `${Math.round(rec.err)}px${rec.hit ? '' : ' MISS'}` : 'INVALID';
-        console.log(`  ${t.id.padEnd(9)} w${String(t.w).padStart(3)} gt(${t.cx},${t.cy}) -> ${rec.pred ? `(${rec.pred.x},${rec.pred.y})` : '-'} err=${errStr} ${res.latencyMs}ms r${nu?.reasoning ?? '?'}`);
+        const errStr =
+          rec.err !== undefined ? `${Math.round(rec.err)}px${rec.hit ? '' : ' MISS'}` : 'INVALID';
+        console.log(
+          `  ${t.id.padEnd(9)} w${String(t.w).padStart(3)} gt(${t.cx},${t.cy}) -> ${rec.pred ? `(${rec.pred.x},${rec.pred.y})` : '-'} err=${errStr} ${res.latencyMs}ms r${nu?.reasoning ?? '?'}`,
+        );
       } catch (err) {
         rec.error = String(err.message ?? err);
         rec.status = 'failed';
@@ -321,13 +391,30 @@ async function main() {
     }
     const outPath = join(ROOT, 'results', `${model}--${condition}--${layoutName}.json`);
     mkdirSync(dirname(outPath), { recursive: true });
-    writeFileSync(outPath, JSON.stringify({
-      model, condition, layout: layoutName, imageDims: { W, H },
-      transport: 'codex-subscription', endpoint: ENDPOINT,
-      timestamp: new Date().toISOString(), records, usage, quota: lastQuota,
-    }, null, 2));
+    writeFileSync(
+      outPath,
+      JSON.stringify(
+        {
+          model,
+          condition,
+          layout: layoutName,
+          imageDims: { W, H },
+          transport: 'codex-subscription',
+          endpoint: ENDPOINT,
+          timestamp: new Date().toISOString(),
+          records,
+          usage,
+          quota: lastQuota,
+        },
+        null,
+        2,
+      ),
+    );
     console.log(`  -> ${outPath}  quota=${JSON.stringify(lastQuota)}`);
   }
 }
 
-main().catch((e) => { console.error('FATAL:', e.message); process.exitCode = 1; });
+main().catch((e) => {
+  console.error('FATAL:', e.message);
+  process.exitCode = 1;
+});

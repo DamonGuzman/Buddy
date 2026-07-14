@@ -6,12 +6,7 @@ import { dirname } from 'node:path';
 export const DEFAULT_PHONE_AUDIO_URL = 'ws://127.0.0.1:3211/clicky';
 export const DEFAULT_PHONE_AUDIO_HEALTH_URL = 'http://127.0.0.1:3211/health';
 
-export type PhoneAudioBridgeState =
-  | 'starting'
-  | 'healthy'
-  | 'unhealthy'
-  | 'exited'
-  | 'stopped';
+export type PhoneAudioBridgeState = 'starting' | 'healthy' | 'unhealthy' | 'exited' | 'stopped';
 
 export interface PhoneAudioBridgeStatus {
   state: PhoneAudioBridgeState;
@@ -197,8 +192,12 @@ export class PhoneAudioBridgeSupervisor {
   }
 
   private pipeLogs(child: ChildProcess): void {
-    child.stdout?.on('data', (chunk: Buffer | string) => this.log(`stdout: ${String(chunk).trim()}`));
-    child.stderr?.on('data', (chunk: Buffer | string) => this.log(`stderr: ${String(chunk).trim()}`));
+    child.stdout?.on('data', (chunk: Buffer | string) =>
+      this.log(`stdout: ${String(chunk).trim()}`),
+    );
+    child.stderr?.on('data', (chunk: Buffer | string) =>
+      this.log(`stderr: ${String(chunk).trim()}`),
+    );
   }
 
   private scheduleInspect(delay: number): void {

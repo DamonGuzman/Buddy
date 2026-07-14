@@ -495,7 +495,8 @@ const AGENT_ROUTES: Record<string, RouteHandler> = {
     if (!deps.agents) return sendJson(res, 503, { error: 'agent runtime not wired' });
     const body = asRecord(await readJsonBody(req));
     const task = body?.['task'];
-    if (typeof task !== 'string' || !task.trim()) return sendJson(res, 400, { error: 'expected {task: string}' });
+    if (typeof task !== 'string' || !task.trim())
+      return sendJson(res, 400, { error: 'expected {task: string}' });
     const result = deps.agents.spawn(task.trim());
     sendJson(res, result.ok ? 202 : 409, result);
   },

@@ -75,7 +75,8 @@ const scenes = (val('--scenes', SCENES.join(',')) || '').split(',').filter(Boole
 // launch the app ourselves we mint a fresh token and hand it over via env.
 const token = process.env.CLICKY_DEBUG_TOKEN || (attach ? readTokenFile() : null) || newToken();
 
-const backend = (live ? 'LIVE OPENAI API' : 'MOCK (tools/mock-realtime)') + (noSnap ? ' — SNAP OFF' : '');
+const backend =
+  (live ? 'LIVE OPENAI API' : 'MOCK (tools/mock-realtime)') + (noSnap ? ' — SNAP OFF' : '');
 const banner = `\n${'='.repeat(72)}\n  POINTING EVAL — backend: ${backend}${live ? '' : '\n  NOTE: the mock points at screen center; this run validates PLUMBING,\n  not model accuracy. Only the calibration target is expected to HIT.'}\n${'='.repeat(72)}\n`;
 console.log(banner);
 
@@ -97,7 +98,11 @@ function scorePoint(p, rect) {
   const dx = Math.max(rect.x - p.x, 0, p.x - (rect.x + rect.width));
   const dy = Math.max(rect.y - p.y, 0, p.y - (rect.y + rect.height));
   const rectDist = Math.hypot(dx, dy);
-  return { verdict: rectDist <= NEAR_DIP ? 'near' : 'miss', errorPx, rectDistPx: Math.round(rectDist) };
+  return {
+    verdict: rectDist <= NEAR_DIP ? 'near' : 'miss',
+    errorPx,
+    rectDistPx: Math.round(rectDist),
+  };
 }
 
 /** Map the overlay-local pointer command to global DIP via the capture meta. */
@@ -198,7 +203,12 @@ process.on('SIGINT', () => {
   process.exit(130);
 });
 
-const results = { backend, mode: voice ? 'voice' : 'text', startedAt: new Date().toISOString(), scenes: [] };
+const results = {
+  backend,
+  mode: voice ? 'voice' : 'text',
+  startedAt: new Date().toISOString(),
+  scenes: [],
+};
 
 try {
   let mockUrl;
@@ -279,10 +289,16 @@ try {
         // M8.5 live eval: keep what was SAID (diagnosable mislabels), the
         // final turn timings and (live) token usage alongside the score.
         const t = (await api.get('/timings')).last ?? {};
-        const newEntries = (voice ? await api.get('/transcript') : (await api.get('/transcript')).slice(txCountBefore)) ?? [];
+        const newEntries =
+          (voice
+            ? await api.get('/transcript')
+            : (await api.get('/transcript')).slice(txCountBefore)) ?? [];
         const userText = newEntries.find((e) => e.role === 'user')?.text ?? null;
         const assistantText =
-          newEntries.filter((e) => e.role === 'assistant').map((e) => e.text).join(' ') || null;
+          newEntries
+            .filter((e) => e.role === 'assistant')
+            .map((e) => e.text)
+            .join(' ') || null;
         const tBase = t.tHoldEnd ?? t.tAsk;
         // M9 snap attribution: what the verdict WOULD have been at the raw
         // model point (recorded by the app pre-snap).
@@ -311,9 +327,13 @@ try {
           assistantText,
           latency: {
             askToFirstToolCallMs:
-              t.tFirstToolCall !== undefined && tBase !== undefined ? t.tFirstToolCall - tBase : null,
+              t.tFirstToolCall !== undefined && tBase !== undefined
+                ? t.tFirstToolCall - tBase
+                : null,
             askToFirstAudioDeltaMs:
-              t.tFirstAudioDelta !== undefined && tBase !== undefined ? t.tFirstAudioDelta - tBase : null,
+              t.tFirstAudioDelta !== undefined && tBase !== undefined
+                ? t.tFirstAudioDelta - tBase
+                : null,
             askToDoneMs:
               t.tResponseDone !== undefined && tBase !== undefined ? t.tResponseDone - tBase : null,
           },
@@ -324,7 +344,9 @@ try {
             ? `; snap->"${(p.snap.snapName || '').slice(0, 30)}" @${p.snap.snapScore} in ${p.snap.snapMs}ms (raw ${rawScore.verdict})`
             : `; no snap match in ${p.snap.snapMs}ms (raw ${rawScore.verdict})`
           : '';
-        console.log(`${score.verdict.toUpperCase()} (pointed ${p.x},${p.y}; err ${score.errorPx}px; said "${(p.label || '').slice(0, 60)}"${snapNote})`);
+        console.log(
+          `${score.verdict.toUpperCase()} (pointed ${p.x},${p.y}; err ${score.errorPx}px; said "${(p.label || '').slice(0, 60)}"${snapNote})`,
+        );
         // Live: spoken audio drains much longer than the response lifecycle —
         // silence it between targets (keeps runs quiet + turns independent).
         await api.post('/playback', { command: 'stop' });
@@ -334,7 +356,11 @@ try {
         let assistantText = null;
         try {
           const tx = (await api.get('/transcript')).slice(voice ? 0 : txCountBefore);
-          assistantText = tx.filter((e) => e.role === 'assistant').map((e) => e.text).join(' ') || null;
+          assistantText =
+            tx
+              .filter((e) => e.role === 'assistant')
+              .map((e) => e.text)
+              .join(' ') || null;
         } catch {
           /* app may be gone */
         }
@@ -346,7 +372,9 @@ try {
           error: String(err),
           assistantText,
         });
-        console.log(`ERROR: ${err.message ?? err}${assistantText ? ` — said: "${assistantText.slice(0, 100)}"` : ''}`);
+        console.log(
+          `ERROR: ${err.message ?? err}${assistantText ? ` — said: "${assistantText.slice(0, 100)}"` : ''}`,
+        );
         try {
           await api.post('/playback', { command: 'stop' });
         } catch {
@@ -401,14 +429,21 @@ const md = [
   '',
   `Backend: **${backend}** — mode: **${results.mode}**`,
   '',
-  live ? '' : '> Mock run: validates plumbing only (mock always points at screen center). Only the calibration target is expected to hit.',
+  live
+    ? ''
+    : '> Mock run: validates plumbing only (mock always points at screen center). Only the calibration target is expected to hit.',
   '',
   '| scene | target | verdict | error px | raw verdict | snap (name @ score, ms) | pointed (global DIP) | target rect |',
   '|---|---|---|---:|---|---|---|---|',
-  ...flat.map((t) =>
-    `| ${t.scene} | ${t.name} | ${t.verdict} | ${t.errorPx ?? ''} | ${t.snap ? t.snap.rawVerdict : ''} | ${
-      t.snap ? (t.snap.snapped ? `"${t.snap.name}" @ ${t.snap.score}, ${t.snap.ms}ms` : `no match, ${t.snap.ms}ms`) : ''
-    } | ${t.pointed ? `${t.pointed.x},${t.pointed.y}` : ''} | ${t.rect.x},${t.rect.y} ${t.rect.width}x${t.rect.height} |`,
+  ...flat.map(
+    (t) =>
+      `| ${t.scene} | ${t.name} | ${t.verdict} | ${t.errorPx ?? ''} | ${t.snap ? t.snap.rawVerdict : ''} | ${
+        t.snap
+          ? t.snap.snapped
+            ? `"${t.snap.name}" @ ${t.snap.score}, ${t.snap.ms}ms`
+            : `no match, ${t.snap.ms}ms`
+          : ''
+      } | ${t.pointed ? `${t.pointed.x},${t.pointed.y}` : ''} | ${t.rect.x},${t.rect.y} ${t.rect.width}x${t.rect.height} |`,
   ),
   '',
   `**Summary:** ${counts.hit} hit / ${counts.near} near / ${counts.miss} miss / ${counts.error} error (of ${flat.length})`,

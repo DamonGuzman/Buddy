@@ -42,15 +42,15 @@ is anything app-side off, and can prompt/image-side interventions fix it?
 
 ## 2. Conditions
 
-| condition | image | framing / tool |
-|---|---|---|
-| baseline-plain | bare | minimal: dims + "pixel coords, origin top-left" |
-| baseline-anchors | bare | production framing verbatim (corner anchors + fraction→pixel worked example + anti-center clause) |
-| grid-100 | 100px semi-transparent gridlines, red axis labels every 200px | plain + "read position off the gridlines" |
-| ruler-edge | tick marks all 4 edges (50px minor / 100px major), numbers every 200px | plain + "project onto the rulers" |
-| fiducials | 9 red crosshairs at known positions, each labeled "(x,y)" | plain + "interpolate from the nearest markers" |
-| normalized | bare | tool takes x,y as 0-1000 normalized (converted for scoring) |
-| think-first | bare | model must first state the location in words (quadrant/fraction/landmark), then call point_at |
+| condition        | image                                                                  | framing / tool                                                                                    |
+| ---------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| baseline-plain   | bare                                                                   | minimal: dims + "pixel coords, origin top-left"                                                   |
+| baseline-anchors | bare                                                                   | production framing verbatim (corner anchors + fraction→pixel worked example + anti-center clause) |
+| grid-100         | 100px semi-transparent gridlines, red axis labels every 200px          | plain + "read position off the gridlines"                                                         |
+| ruler-edge       | tick marks all 4 edges (50px minor / 100px major), numbers every 200px | plain + "project onto the rulers"                                                                 |
+| fiducials        | 9 red crosshairs at known positions, each labeled "(x,y)"              | plain + "interpolate from the nearest markers"                                                    |
+| normalized       | bare                                                                   | tool takes x,y as 0-1000 normalized (converted for scoring)                                       |
+| think-first      | bare                                                                   | model must first state the location in words (quadrant/fraction/landmark), then call point_at     |
 
 Model under test: `gpt-realtime-2.1` (production default). Transfer checks:
 best conditions re-run on `gpt-realtime-2.1-mini`; sanity condition on a
@@ -69,42 +69,42 @@ condition (no refusals — the production no-refusal persona clause was used);
 the target LABEL echoed by the model was correct on every single turn, in
 every condition, on every model. Only coordinates are wrong, ever.
 
-| condition | median err | p90 err | max | ≤40px | ≤100px | in-element hit% | p50 ask→pointer |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| baseline-plain | 83 | 243 | 292 | 29% | 54% | 33% | 1.2s |
-| baseline-anchors (production) | 81 | 283 | 313 | 38% | 58% | 25% | 1.1s |
-| grid-100 | 84 | 133 | **200** | 29% | 58% | 17% | 1.2s |
-| ruler-edge | 71 | 191 | 240 | 33% | 54% | 38% | 1.1s |
-| fiducials | 88 | 309 | 453 | 8% | 54% | 21% | 1.8s |
-| **normalized (0-1000 tool)** | **56** | 248 | 405 | 29% | 63% | 33% | 1.0s |
-| think-first | 126 | 207 | 358 | 33% | 46% | 29% | 1.3s |
-| gpt-5.2 via REST (plain) | **40** | **62** | **106** | **50%** | **92%** | 42% | 1.3s |
+| condition                     | median err | p90 err |     max |   ≤40px |  ≤100px | in-element hit% | p50 ask→pointer |
+| ----------------------------- | ---------: | ------: | ------: | ------: | ------: | --------------: | --------------: |
+| baseline-plain                |         83 |     243 |     292 |     29% |     54% |             33% |            1.2s |
+| baseline-anchors (production) |         81 |     283 |     313 |     38% |     58% |             25% |            1.1s |
+| grid-100                      |         84 |     133 | **200** |     29% |     58% |             17% |            1.2s |
+| ruler-edge                    |         71 |     191 |     240 |     33% |     54% |             38% |            1.1s |
+| fiducials                     |         88 |     309 |     453 |      8% |     54% |             21% |            1.8s |
+| **normalized (0-1000 tool)**  |     **56** |     248 |     405 |     29% |     63% |             33% |            1.0s |
+| think-first                   |        126 |     207 |     358 |     33% |     46% |             29% |            1.3s |
+| gpt-5.2 via REST (plain)      |     **40** |  **62** | **106** | **50%** | **92%** |             42% |            1.3s |
 
 Zone medians (px), pooled per condition:
 
-| condition | corners | center | edges | dense cluster | small icons |
-|---|---:|---:|---:|---:|---:|
-| baseline-plain | 40 | 44 | 53 | 237 | 161 |
-| baseline-anchors | 31 | 85 | 65 | 166 | 158 |
-| grid-100 | 57 | 72 | 39 | 128 | 122 |
-| ruler-edge | 49 | 121 | 15 | 185 | 87 |
-| fiducials | 54 | 118 | 51 | 292 | 120 |
-| normalized | 25 | 119 | 74 | 133 | 138 |
-| think-first | 33 | 180 | 36 | 155 | 153 |
-| gpt-5.2 REST | 27 | 50 | 34 | 47 | 39 |
+| condition        | corners | center | edges | dense cluster | small icons |
+| ---------------- | ------: | -----: | ----: | ------------: | ----------: |
+| baseline-plain   |      40 |     44 |    53 |           237 |         161 |
+| baseline-anchors |      31 |     85 |    65 |           166 |         158 |
+| grid-100         |      57 |     72 |    39 |           128 |         122 |
+| ruler-edge       |      49 |    121 |    15 |           185 |          87 |
+| fiducials        |      54 |    118 |    51 |           292 |         120 |
+| normalized       |      25 |    119 |    74 |           133 |         138 |
+| think-first      |      33 |    180 |    36 |           155 |         153 |
+| gpt-5.2 REST     |      27 |     50 |    34 |            47 |          39 |
 
 ## 4. Drift structure
 
 Affine fits (gt→pred, per layout; identity = x:[1,0,0] y:[0,1,0]):
 
-| condition/layout | x coefficients | y coefficients | raw RMS | residual RMS after affine |
-|---|---|---|---:|---:|
-| plain A | [1.0, 0.1, 17] | [0.0, 1.0, -34] | 146 | 124 |
-| plain B | [0.9, 0.2, -69] | [0.0, 1.0, -63] | 149 | 101 |
-| anchors A | [0.9, 0.1, 9] | [0.0, 1.0, -26] | 152 | 129 |
-| anchors B | [0.9, 0.1, -20] | [0.1, 1.0, -145] | 149 | 111 |
-| grid-100 A | [0.9, 0.1, 54] | [0.0, 0.9, 4] | 97 | 77 |
-| grid-100 B | [1.0, 0.1, -28] | [0.0, 1.0, -18] | 103 | 83 |
+| condition/layout | x coefficients  | y coefficients   | raw RMS | residual RMS after affine |
+| ---------------- | --------------- | ---------------- | ------: | ------------------------: |
+| plain A          | [1.0, 0.1, 17]  | [0.0, 1.0, -34]  |     146 |                       124 |
+| plain B          | [0.9, 0.2, -69] | [0.0, 1.0, -63]  |     149 |                       101 |
+| anchors A        | [0.9, 0.1, 9]   | [0.0, 1.0, -26]  |     152 |                       129 |
+| anchors B        | [0.9, 0.1, -20] | [0.1, 1.0, -145] |     149 |                       111 |
+| grid-100 A       | [0.9, 0.1, 54]  | [0.0, 0.9, 4]    |      97 |                        77 |
+| grid-100 B       | [1.0, 0.1, -28] | [0.0, 1.0, -18]  |     103 |                        83 |
 
 Key structural findings (per-target error vectors):
 
@@ -157,11 +157,11 @@ Key structural findings (per-target error vectors):
 
 ## 5. Real-screenshot check (gpt-realtime-2.1, 5 targets, this machine's 4K desktop at 2048px)
 
-| condition | startbtn | clock | review | newtask | openin | median |
-|---|---:|---:|---:|---:|---:|---:|
-| baseline-anchors (production) | 670 | 50 | 289 | 100 | 65 | 100 |
-| grid-100 overlay | 254 | 51 | 76 | 130 | 108 | 108 |
-| normalized tool | 651 | 37 (HIT) | 310 | 160 | 52 | 160 |
+| condition                     | startbtn |    clock | review | newtask | openin | median |
+| ----------------------------- | -------: | -------: | -----: | ------: | -----: | -----: |
+| baseline-anchors (production) |      670 |       50 |    289 |     100 |     65 |    100 |
+| grid-100 overlay              |      254 |       51 |     76 |     130 |    108 |    108 |
+| normalized tool               |      651 | 37 (HIT) |    310 |     160 |     52 |    160 |
 
 Synthetic results carry over (medians ~100-160 vs ~56-84 — real content is
 harder), plus one new failure mode invisible on synthetic scenes:
@@ -179,12 +179,12 @@ catastrophes (max 254 vs 670/651).
 Transfer of the two best interventions to `gpt-realtime-2.1-mini`
 (synthetic, 24 targets each) — **they do not transfer**:
 
-| model x condition | median | p90 | max | ≤40px | hit% |
-|---|---:|---:|---:|---:|---:|
-| full x normalized | 56 | 248 | 405 | 29% | 33% |
-| mini x normalized | 133 | 234 | 275 | 17% | 21% |
-| full x grid-100 | 84 | 133 | 200 | 29% | 17% |
-| mini x grid-100 | 114 | 336 | **951** | 4% | 4% |
+| model x condition | median | p90 |     max | ≤40px | hit% |
+| ----------------- | -----: | --: | ------: | ----: | ---: |
+| full x normalized |     56 | 248 |     405 |   29% |  33% |
+| mini x normalized |    133 | 234 |     275 |   17% |  21% |
+| full x grid-100   |     84 | 133 |     200 |   29% |  17% |
+| mini x grid-100   |    114 | 336 | **951** |    4% |   4% |
 
 mini's localization is so noisy that gridlines make it worse (it points at
 grid labels/lines; 951px worst). No prompt- or image-side lever rescues mini
@@ -233,7 +233,7 @@ already handles this via its watchdog + cancel path.)
      on 100% of turns in every condition of this study, so label-matching
      carries the accuracy and coordinates only break ties.
    - **Do not composite grid overlays into production captures**: +0-25px
-     median cost, screen pollution the model can also *talk about*, and the
+     median cost, screen pollution the model can also _talk about_, and the
      tail-taming it buys (254-670px misses → still misses) doesn't change
      any user-visible outcome; snapping supersedes it.
    - **Consider switching the point_at tool to normalized 0-1000 coords**
@@ -259,21 +259,21 @@ advanced to the full set (layouts A+B + 5 real-screenshot targets, n=29).
 
 ### 8.1 Leaderboard (pooled over all targets run; sorted by median)
 
-| model (config) | n | median | p90 | max | ≤40px | ≤100px | in-element | p50 latency | tok/call in+out |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| **gpt-5.6-terra (low)** | 29 | 1 | 4 | 6 | 100% | 100% | 100% | 1.5s | 2699+41 |
-| **gpt-5.6-sol (low)** | 29 | 1 | 4 | 7 | 100% | 100% | 100% | 1.4s | 2699+25 |
-| gpt-5.6-luna (low) | 29 | 1 | 4 | 26 | 100% | 100% | 100% | 1.2s | 2699+37 |
-| gpt-5.5 (low) | 29 | 1 | 3 | 12 | 100% | 100% | 100% | **3.0s** ⚠ | 2699+109 |
-| gpt-5.4 (low) | 29 | 2 | 33 | 34 | 100% | 100% | 86% | 1.5s | 2699+74 |
-| **gpt-5.4-mini (low)** | 29 | 10 | 32 | 44 | 97% | 100% | 93% | 1.3s | 2699+79 |
-| computer-use-preview (native) | 12 | 3* | 11* | 11* | 100%* | 100%* | 100%* | **9.7s** ⚠ | 1678+66 |
-| gpt-5.2 (default) | 24 | 44 | 65 | 106 | 50% | 92% | 42% | 1.3s | 2697+20 |
-| gpt-5-mini (low) | 12 | 78 | 148 | 274 | 17% | 58% | 17% | **2.5s** ⚠ | 2697+125 |
-| gpt-4.1-mini | 12 | 169 | 257 | 294 | 0% | 50% | 8% | 1.0s | 3331+17 |
-| gpt-4o | 12 | 155 | 240 | 453 | 17% | 42% | 25% | 1.1s | 1197+16 |
-| gpt-4o-mini | 12 | 384 | 544 | 917 | 0% | 0% | 0% | 1.5s | 36927+19 |
-| (ref) gpt-realtime-2.1, best framing | 24 | 56-84 | 133-311 | 200-650 | ≤38% | ≤63% | ≤33% | 1.0-1.2s | — |
+| model (config)                       |   n | median |     p90 |     max | ≤40px | ≤100px | in-element | p50 latency | tok/call in+out |
+| ------------------------------------ | --: | -----: | ------: | ------: | ----: | -----: | ---------: | ----------: | --------------- |
+| **gpt-5.6-terra (low)**              |  29 |      1 |       4 |       6 |  100% |   100% |       100% |        1.5s | 2699+41         |
+| **gpt-5.6-sol (low)**                |  29 |      1 |       4 |       7 |  100% |   100% |       100% |        1.4s | 2699+25         |
+| gpt-5.6-luna (low)                   |  29 |      1 |       4 |      26 |  100% |   100% |       100% |        1.2s | 2699+37         |
+| gpt-5.5 (low)                        |  29 |      1 |       3 |      12 |  100% |   100% |       100% |  **3.0s** ⚠ | 2699+109        |
+| gpt-5.4 (low)                        |  29 |      2 |      33 |      34 |  100% |   100% |        86% |        1.5s | 2699+74         |
+| **gpt-5.4-mini (low)**               |  29 |     10 |      32 |      44 |   97% |   100% |        93% |        1.3s | 2699+79         |
+| computer-use-preview (native)        |  12 |     3* |     11* |     11* | 100%* |  100%* |      100%* |  **9.7s** ⚠ | 1678+66         |
+| gpt-5.2 (default)                    |  24 |     44 |      65 |     106 |   50% |    92% |        42% |        1.3s | 2697+20         |
+| gpt-5-mini (low)                     |  12 |     78 |     148 |     274 |   17% |    58% |        17% |  **2.5s** ⚠ | 2697+125        |
+| gpt-4.1-mini                         |  12 |    169 |     257 |     294 |    0% |    50% |         8% |        1.0s | 3331+17         |
+| gpt-4o                               |  12 |    155 |     240 |     453 |   17% |    42% |        25% |        1.1s | 1197+16         |
+| gpt-4o-mini                          |  12 |    384 |     544 |     917 |    0% |     0% |         0% |        1.5s | 36927+19        |
+| (ref) gpt-realtime-2.1, best framing |  24 |  56-84 | 133-311 | 200-650 |  ≤38% |   ≤63% |       ≤33% |    1.0-1.2s | —               |
 
 \* computer-use-preview scored on the 8/12 turns where it actually clicked;
 on 4/12 it stalled asking for confirmation ("I found the SAVE button…
@@ -285,15 +285,15 @@ Accurate when it acts (max 11px), but disqualified on latency + reliability.
 
 Full set (24 synthetic + 5 real targets), low effort, bare image, pixel JSON:
 
-| | gpt-5.4 | gpt-5.4-mini | gpt-5.5 | gpt-5.6-sol | gpt-5.6-terra | gpt-5.6-luna |
-|---|---:|---:|---:|---:|---:|---:|
-| median err (all) | 1.7px | 8.6px | 1.4px | 1.0px | 1.0px | 1.0px |
-| max err synthetic | 34px | 44px | 1.4px | 1.4px | 1.4px | 1.4px |
-| median / max err REAL | 4.5 / 15px | 12 / 32px | 3.2 / 12px | 3.6 / 7px | 3.6 / 6px | 4.1 / 26px |
-| ≤40px | 100% | 97% | 100% | 100% | 100% | 100% |
-| in-element | 86% | 93% | 100% | 100% | 100% | 100% |
-| p50 latency (synthetic / real) | 1.5 / 1.8s | 1.3 / 1.4s | 2.9 / 4.4s ⚠ | 1.4 / 1.9s | 1.5 / 1.9s | 1.2 / 1.7s |
-| reasoning tok/call | 43-61 | ~50 | 66-118 | 0-12 | 10-34 | 3-44 |
+|                                |    gpt-5.4 | gpt-5.4-mini |      gpt-5.5 | gpt-5.6-sol | gpt-5.6-terra | gpt-5.6-luna |
+| ------------------------------ | ---------: | -----------: | -----------: | ----------: | ------------: | -----------: |
+| median err (all)               |      1.7px |        8.6px |        1.4px |       1.0px |         1.0px |        1.0px |
+| max err synthetic              |       34px |         44px |        1.4px |       1.4px |         1.4px |        1.4px |
+| median / max err REAL          | 4.5 / 15px |    12 / 32px |   3.2 / 12px |   3.6 / 7px |     3.6 / 6px |   4.1 / 26px |
+| ≤40px                          |       100% |          97% |         100% |        100% |          100% |         100% |
+| in-element                     |        86% |          93% |         100% |        100% |          100% |         100% |
+| p50 latency (synthetic / real) | 1.5 / 1.8s |   1.3 / 1.4s | 2.9 / 4.4s ⚠ |  1.4 / 1.9s |    1.5 / 1.9s |   1.2 / 1.7s |
+| reasoning tok/call             |      43-61 |          ~50 |       66-118 |        0-12 |         10-34 |         3-44 |
 
 - The jump happens **between gpt-5.2 and gpt-5.4**: 5.2 = 44px median (usable
   but coarse); 5.4+ = pixel-exact. On synthetic UI every 5.4+ model except
@@ -304,7 +304,7 @@ Full set (24 synthetic + 5 real targets), low effort, bare image, pixel JSON:
   accuracy on both gpt-5.6-sol (1.0 vs 1.0px median) and gpt-5.4 (1.7 vs
   1.4px, same 33px max); medium adds ~0.4s on 5.4. **Low is correct.**
 - Prompt sensitivity (gpt-5.6-sol, layout A): normalized 0-1000 OUTPUT is
-  *worse* than pixel output (max 56px vs 1.4px, in-element 75% vs 100%) —
+  _worse_ than pixel output (max 56px vs 1.4px, in-element 75% vs 100%) —
   the opposite of the realtime finding. These models natively think in
   pixels of the actual image; don't renormalize them.
 - gpt-5.4's residual 33px synthetic misses are all the 16px blue square
@@ -348,8 +348,8 @@ re-measure: effort-enum probe, floor re-measure with warm-up split and
 TTFB/first-content/total timing on 12 synthetic + 3 real targets, plus a
 5-call warm 'low' reproduction. It could not be executed in this pass: the
 account returned `insufficient_quota` (billing-level, both gpt-4o-mini and
-gpt-5.5 probes) continuously for ~1h of polling. Run `node audit-55.mjs`
-when the account has credit (~$0.15). Verdict impact either way: none for
+gpt-5.5 probes) continuously for ~~1h of polling. Run `node audit-55.mjs`
+when the account has credit (~~$0.15). Verdict impact either way: none for
 the grounding slot — even a floored gpt-5.5 can at best tie gpt-5.4-mini's
 1.3s at a higher price tier (see §9).
 
@@ -431,11 +431,11 @@ holds 100% in-element on every target, including the small/hard ones**.
 
 ### 11.1 Three-model comparison (subscription, effort low, n=29)
 
-| model | in-element (all) | in-element (small, n=9) | median px | p90 px | max px | p50 latency | out tok | reasoning tok (med / total) | cost proxy (out+rsn, total) |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| **gpt-5.6-sol** | **100%** | **100%** | 1.0 | 3.2 | **6.4** | 1.70s | ~18 | 0 / **18** | **575** |
-| gpt-5.6-terra | 100% | 100% | 1.0 | 2.0 | 6.4 | 2.01s | ~19 | 0 / 377 | 1313 |
-| gpt-5.6-luna | 100% | 100% | 1.0 | 4.1 | **30** | 1.60s | ~18 | 0 / 446 | 1438 |
+| model           | in-element (all) | in-element (small, n=9) | median px | p90 px |  max px | p50 latency | out tok | reasoning tok (med / total) | cost proxy (out+rsn, total) |
+| --------------- | ---------------: | ----------------------: | --------: | -----: | ------: | ----------: | ------: | --------------------------: | --------------------------: |
+| **gpt-5.6-sol** |         **100%** |                **100%** |       1.0 |    3.2 | **6.4** |       1.70s |     ~18 |                  0 / **18** |                     **575** |
+| gpt-5.6-terra   |             100% |                    100% |       1.0 |    2.0 |     6.4 |       2.01s |     ~19 |                     0 / 377 |                        1313 |
+| gpt-5.6-luna    |             100% |                    100% |       1.0 |    4.1 |  **30** |       1.60s |     ~18 |                     0 / 446 |                        1438 |
 
 Input ≈ 2863 tok/call for all three (the Codex Responses endpoint bills ~166
 tok more per call than the chat-completions path's 2697 — endpoint framing
@@ -473,7 +473,7 @@ Cheapest model that holds 100% in-element on every target incl. small ones.
   `output_tokens_details.reasoning_tokens`.
 - **Reasoning-token behaviour differs from the API path.** On chat-completions
   (§8.2) sol/terra/luna showed 0-44 reasoning at `low`; on the subscription
-  Responses endpoint the *same* `effort:low` still emits reasoning on the
+  Responses endpoint the _same_ `effort:low` still emits reasoning on the
   harder targets — luna up to 78 tok on small icons, terra up to 43, while
   **sol stays at ~0** (max 18 across the whole run). This is the decisive
   cost separator and is only visible via this transport.

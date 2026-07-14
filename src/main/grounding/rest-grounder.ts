@@ -213,8 +213,10 @@ export class RestGrounder {
       const t0 = Date.now();
       try {
         const point = await this.request(query, key);
-        console.debug(`[rest-ground] apiKey ${this.model} ${Date.now() - t0}ms -> ` +
-          (point === null ? 'null' : `(${point.x},${point.y})`));
+        console.debug(
+          `[rest-ground] apiKey ${this.model} ${Date.now() - t0}ms -> ` +
+            (point === null ? 'null' : `(${point.x},${point.y})`),
+        );
         return { point, source: 'apiKey', quotaExhausted: false, usedPercent: null };
       } catch (err) {
         console.debug(`[rest-ground] apiKey failed after ${Date.now() - t0}ms: ${reason(err)}`);
@@ -239,10 +241,12 @@ export class RestGrounder {
     const t0 = Date.now();
     try {
       const outcome = await this.requestCodex(query, bearer, auth.accountId);
-      console.debug(`[rest-ground] codex ${this.codexModel} ${Date.now() - t0}ms -> ` +
-        (outcome.point === null
-          ? `null${outcome.quotaExhausted ? ' (quota)' : ''}`
-          : `(${outcome.point.x},${outcome.point.y})`));
+      console.debug(
+        `[rest-ground] codex ${this.codexModel} ${Date.now() - t0}ms -> ` +
+          (outcome.point === null
+            ? `null${outcome.quotaExhausted ? ' (quota)' : ''}`
+            : `(${outcome.point.x},${outcome.point.y})`),
+      );
       return outcome;
     } catch (err) {
       console.debug(`[rest-ground] codex failed after ${Date.now() - t0}ms: ${reason(err)}`);
@@ -482,11 +486,7 @@ interface CodexStreamResult {
  * usage/rate-limit rejection. Tolerant JSON extraction of {x,y} (the endpoint
  * has no request-level schema). Exported for tests. Never throws.
  */
-export function parseCodexStream(
-  body: string,
-  imageW: number,
-  imageH: number,
-): CodexStreamResult {
+export function parseCodexStream(body: string, imageW: number, imageH: number): CodexStreamResult {
   let deltaText = '';
   let finalText = '';
   let usage: GroundUsage | null = null;

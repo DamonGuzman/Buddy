@@ -19,11 +19,10 @@ function readLocalApiKey() {
   if (processKey !== '') return processKey;
   if (process.platform !== 'win32') return '';
 
-  const result = spawnSync(
-    'reg.exe',
-    ['query', 'HKCU\\Environment', '/v', 'OPENAI_API_KEY'],
-    { encoding: 'utf8', windowsHide: true },
-  );
+  const result = spawnSync('reg.exe', ['query', 'HKCU\\Environment', '/v', 'OPENAI_API_KEY'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
   if (result.status !== 0 || typeof result.stdout !== 'string') return '';
   const match = result.stdout.match(/OPENAI_API_KEY\s+REG_[A-Z_]+\s+([^\r\n]+)/);
   return match?.[1]?.trim() ?? '';
@@ -88,21 +87,17 @@ function spawnElectron() {
     console.warn('[dev] OPENAI_API_KEY is not set; no API key can be imported automatically');
   }
 
-  electronProcess = spawn(
-    process.execPath,
-    [electronViteCli, 'dev', '--watch', ...cliArgs],
-    {
-      cwd: repoRoot,
-      stdio: 'inherit',
-      env: {
-        ...process.env,
-        CLICKY_USER_DATA: activeDevUserData,
-        CLICKY_SHOW_PANEL: process.env.CLICKY_SHOW_PANEL ?? '1',
-        CLICKY_PHONE_AUDIO_URL: process.env.CLICKY_PHONE_AUDIO_URL ?? bridgeSocketUrl,
-        CLICKY_IMPORT_API_KEY_FROM_ENV: localApiKey !== '' ? '1' : '0',
-      },
+  electronProcess = spawn(process.execPath, [electronViteCli, 'dev', '--watch', ...cliArgs], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      CLICKY_USER_DATA: activeDevUserData,
+      CLICKY_SHOW_PANEL: process.env.CLICKY_SHOW_PANEL ?? '1',
+      CLICKY_PHONE_AUDIO_URL: process.env.CLICKY_PHONE_AUDIO_URL ?? bridgeSocketUrl,
+      CLICKY_IMPORT_API_KEY_FROM_ENV: localApiKey !== '' ? '1' : '0',
     },
-  );
+  });
 
   electronProcess.on('error', (error) => {
     console.error('[dev] failed to start Electron:', error);

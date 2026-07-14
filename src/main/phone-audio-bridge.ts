@@ -34,8 +34,10 @@ interface PhoneAudioBridgeEvents {
 const RECONNECT_MIN_MS = 250;
 const RECONNECT_MAX_MS = 4_000;
 
-export class PhoneAudioBridgeClient extends EventEmitter<PhoneAudioBridgeEvents>
-  implements PhoneAudioTransport {
+export class PhoneAudioBridgeClient
+  extends EventEmitter<PhoneAudioBridgeEvents>
+  implements PhoneAudioTransport
+{
   private socket: WebSocket | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectMs = RECONNECT_MIN_MS;

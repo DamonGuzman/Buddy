@@ -38,7 +38,9 @@ import { analyzePlayedAudio } from './verify-audio.mjs';
 
 const argv = process.argv.slice(2);
 const live = argv.includes('--live');
-const debugPort = Number(argv.includes('--debug-port') ? argv[argv.indexOf('--debug-port') + 1] : '8199');
+const debugPort = Number(
+  argv.includes('--debug-port') ? argv[argv.indexOf('--debug-port') + 1] : '8199',
+);
 
 const backend = live ? 'LIVE OPENAI API' : 'MOCK (tools/mock-realtime)';
 console.log(`\n=== VOICE ROUND-TRIP EVAL — backend: ${backend} ===\n`);
@@ -101,7 +103,8 @@ async function latestUserTranscript() {
   const transcript = await api.get('/transcript');
   for (let i = transcript.length - 1; i >= 0; i--) {
     const e = transcript[i];
-    if (e.role === 'user' && e.text && e.text !== '…' && e.text !== '(voice message)') return e.text;
+    if (e.role === 'user' && e.text && e.text !== '…' && e.text !== '(voice message)')
+      return e.text;
   }
   return null;
 }
@@ -211,8 +214,17 @@ try {
         t.tFirstToolCall !== undefined ? t.tFirstToolCall - t.tHoldEnd : null,
       releaseToDoneMs: t.tResponseDone - t.tHoldEnd,
       ...(t.usage ? { usage: t.usage } : {}),
-      playback: { rms: stats.rms, peak: stats.peak, underruns: stats.underruns, samplesPlayed: stats.samplesPlayed },
-      spectral: { pass: analysis.spectralPass, notes: analysis.notes, playedSeconds: analysis.playedSeconds },
+      playback: {
+        rms: stats.rms,
+        peak: stats.peak,
+        underruns: stats.underruns,
+        samplesPlayed: stats.samplesPlayed,
+      },
+      spectral: {
+        pass: analysis.spectralPass,
+        notes: analysis.notes,
+        playedSeconds: analysis.playedSeconds,
+      },
     };
     results.voiceTurns.push(row);
     console.log(
@@ -226,7 +238,10 @@ try {
   // Keep the final ring as evidence.
   const finalOutput = await fetchAndVerifyOutput();
   writeFileSync(path.join(resultsDir, 'last-output.wav'), finalOutput.buf);
-  writeFileSync(path.join(resultsDir, 'last-output.analysis.json'), JSON.stringify(finalOutput.analysis, null, 2));
+  writeFileSync(
+    path.join(resultsDir, 'last-output.analysis.json'),
+    JSON.stringify(finalOutput.analysis, null, 2),
+  );
 
   // -------------------------------------------------------------------------
   // B. BARGE-IN x3
@@ -248,7 +263,9 @@ try {
     const timed = await waitFor(
       async () => {
         const { history } = await api.get('/timings');
-        const turn = history.find((h) => h.turnId !== prev && h.kind === 'text' && h.bargeInStopMs !== undefined);
+        const turn = history.find(
+          (h) => h.turnId !== prev && h.kind === 'text' && h.bargeInStopMs !== undefined,
+        );
         return turn ?? null;
       },
       { timeoutMs: 10_000, intervalMs: 80, label: 'bargeInStopMs' },
@@ -305,7 +322,9 @@ try {
       assistantState: state.assistantState,
       pass: after.history.length === before && state.assistantState === 'idle',
     };
-    console.log(`  no turn created: ${!results.shortHold.turnCreated}, state: ${state.assistantState}`);
+    console.log(
+      `  no turn created: ${!results.shortHold.turnCreated}, state: ${state.assistantState}`,
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -347,7 +366,9 @@ results.medians = {
   releaseToFirstUserTranscriptMs: median(
     v.map((t) => t.releaseToFirstUserTranscriptMs).filter((x) => x !== null),
   ),
-  releaseToFirstToolCallMs: median(v.map((t) => t.releaseToFirstToolCallMs).filter((x) => x !== null)),
+  releaseToFirstToolCallMs: median(
+    v.map((t) => t.releaseToFirstToolCallMs).filter((x) => x !== null),
+  ),
   releaseToFirstAudioDeltaMs: median(v.map((t) => t.releaseToFirstAudioDeltaMs)),
   firstDeltaToFirstPlayedMs: median(v.map((t) => t.firstDeltaToFirstPlayedMs)),
   releaseToDoneMs: median(v.map((t) => t.releaseToDoneMs)),
@@ -367,7 +388,9 @@ results.gates = {
   // The spectral melody check is mock-only (live output is speech, not the
   // mock's three-note melody): in live mode require audible played speech.
   spectral: live ? v.every((t) => t.spectral.playedSeconds > 0.5) : v.every((t) => t.spectral.pass),
-  ...(live ? { spectralNote: 'live: playedSeconds > 0.5 (speech), melody check is mock-only' } : {}),
+  ...(live
+    ? { spectralNote: 'live: playedSeconds > 0.5 (speech), melody check is mock-only' }
+    : {}),
   bargeInUnder300: results.bargeIns.every((b) => b.bargeInStopMs < 300),
   shortHold: results.shortHold?.pass ?? false,
   silenceHold: results.silenceHold?.pass ?? false,

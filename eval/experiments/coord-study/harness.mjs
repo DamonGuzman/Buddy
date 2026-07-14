@@ -48,10 +48,22 @@ const POINT_AT_PIXELS = {
   parameters: {
     type: 'object',
     properties: {
-      x: { type: 'integer', description: 'X of the CENTER of the target, in pixels of the screenshot for `screen`.' },
-      y: { type: 'integer', description: 'Y of the CENTER of the target, in pixels of the screenshot for `screen`.' },
-      label: { type: 'string', description: 'Short human label of what is at this spot, e.g. "the save button".' },
-      screen: { type: 'integer', description: 'Index of the screenshot the coordinates refer to (screen0 = 0, ...).' },
+      x: {
+        type: 'integer',
+        description: 'X of the CENTER of the target, in pixels of the screenshot for `screen`.',
+      },
+      y: {
+        type: 'integer',
+        description: 'Y of the CENTER of the target, in pixels of the screenshot for `screen`.',
+      },
+      label: {
+        type: 'string',
+        description: 'Short human label of what is at this spot, e.g. "the save button".',
+      },
+      screen: {
+        type: 'integer',
+        description: 'Index of the screenshot the coordinates refer to (screen0 = 0, ...).',
+      },
     },
     required: ['x', 'y', 'label', 'screen'],
   },
@@ -67,10 +79,20 @@ const POINT_AT_NORMALIZED = {
   parameters: {
     type: 'object',
     properties: {
-      x: { type: 'integer', description: 'X of the CENTER of the target, normalized 0-1000 across the screenshot width.' },
-      y: { type: 'integer', description: 'Y of the CENTER of the target, normalized 0-1000 down the screenshot height.' },
+      x: {
+        type: 'integer',
+        description:
+          'X of the CENTER of the target, normalized 0-1000 across the screenshot width.',
+      },
+      y: {
+        type: 'integer',
+        description: 'Y of the CENTER of the target, normalized 0-1000 down the screenshot height.',
+      },
       label: { type: 'string', description: 'Short human label of what is at this spot.' },
-      screen: { type: 'integer', description: 'Index of the screenshot the coordinates refer to (screen0 = 0, ...).' },
+      screen: {
+        type: 'integer',
+        description: 'Index of the screenshot the coordinates refer to (screen0 = 0, ...).',
+      },
     },
     required: ['x', 'y', 'label', 'screen'],
   },
@@ -79,7 +101,7 @@ const POINT_AT_NORMALIZED = {
 const BASE_INSTRUCTIONS =
   'you are a precise ui pointing assistant. the user names an on-screen target; call the ' +
   'point_at tool with its location, aiming for the center of the target. you always have what ' +
-  "you need to point: estimate the position by looking at the screenshot. never refuse because " +
+  'you need to point: estimate the position by looking at the screenshot. never refuse because ' +
   "you 'don't have exact pixel coordinates' — nobody does; your best visual estimate is exactly " +
   'what point_at expects. keep any text reply to one short sentence.';
 
@@ -194,35 +216,51 @@ class StudySession {
       this.ws = ws;
       let settled = false;
       const timeout = setTimeout(() => {
-        if (!settled) { settled = true; ws.terminate(); reject(new Error('handshake timeout')); }
+        if (!settled) {
+          settled = true;
+          ws.terminate();
+          reject(new Error('handshake timeout'));
+        }
       }, 15_000);
       ws.on('message', (data) => {
         let evt;
-        try { evt = JSON.parse(data.toString('utf8')); } catch { return; }
+        try {
+          evt = JSON.parse(data.toString('utf8'));
+        } catch {
+          return;
+        }
         if (!settled && evt.type === 'session.created') {
           settled = true;
           clearTimeout(timeout);
-          ws.send(JSON.stringify({
-            type: 'session.update',
-            session: {
-              type: 'realtime',
-              instructions: this.instructions,
-              output_modalities: ['text'],
-              tools: [this.tool],
-            },
-          }));
+          ws.send(
+            JSON.stringify({
+              type: 'session.update',
+              session: {
+                type: 'realtime',
+                instructions: this.instructions,
+                output_modalities: ['text'],
+                tools: [this.tool],
+              },
+            }),
+          );
           resolve();
           return;
         }
         this.onEvent(evt);
       });
       ws.on('error', (err) => {
-        if (!settled) { settled = true; clearTimeout(timeout); reject(err); }
-        else this.pending?.fail(err);
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          reject(err);
+        } else this.pending?.fail(err);
       });
       ws.on('close', () => {
-        if (!settled) { settled = true; clearTimeout(timeout); reject(new Error('closed during handshake')); }
-        else this.pending?.fail(new Error('connection closed mid-turn'));
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          reject(new Error('closed during handshake'));
+        } else this.pending?.fail(new Error('connection closed mid-turn'));
       });
     });
   }
@@ -238,12 +276,23 @@ class StudySession {
         break;
       case 'response.function_call_arguments.done': {
         if (!p) break;
-        p.toolCalls.push({ callId: evt.call_id, name: evt.name, rawArgs: evt.arguments, tMs: Date.now() - p.t0 });
+        p.toolCalls.push({
+          callId: evt.call_id,
+          name: evt.name,
+          rawArgs: evt.arguments,
+          tMs: Date.now() - p.t0,
+        });
         // ack the tool call so the item isn't dangling; do NOT request a continue
-        this.ws.send(JSON.stringify({
-          type: 'conversation.item.create',
-          item: { type: 'function_call_output', call_id: evt.call_id, output: JSON.stringify({ ok: true }) },
-        }));
+        this.ws.send(
+          JSON.stringify({
+            type: 'conversation.item.create',
+            item: {
+              type: 'function_call_output',
+              call_id: evt.call_id,
+              output: JSON.stringify({ ok: true }),
+            },
+          }),
+        );
         break;
       }
       case 'response.done': {
@@ -273,7 +322,11 @@ class StudySession {
         // cancel the stuck response server-side, otherwise every subsequent
         // response.create in this session is rejected with
         // "conversation already has an active response"
-        try { this.ws.send(JSON.stringify({ type: 'response.cancel' })); } catch { /* dead ws */ }
+        try {
+          this.ws.send(JSON.stringify({ type: 'response.cancel' }));
+        } catch {
+          /* dead ws */
+        }
         reject(new Error(`response timeout after ${RESPONSE_TIMEOUT_MS}ms`));
       }, RESPONSE_TIMEOUT_MS);
       this.pending = {
@@ -282,7 +335,12 @@ class StudySession {
         toolCalls: [],
         done: (info) => {
           clearTimeout(timeout);
-          const out = { text: this.pending.text, toolCalls: this.pending.toolCalls, totalMs: Date.now() - t0, ...info };
+          const out = {
+            text: this.pending.text,
+            toolCalls: this.pending.toolCalls,
+            totalMs: Date.now() - t0,
+            ...info,
+          };
           this.pending = null;
           resolve(out);
         },
@@ -297,16 +355,22 @@ class StudySession {
         { type: 'input_image', image_url: `data:image/jpeg;base64,${imageBase64}` },
         { type: 'input_text', text: askText },
       ];
-      this.ws.send(JSON.stringify({
-        type: 'conversation.item.create',
-        item: { type: 'message', role: 'user', content },
-      }));
+      this.ws.send(
+        JSON.stringify({
+          type: 'conversation.item.create',
+          item: { type: 'message', role: 'user', content },
+        }),
+      );
       this.ws.send(JSON.stringify({ type: 'response.create' }));
     });
   }
 
   close() {
-    try { this.ws?.close(1000, 'done'); } catch { /* ignore */ }
+    try {
+      this.ws?.close(1000, 'done');
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -320,13 +384,29 @@ function parseArgs(argv) {
   return args;
 }
 
-export async function runCondition({ model, conditionName, layoutName, image, targets, W, H, outPath }) {
+export async function runCondition({
+  model,
+  conditionName,
+  layoutName,
+  image,
+  targets,
+  W,
+  H,
+  outPath,
+}) {
   const cond = CONDITIONS[conditionName];
   if (!cond) throw new Error(`unknown condition ${conditionName}`);
   const apiKey = getApiKey();
-  const session = new StudySession({ model, instructions: cond.instructions, tool: cond.tool, apiKey });
+  const session = new StudySession({
+    model,
+    instructions: cond.instructions,
+    tool: cond.tool,
+    apiKey,
+  });
   await session.connect();
-  console.log(`[${model} | ${conditionName} | ${layoutName}] session up, ${targets.length} targets`);
+  console.log(
+    `[${model} | ${conditionName} | ${layoutName}] session up, ${targets.length} targets`,
+  );
   const framingText = cond.framing(W, H);
   const records = [];
   for (const t of targets) {
@@ -337,7 +417,11 @@ export async function runCondition({ model, conditionName, layoutName, image, ta
       const call = res.toolCalls[0] ?? null;
       if (call) {
         let parsed = null;
-        try { parsed = JSON.parse(call.rawArgs); } catch { /* keep null */ }
+        try {
+          parsed = JSON.parse(call.rawArgs);
+        } catch {
+          /* keep null */
+        }
         if (parsed && typeof parsed.x === 'number' && typeof parsed.y === 'number') {
           let px = parsed.x;
           let py = parsed.y;
@@ -362,8 +446,11 @@ export async function runCondition({ model, conditionName, layoutName, image, ta
       rec.modelText = res.text;
       rec.status = res.status;
       rec.totalMs = res.totalMs;
-      const errStr = rec.err !== undefined ? `${Math.round(rec.err)}px` : (rec.refused ? 'REFUSED' : 'INVALID');
-      console.log(`  ${t.id.padEnd(8)} gt(${t.cx},${t.cy}) -> ${rec.pred ? `(${Math.round(rec.pred.x)},${Math.round(rec.pred.y)})` : '-'} err=${errStr}`);
+      const errStr =
+        rec.err !== undefined ? `${Math.round(rec.err)}px` : rec.refused ? 'REFUSED' : 'INVALID';
+      console.log(
+        `  ${t.id.padEnd(8)} gt(${t.cx},${t.cy}) -> ${rec.pred ? `(${Math.round(rec.pred.x)},${Math.round(rec.pred.y)})` : '-'} err=${errStr}`,
+      );
     } catch (err) {
       rec.error = String(err.message ?? err);
       console.log(`  ${t.id.padEnd(8)} ERROR: ${rec.error}`);
@@ -387,12 +474,19 @@ export async function runCondition({ model, conditionName, layoutName, image, ta
 }
 
 // CLI entry
-const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1].replace(/\\/g, '/').replace(/^([a-z]):/i, (m) => m.toUpperCase()) || process.argv[1]?.endsWith('harness.mjs');
+const isMain =
+  (process.argv[1] &&
+    fileURLToPath(import.meta.url) ===
+      process.argv[1].replace(/\\/g, '/').replace(/^([a-z]):/i, (m) => m.toUpperCase())) ||
+  process.argv[1]?.endsWith('harness.mjs');
 if (isMain) {
   const args = parseArgs(process.argv);
   const model = args.model ?? 'gpt-realtime-2.1';
   const conditionName = args.condition;
-  if (!conditionName) { console.error('need --condition'); process.exit(1); }
+  if (!conditionName) {
+    console.error('need --condition');
+    process.exit(1);
+  }
   const spec = JSON.parse(readFileSync(join(ROOT, 'layouts.json'), 'utf8'));
   const cond = CONDITIONS[conditionName];
 
@@ -404,16 +498,32 @@ if (isMain) {
     const targets = JSON.parse(readFileSync(join(ROOT, args.targets), 'utf8'));
     const image = readFileSync(join(ROOT, args.image)).toString('base64');
     const outPath = join(ROOT, 'results', `${model}--${conditionName}--real.json`);
-    await runCondition({ model, conditionName, layoutName: 'real', image, targets: cap(targets.targets), W: targets.width, H: targets.height, outPath });
+    await runCondition({
+      model,
+      conditionName,
+      layoutName: 'real',
+      image,
+      targets: cap(targets.targets),
+      W: targets.width,
+      H: targets.height,
+      outPath,
+    });
   } else {
     const layouts = (args.layouts ?? 'A,B').split(',');
     for (const layoutName of layouts) {
-      const image = readFileSync(join(ROOT, 'images', `${layoutName}-${cond.variant}.jpg`)).toString('base64');
+      const image = readFileSync(
+        join(ROOT, 'images', `${layoutName}-${cond.variant}.jpg`),
+      ).toString('base64');
       const outPath = join(ROOT, 'results', `${model}--${conditionName}--${layoutName}.json`);
       await runCondition({
-        model, conditionName, layoutName, image,
+        model,
+        conditionName,
+        layoutName,
+        image,
         targets: cap(spec.layouts[layoutName].targets),
-        W: spec.width, H: spec.height, outPath,
+        W: spec.width,
+        H: spec.height,
+        outPath,
       });
     }
   }

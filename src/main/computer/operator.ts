@@ -3,10 +3,7 @@ import type { ChatGptCodexAuthSource } from '../auth/auth-source';
 import { captureAllDisplays } from '../capture';
 import type { CaptureResult } from '../capture';
 import { mapModelPoint } from '../coords';
-import {
-  CodexResponsesSession,
-  DEFAULT_CODEX_MODEL,
-} from '../codex/responses-session';
+import { CodexResponsesSession, DEFAULT_CODEX_MODEL } from '../codex/responses-session';
 import type {
   CodexFunctionCall,
   CodexResponsesCallbacks,
@@ -36,7 +33,8 @@ rules:
 export const CLICK_AT_TOOL: CodexToolDef = {
   type: 'function',
   name: 'click_at',
-  description: 'Click the center of a visible target. Coordinates are pixels in the named screenshot.',
+  description:
+    'Click the center of a visible target. Coordinates are pixels in the named screenshot.',
   parameters: {
     type: 'object',
     properties: {
@@ -100,26 +98,31 @@ export class ComputerUseOperator {
   constructor(private readonly options: ComputerUseOperatorOptions) {
     this.capture = options.capture ?? captureAllDisplays;
     this.captures = options.initialCaptures ?? [];
-    this.session = options.buildSession?.(options.auth) ?? new CodexResponsesSession({
-      auth: options.auth,
-      model: DEFAULT_CODEX_MODEL,
-      instructions: OPERATOR_INSTRUCTIONS,
-      tools: [CLICK_AT_TOOL, TYPE_TEXT_TOOL, PRESS_KEYS_TOOL],
-      reasoningEffort: 'low',
-      serviceTier: 'priority',
-      timeoutMs: 45_000,
-    });
+    this.session =
+      options.buildSession?.(options.auth) ??
+      new CodexResponsesSession({
+        auth: options.auth,
+        model: DEFAULT_CODEX_MODEL,
+        instructions: OPERATOR_INSTRUCTIONS,
+        tools: [CLICK_AT_TOOL, TYPE_TEXT_TOOL, PRESS_KEYS_TOOL],
+        reasoningEffort: 'low',
+        serviceTier: 'priority',
+        timeoutMs: 45_000,
+      });
   }
 
   async run(task: string): Promise<ComputerUseResult> {
     if (!this.options.isAllowed()) return stopped(0);
     if (this.captures.length === 0) this.captures = await this.capture();
-    if (this.captures.length === 0) return failure('i could not see the screen, so i did not act.', 0);
+    if (this.captures.length === 0)
+      return failure('i could not see the screen, so i did not act.', 0);
 
     let calls: CodexFunctionCall[] = [];
     const callbacks: CodexResponsesCallbacks = {
       onFunctionCall: (call) => calls.push(call),
-      onTextDone: (_id, text) => { if (text.trim()) this.finalText = text.trim(); },
+      onTextDone: (_id, text) => {
+        if (text.trim()) this.finalText = text.trim();
+      },
     };
     let result = await this.session.submit(this.turn(task), callbacks);
     let actions = 0;
@@ -127,11 +130,18 @@ export class ComputerUseOperator {
     for (;;) {
       const failed = resultFailure(result, actions);
       if (failed) return failed;
-      if (!this.options.isAllowed()) { this.session.cancel(); return stopped(actions); }
+      if (!this.options.isAllowed()) {
+        this.session.cancel();
+        return stopped(actions);
+      }
       if (calls.length === 0) {
         return { ok: true, summary: this.finalText || 'done.', actions, quotaExhausted: false };
       }
-      if (actions >= MAX_ACTIONS) return failure('i stopped after twelve actions before the task was clearly complete.', actions);
+      if (actions >= MAX_ACTIONS)
+        return failure(
+          'i stopped after twelve actions before the task was clearly complete.',
+          actions,
+        );
 
       const [first, ...extra] = calls;
       calls = [];
@@ -139,15 +149,27 @@ export class ComputerUseOperator {
       const output = await this.execute(first);
       this.session.sendToolOutput(first.callId, output);
       for (const call of extra) {
-        this.session.sendToolOutput(call.callId, { error: 'only one action is allowed per screen observation' });
+        this.session.sendToolOutput(call.callId, {
+          error: 'only one action is allowed per screen observation',
+        });
       }
-      if (output['ok'] !== true) return failure(String(output['error'] || 'the action failed.'), actions);
+      if (output['ok'] !== true)
+        return failure(String(output['error'] || 'the action failed.'), actions);
       actions += 1;
       await delay(SETTLE_MS);
-      if (!this.options.isAllowed()) { this.session.cancel(); return stopped(actions); }
+      if (!this.options.isAllowed()) {
+        this.session.cancel();
+        return stopped(actions);
+      }
       this.captures = await this.capture();
-      if (this.captures.length === 0) return failure('i lost sight of the screen after acting, so i stopped.', actions);
-      result = await this.session.continueWithTurn(this.turn('the previous action completed. inspect this fresh screen state and either take the next single action or finish.'), callbacks);
+      if (this.captures.length === 0)
+        return failure('i lost sight of the screen after acting, so i stopped.', actions);
+      result = await this.session.continueWithTurn(
+        this.turn(
+          'the previous action completed. inspect this fresh screen state and either take the next single action or finish.',
+        ),
+        callbacks,
+      );
     }
   }
 
@@ -165,14 +187,17 @@ export class ComputerUseOperator {
       const parsed: unknown = JSON.parse(call.argsJson || '{}');
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
       args = parsed as Record<string, unknown>;
-    } catch { return { error: 'arguments were not valid json' }; }
+    } catch {
+      return { error: 'arguments were not valid json' };
+    }
 
     try {
       if (call.name === 'click_at') {
         const screenIndex = finiteNumber(args['screen']);
         const x = finiteNumber(args['x']);
         const y = finiteNumber(args['y']);
-        if (screenIndex === null || x === null || y === null) return { error: 'screen, x, and y must be numbers' };
+        if (screenIndex === null || x === null || y === null)
+          return { error: 'screen, x, and y must be numbers' };
         const capture = this.captures.find((item) => item.meta.screenIndex === screenIndex);
         if (!capture) return { error: 'that screenshot does not exist' };
         const mapped = mapModelPoint({ x, y }, capture.meta);
@@ -180,15 +205,24 @@ export class ComputerUseOperator {
         const button = isButton(args['button']) ? args['button'] : 'left';
         const count = args['count'] === 2 ? 2 : 1;
         await this.options.input.click(physical.x, physical.y, button, count);
-        return { ok: true, clicked: typeof args['label'] === 'string' ? args['label'].slice(0, 200) : '' };
+        return {
+          ok: true,
+          clicked: typeof args['label'] === 'string' ? args['label'].slice(0, 200) : '',
+        };
       }
       if (call.name === 'type_text') {
-        if (typeof args['text'] !== 'string' || args['text'].length > 10_000) return { error: 'text must be at most 10000 characters' };
+        if (typeof args['text'] !== 'string' || args['text'].length > 10_000)
+          return { error: 'text must be at most 10000 characters' };
         await this.options.input.typeText(args['text']);
         return { ok: true, typed_characters: args['text'].length };
       }
       if (call.name === 'press_keys') {
-        if (!Array.isArray(args['keys']) || args['keys'].length < 1 || args['keys'].length > 8 || !args['keys'].every((key) => typeof key === 'string')) {
+        if (
+          !Array.isArray(args['keys']) ||
+          args['keys'].length < 1 ||
+          args['keys'].length > 8 ||
+          !args['keys'].every((key) => typeof key === 'string')
+        ) {
           return { error: 'keys must be an array of one to eight strings' };
         }
         await this.options.input.pressKeys(args['keys'] as string[]);
@@ -202,18 +236,36 @@ export class ComputerUseOperator {
 }
 
 function captureContext(captures: CaptureResult[]): string {
-  return captures.map((capture) => {
-    const m = capture.meta;
-    return `screen${m.screenIndex}: ${m.imageW}x${m.imageH} screenshot pixels${m.isActive ? ' (active)' : ''}; coordinates use this image.`;
-  }).join('\n');
+  return captures
+    .map((capture) => {
+      const m = capture.meta;
+      return `screen${m.screenIndex}: ${m.imageW}x${m.imageH} screenshot pixels${m.isActive ? ' (active)' : ''}; coordinates use this image.`;
+    })
+    .join('\n');
 }
-function finiteNumber(value: unknown): number | null { return typeof value === 'number' && Number.isFinite(value) ? value : null; }
-function isButton(value: unknown): value is MouseButton { return value === 'left' || value === 'right' || value === 'middle'; }
-function delay(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
-function failure(summary: string, actions: number): ComputerUseResult { return { ok: false, summary, actions, quotaExhausted: false }; }
-function stopped(actions: number): ComputerUseResult { return failure('computer use was turned off or the turn was superseded, so i stopped.', actions); }
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+function isButton(value: unknown): value is MouseButton {
+  return value === 'left' || value === 'right' || value === 'middle';
+}
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function failure(summary: string, actions: number): ComputerUseResult {
+  return { ok: false, summary, actions, quotaExhausted: false };
+}
+function stopped(actions: number): ComputerUseResult {
+  return failure('computer use was turned off or the turn was superseded, so i stopped.', actions);
+}
 function resultFailure(result: CodexTurnResult, actions: number): ComputerUseResult | null {
-  if (result.quotaExhausted) return { ok: false, summary: 'chatgpt fast-mode usage is unavailable right now, so i did not continue.', actions, quotaExhausted: true };
+  if (result.quotaExhausted)
+    return {
+      ok: false,
+      summary: 'chatgpt fast-mode usage is unavailable right now, so i did not continue.',
+      actions,
+      quotaExhausted: true,
+    };
   if (result.aborted) return stopped(actions);
   if (result.error) return failure(`the sol operator stopped: ${result.error.message}`, actions);
   return null;

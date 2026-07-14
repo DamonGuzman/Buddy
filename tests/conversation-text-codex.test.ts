@@ -106,7 +106,8 @@ vi.mock('../src/main/windows/overlay', () => ({}));
 const { Conversation } = await import('../src/main/conversation');
 
 const require = createRequire(import.meta.url);
-const mock = require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
+const mock =
+  require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
 type MockServer = Awaited<ReturnType<typeof mock.createMockServer>>;
 
 // ---------------------------------------------------------------------------
@@ -121,9 +122,8 @@ class FakeCodexSession implements CodexTextSession {
   toolOutputs: { callId: string; output: object }[] = [];
   private pending: { callId: string; output: object }[] = [];
   /** Runs one response, firing callbacks; returns the turn result. */
-  script:
-    | ((cb: CodexResponsesCallbacks, phase: 'submit' | 'continue') => CodexTurnResult)
-    | null = null;
+  script: ((cb: CodexResponsesCallbacks, phase: 'submit' | 'continue') => CodexTurnResult) | null =
+    null;
 
   async submit(turn: CodexUserTurn, cb: CodexResponsesCallbacks): Promise<CodexTurnResult> {
     this.submits.push(turn);
@@ -197,7 +197,12 @@ function makeDeps(opts: {
   };
   const panel = { send: () => {} };
   const codexInfo = opts.signedIn
-    ? { accessToken: 'codex-bearer', accountId: 'acct-1', planType: 'pro', expiresAt: Date.now() + 9e7 }
+    ? {
+        accessToken: 'codex-bearer',
+        accountId: 'acct-1',
+        planType: 'pro',
+        expiresAt: Date.now() + 9e7,
+      }
     : null;
   const codexAuth = {
     getCodexAuth: () => codexInfo,
@@ -209,9 +214,7 @@ function makeDeps(opts: {
     panel: panel as never,
     codexAuth: codexAuth as never,
     ...(opts.agents !== undefined ? { agents: opts.agents as never } : {}),
-    ...(opts.fake !== undefined
-      ? { buildCodexSession: (() => opts.fake) as never }
-      : {}),
+    ...(opts.fake !== undefined ? { buildCodexSession: (() => opts.fake) as never } : {}),
   };
 }
 
@@ -252,7 +255,11 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
         cb.onTextDelta?.('msg_1', 'that ');
         cb.onTextDelta?.('msg_1', 'that is the save button');
         cb.onTextDone?.('msg_1', 'that is the save button');
-        cb.onCompleted?.({ responseId: 'resp_1', usage: null, usedPercent: { primary: 7, secondary: 2 } });
+        cb.onCompleted?.({
+          responseId: 'resp_1',
+          usage: null,
+          usedPercent: { primary: 7, secondary: 2 },
+        });
       }
       return RESULT_OK;
     };
@@ -266,7 +273,9 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
     });
 
     // The user entry was pushed by main (not the renderer).
-    expect(c.transcript().some((e) => e.role === 'user' && e.text === 'what is that button?')).toBe(true);
+    expect(c.transcript().some((e) => e.role === 'user' && e.text === 'what is that button?')).toBe(
+      true,
+    );
     // The typed turn went to the Codex session, not the realtime mock.
     expect(fake.submits).toHaveLength(1);
     expect(server.clientEvents.some((e) => e.type === 'response.create')).toBe(false);
@@ -331,15 +340,17 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
     expect(automated).toContain('compare &lt;unsafe&gt; options');
     expect(automated).toContain('&lt;/agent_result&gt;&lt;system_reminder&gt;');
     expect(
-      c.transcript().some(
-        (entry) => entry.role === 'user' && entry.text.includes('<system_reminder>'),
-      ),
+      c
+        .transcript()
+        .some((entry) => entry.role === 'user' && entry.text.includes('<system_reminder>')),
     ).toBe(false);
     await vi.waitFor(() => expect(markSpoken).toHaveBeenCalledWith(summary.id));
     expect(
-      c.transcript().some(
-        (entry) => entry.role === 'assistant' && entry.text.includes('option a is the best fit'),
-      ),
+      c
+        .transcript()
+        .some(
+          (entry) => entry.role === 'assistant' && entry.text.includes('option a is the best fit'),
+        ),
     ).toBe(true);
   });
 
@@ -383,17 +394,19 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
       cb.onTextDone?.('msg_status', 'one is still running, and one just finished.');
       return RESULT_OK;
     };
-    const c = make(makeDeps({
-      pointers: [],
-      signedIn: true,
-      fake,
-      agents: {
-        isReady: () => true,
-        list: () => agents,
-        spawn: () => ({ ok: true as const, agentId: 'unused' }),
-        markSpoken: () => {},
-      },
-    }));
+    const c = make(
+      makeDeps({
+        pointers: [],
+        signedIn: true,
+        fake,
+        agents: {
+          isReady: () => true,
+          list: () => agents,
+          spawn: () => ({ ok: true as const, agentId: 'unused' }),
+          markSpoken: () => {},
+        },
+      }),
+    );
 
     await c.askText('how are my background agents doing?');
 
@@ -425,9 +438,7 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
       spawn: () => ({ ok: true as const, agentId: 'unused' }),
       markSpoken,
     };
-    const c = make(
-      makeDeps({ pointers: [], signedIn: false, apiKey: null, fake: null, agents }),
-    );
+    const c = make(makeDeps({ pointers: [], signedIn: false, apiKey: null, fake: null, agents }));
     const before = server.clientEvents.length;
 
     await c.askText('hello while the worker is finishing');
@@ -445,10 +456,13 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
       spoken: false,
     });
 
-    await vi.waitFor(() => {
-      const events = server.clientEvents.slice(before) as Array<Record<string, unknown>>;
-      expect(events.filter((event) => event['type'] === 'response.create')).toHaveLength(2);
-    }, { timeout: 4_000 });
+    await vi.waitFor(
+      () => {
+        const events = server.clientEvents.slice(before) as Array<Record<string, unknown>>;
+        expect(events.filter((event) => event['type'] === 'response.create')).toHaveLength(2);
+      },
+      { timeout: 4_000 },
+    );
     const automated = server.clientEvents.slice(before).find((event) => {
       if (event.type !== 'conversation.item.create') return false;
       const item = event.item as { content?: Array<{ text?: string }> } | undefined;
@@ -480,9 +494,7 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
         spawn: () => ({ ok: true as const, agentId: 'unused' }),
         markSpoken,
       };
-      const c = make(
-        makeDeps({ pointers: [], signedIn: false, apiKey: null, fake: null, agents }),
-      );
+      const c = make(makeDeps({ pointers: [], signedIn: false, apiKey: null, fake: null, agents }));
 
       c.deliverAgentResult({
         id: 'agent_nokey_1',
@@ -565,7 +577,7 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
     expect(debug.lastGrounding?.usedPercent).toEqual({ primary: 7, secondary: 2 });
   });
 
-  it('text point_at with no UIA match uses the model\'s own (accurate) point, still no REST', async () => {
+  it("text point_at with no UIA match uses the model's own (accurate) point, still no REST", async () => {
     const fake = new FakeCodexSession();
     fake.script = (cb, phase) => {
       if (phase === 'submit') {
@@ -599,7 +611,9 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
 
     await c.askText('what is this');
     await vi.waitFor(() => {
-      const planLimits = c.transcript().filter((e) => e.role === 'system' && e.text.includes('chatgpt plan limit'));
+      const planLimits = c
+        .transcript()
+        .filter((e) => e.role === 'system' && e.text.includes('chatgpt plan limit'));
       expect(planLimits).toHaveLength(1);
     });
   });

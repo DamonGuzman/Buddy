@@ -67,7 +67,7 @@ export function AgentCluster({
   const slots = helperSlots(slotCount, dir, vdir);
   const hoveredAgent =
     hoveredKey !== null && hoveredKey !== OVERFLOW_KEY
-      ? [...view.shown, ...view.overflow].find((a) => a.id === hoveredKey) ?? null
+      ? ([...view.shown, ...view.overflow].find((a) => a.id === hoveredKey) ?? null)
       : null;
 
   return (
@@ -188,7 +188,13 @@ function HelperSprite({
 }
 
 /** A 22px sibling of BuddySvg with a per-agent gradient (unique defs id). */
-function HelperSvg({ id, tint }: { id: string; tint: { light: string; dark: string } }): React.JSX.Element {
+function HelperSvg({
+  id,
+  tint,
+}: {
+  id: string;
+  tint: { light: string; dark: string };
+}): React.JSX.Element {
   const gid = `helper-grad-${id}`;
   return (
     <svg className="helper-svg" width={22} height={22} viewBox="0 0 40 40" aria-hidden="true">

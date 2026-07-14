@@ -1,0 +1,10 @@
+node_modules/
+out/
+dist/
+build/*.ico
+build/*.png
+eval/results/
+eval/experiments/coord-study/results/
+sessions/
+package-lock.json
+*.ps1

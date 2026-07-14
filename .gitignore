@@ -8,3 +8,6 @@ dist/
 # M8.5 eval harness: generated audio + run artifacts (evidence files force-added per run)
 eval/audio/
 eval/results/
+
+# Windows reserved-name artifact from cmd-style redirects
+NUL

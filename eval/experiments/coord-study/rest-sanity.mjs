@@ -32,7 +32,8 @@ const norm = args.norm !== undefined;
 const conditionName = (norm ? 'rest-norm' : 'rest-plain') + (effort ? `-${effort}` : '');
 const apiKey = getApiKey();
 const spec = JSON.parse(readFileSync(join(ROOT, 'layouts.json'), 'utf8'));
-const W = spec.width, H = spec.height;
+const W = spec.width,
+  H = spec.height;
 
 const SYSTEM = norm
   ? 'You are a precise UI grounding model. The user names an on-screen target in the attached ' +
@@ -43,7 +44,7 @@ const SYSTEM = norm
   : 'You are a precise UI grounding model. The user names an on-screen target in the attached ' +
     `screenshot (${W}x${H} pixels, origin top-left). Respond with ONLY a JSON object ` +
     '{"x": <int>, "y": <int>, "label": "<short label>"} giving the pixel coordinates of the ' +
-    "CENTER of the target. No prose, no code fences.";
+    'CENTER of the target. No prose, no code fences.';
 
 async function pointOnce(imageB64, ask) {
   const t0 = Date.now();
@@ -71,7 +72,11 @@ async function pointOnce(imageB64, ask) {
   if (!res.ok) throw new Error(j.error?.message ?? `http ${res.status}`);
   const text = j.choices?.[0]?.message?.content ?? '';
   let parsed = null;
-  try { parsed = JSON.parse(text); } catch { /* keep null */ }
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    /* keep null */
+  }
   return { parsed, text, latencyMs: Date.now() - t0, usage: j.usage };
 }
 
@@ -115,7 +120,9 @@ for (const { layoutName, imageFile, targets: allTargets } of jobs) {
       rec.latencyMs = res.latencyMs;
       rec.status = 'completed';
       if (res.usage) usage.push(res.usage);
-      console.log(`  ${t.id.padEnd(8)} gt(${t.cx},${t.cy}) -> ${rec.pred ? `(${rec.pred.x},${rec.pred.y})` : '-'} err=${rec.err !== undefined ? Math.round(rec.err) + 'px' : 'INVALID'}`);
+      console.log(
+        `  ${t.id.padEnd(8)} gt(${t.cx},${t.cy}) -> ${rec.pred ? `(${rec.pred.x},${rec.pred.y})` : '-'} err=${rec.err !== undefined ? Math.round(rec.err) + 'px' : 'INVALID'}`,
+      );
     } catch (err) {
       rec.error = String(err.message ?? err);
       rec.status = 'failed';
@@ -125,9 +132,21 @@ for (const { layoutName, imageFile, targets: allTargets } of jobs) {
   }
   const outPath = join(ROOT, 'results', `${model}--${conditionName}--${layoutName}.json`);
   mkdirSync(dirname(outPath), { recursive: true });
-  writeFileSync(outPath, JSON.stringify({
-    model, condition: conditionName, layout: layoutName, imageDims: { W, H },
-    timestamp: new Date().toISOString(), records, usage,
-  }, null, 2));
+  writeFileSync(
+    outPath,
+    JSON.stringify(
+      {
+        model,
+        condition: conditionName,
+        layout: layoutName,
+        imageDims: { W, H },
+        timestamp: new Date().toISOString(),
+        records,
+        usage,
+      },
+      null,
+      2,
+    ),
+  );
   console.log(`  -> ${outPath}`);
 }

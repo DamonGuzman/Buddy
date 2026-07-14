@@ -238,7 +238,12 @@ export function helperStatus(agent: AgentSummary): HelperStatusView {
         cta: 'click to see how far i got',
       };
     case 'cancelled':
-      return { pill: 'stopped', kind: 'trouble', line: 'you asked me to stop, so i did', cta: null };
+      return {
+        pill: 'stopped',
+        kind: 'trouble',
+        line: 'you asked me to stop, so i did',
+        cta: null,
+      };
   }
 }
 
