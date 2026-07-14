@@ -154,6 +154,11 @@ function BuddySvg({
           <circle cx={25.9} cy={25.1} r={1.55} fill="#173a63" />
         </g>
       </g>
+      <g className="buddy-mouth" aria-hidden="true">
+        <rect x={16.2} y={28.5} width={1.7} height={3.2} rx={0.85} />
+        <rect x={19.15} y={27.8} width={1.7} height={4.6} rx={0.85} />
+        <rect x={22.1} y={28.5} width={1.7} height={3.2} rx={0.85} />
+      </g>
     </svg>
   );
 }
@@ -1025,6 +1030,14 @@ function App(): React.JSX.Element {
       >
         <div className="listen-ring r1" />
         <div className="listen-ring r2" />
+        <div className="speech-rays left" aria-hidden="true">
+          <span className="near" />
+          <span className="far" />
+        </div>
+        <div className="speech-rays right" aria-hidden="true">
+          <span className="near" />
+          <span className="far" />
+        </div>
         <div ref={rotRef} className="buddy-rot">
           <div className="buddy-fx">
             <div className="buddy-bob">

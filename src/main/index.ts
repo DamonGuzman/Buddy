@@ -317,6 +317,12 @@ async function main(): Promise<void> {
     conversation.cancelHold();
     if (reason === 'watchdog') conversation.reportError('hold_too_long');
   });
+  // macOS overlays stay unconditionally click-through. Reuse the global
+  // input hook and main-process DIP coordinates to detect a click on Buddy
+  // without ever making the overlay focusable or mouse-intercepting.
+  hotkey.on('primary-click', () => {
+    if (process.platform === 'darwin') overlays.openPanelIfBuddyClicked();
+  });
 
   // ---------------------------------------------------------------------
   // Boot

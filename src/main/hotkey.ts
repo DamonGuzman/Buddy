@@ -36,6 +36,8 @@ export interface HotkeyEvents {
   'hold-end': [];
   /** Forced release: watchdog / lock / suspend. Cancel the hold, no turn. */
   'hold-cancel': [reason: HoldCancelReason];
+  /** Global primary-button click (used to hit-test click-through Buddy on macOS). */
+  'primary-click': [];
   error: [Error];
 }
 
@@ -48,6 +50,7 @@ interface HotkeyStatus {
 /** Minimal surface of uiohook-napi's uIOhook (injectable for unit tests). */
 export interface UiohookLike {
   on(event: 'keydown' | 'keyup', cb: (e: { keycode: number }) => void): unknown;
+  on(event: 'click', cb: (e: { button: unknown }) => void): unknown;
   start(): void;
   stop(): void;
 }
@@ -95,6 +98,12 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
         if (CTRL_KEYCODES.has(e.keycode)) this.ctrlDown = false;
         if (e.keycode === ALT_LEFT_KEYCODE) this.altDown = false;
         this.evaluate();
+      });
+      hook.on('click', (e: { button: unknown }) => {
+        // libuiohook numbers the primary/left mouse button as 1 on both
+        // macOS and Windows. Coordinates are deliberately read through
+        // Electron at the consumer so mixed-DPI screens stay in DIP space.
+        if (e.button === 1) this.emit('primary-click');
       });
 
       hook.start();

@@ -10,6 +10,7 @@
   --blue: #3b82f6;
   --blue-soft: rgba(96, 165, 250, 0.85);
   --listen: rgba(74, 222, 128, 0.9);
+  --speak: rgba(103, 232, 249, 0.94);
   --privacy: rgba(245, 158, 11, 0.9);
   --text: #f3f4f6;
   --font:
@@ -70,20 +71,121 @@
   }
 }
 
-/* speaking: rhythmic subtle bounce (overrides bob) */
+/* speaking: compact, centered motion that belongs to Buddy itself. */
 .buddy-root[data-visible][data-state='speaking'] .buddy-bob {
-  animation: buddy-bounce 0.62s ease-in-out infinite;
+  animation: buddy-bounce 0.9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
 @keyframes buddy-bounce {
   0%,
   100% {
     transform: translateY(0) scale(1);
   }
-  32% {
-    transform: translateY(-5px) scale(1.04, 0.98);
+  28% {
+    transform: translateY(-3px) scale(1.035, 0.975);
   }
-  62% {
-    transform: translateY(1px) scale(0.985, 1.015);
+  58% {
+    transform: translateY(0.5px) scale(0.985, 1.02);
+  }
+}
+
+.buddy-root[data-state='speaking'] .buddy-svg {
+  filter: drop-shadow(0 3px 7px rgba(15, 40, 90, 0.45))
+    drop-shadow(0 0 7px rgba(103, 232, 249, 0.78));
+}
+
+/* Three tiny bars become Buddy's mouth while it speaks. Because they live in
+   the face SVG, the waveform is visually anchored even while Buddy bounces. */
+.buddy-mouth {
+  fill: #d9fbff;
+  opacity: 0;
+  transform-origin: 20px 30px;
+}
+.buddy-root[data-visible][data-state='speaking'] .buddy-mouth {
+  opacity: 1;
+}
+.buddy-root[data-visible][data-state='speaking'] .buddy-mouth rect {
+  animation: buddy-mouth-band 0.42s ease-in-out infinite alternate;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.buddy-root[data-visible][data-state='speaking'] .buddy-mouth rect:nth-child(2) {
+  animation-duration: 0.31s;
+  animation-delay: -0.17s;
+}
+.buddy-root[data-visible][data-state='speaking'] .buddy-mouth rect:nth-child(3) {
+  animation-duration: 0.5s;
+  animation-delay: -0.28s;
+}
+@keyframes buddy-mouth-band {
+  from {
+    transform: scaleY(0.38);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+/* Small symmetric arcs emerge directly from Buddy's cheeks. The whole effect
+   stays within 62px, so the character remains visually centered. */
+.speech-rays {
+  position: absolute;
+  top: -10px;
+  width: 12px;
+  height: 20px;
+  opacity: 0;
+}
+.speech-rays.left {
+  right: 20px;
+  transform: scaleX(-1);
+}
+.speech-rays.right {
+  left: 20px;
+}
+.speech-rays span {
+  position: absolute;
+  top: 50%;
+  border: 2px solid var(--speak);
+  border-left: 0;
+  border-radius: 0 999px 999px 0;
+  transform: translateY(-50%) scale(0.72);
+  transform-origin: left center;
+  box-shadow: 2px 0 5px rgba(34, 211, 238, 0.42);
+}
+.speech-rays .near {
+  left: 0;
+  width: 5px;
+  height: 10px;
+}
+.speech-rays .far {
+  left: 5px;
+  width: 7px;
+  height: 16px;
+}
+.buddy-root[data-visible][data-state='speaking'] .speech-rays {
+  opacity: 0.9;
+}
+.buddy-root[data-visible][data-state='speaking'] .speech-rays span {
+  animation: speech-ray 0.72s ease-in-out infinite alternate;
+}
+.buddy-root[data-visible][data-state='speaking'] .speech-rays .far {
+  animation-delay: -0.34s;
+}
+@keyframes speech-ray {
+  from {
+    transform: translateY(-50%) scale(0.72);
+    opacity: 0.48;
+  }
+  to {
+    transform: translateY(-50%) scale(1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .buddy-root[data-visible][data-state='speaking'] .buddy-bob,
+  .buddy-root[data-visible][data-state='speaking'] .buddy-mouth rect,
+  .buddy-root[data-visible][data-state='speaking'] .speech-rays span {
+    animation: none;
   }
 }
 

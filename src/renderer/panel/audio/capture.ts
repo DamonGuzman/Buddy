@@ -6,9 +6,11 @@
  * Pipeline: getUserMedia → MediaStreamAudioSourceNode → pcm-capture worklet
  * (Float32 → Int16 PCM LE, ~60ms chunks) → clicky.sendAudioChunk(ArrayBuffer).
  *
- * The AudioContext (24kHz) and worklet module are created once and reused;
- * the mic stream itself is acquired per hold and fully released on stop, so
- * the OS mic-in-use indicator is only on while the hotkey is held.
+ * The mic stream is acquired per hold and fully released on stop, so the OS
+ * mic-in-use indicator is only on while the hotkey is held. The capture
+ * AudioContext is reused on Windows, but closed after each hold on macOS:
+ * Chromium's audio service can otherwise leave a later playback context
+ * rendering into an inactive CoreAudio output session.
  */
 
 import { clicky } from '../clicky';
@@ -37,6 +39,13 @@ function rmsOfInt16(buf: ArrayBuffer): number {
   return Math.sqrt(sum / samples.length);
 }
 
+function isMacOS(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return (
+    navigator.platform.startsWith('Mac') || /Macintosh|Mac OS X/.test(navigator.userAgent)
+  );
+}
+
 export class MicCapture {
   private ctx: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
@@ -44,6 +53,7 @@ export class MicCapture {
   private stream: MediaStream | null = null;
   private testOsc: OscillatorNode | null = null;
   private moduleReady: Promise<void> | null = null;
+  private contextClose: Promise<void> | null = null;
   private generation = 0; // invalidates in-flight async starts on stop()
   private running = false;
   private chunkCount = 0;
@@ -76,6 +86,7 @@ export class MicCapture {
     const gen = ++this.generation;
     this.chunkCount = 0;
     this.peakRms = 0;
+    let pendingStream: MediaStream | null = null;
 
     try {
       const constraints: MediaStreamConstraints = {
@@ -86,25 +97,35 @@ export class MicCapture {
         },
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      pendingStream = stream;
       if (gen !== this.generation) {
         // stop() arrived while we were acquiring the mic — release and bail.
         for (const track of stream.getTracks()) track.stop();
+        pendingStream = null;
         return;
       }
 
       const ctx = await this.ensureContext();
       if (gen !== this.generation) {
         for (const track of stream.getTracks()) track.stop();
+        pendingStream = null;
         return;
       }
 
       this.stream = stream;
+      pendingStream = null;
       console.debug('[capture] using device:', stream.getAudioTracks()[0]?.label ?? '(unknown)');
       this.node?.port.postMessage({ type: 'reset' });
       this.source = ctx.createMediaStreamSource(stream);
       if (this.node) this.source.connect(this.node);
       this.lastError = null;
     } catch (err) {
+      if (pendingStream) {
+        for (const track of pendingStream.getTracks()) track.stop();
+      }
+      // A normal hotkey release can race initial AudioWorklet setup. stop()
+      // already owns cleanup in that case; it is not a microphone failure.
+      if (gen !== this.generation) return;
       this.lastError = err instanceof Error ? err.message : String(err);
       console.warn('[capture] failed to start mic capture:', this.lastError);
       this.running = false;
@@ -155,7 +176,7 @@ export class MicCapture {
     }
   }
 
-  /** Stop streaming: release mic tracks, suspend the (reused) context. */
+  /** Stop streaming and release the mic tracks (plus the graph on macOS). */
   stop(): void {
     this.generation++;
     if (!this.running && !this.stream) return;
@@ -181,7 +202,11 @@ export class MicCapture {
       for (const track of this.stream.getTracks()) track.stop();
       this.stream = null;
     }
-    void this.ctx?.suspend().catch(() => undefined);
+    if (isMacOS()) {
+      this.closeContext();
+    } else {
+      void this.ctx?.suspend().catch(() => undefined);
+    }
     console.debug(
       `[capture] stopped after ${this.chunkCount} chunks (peak rms ${this.peakRms.toFixed(4)})`,
     );
@@ -202,16 +227,48 @@ export class MicCapture {
 
   // -------------------------------------------------------------------------
 
+  private closeContext(): void {
+    const ctx = this.ctx;
+    const node = this.node;
+    this.ctx = null;
+    this.node = null;
+    this.moduleReady = null;
+
+    if (node) {
+      node.port.onmessage = null;
+      try {
+        node.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+    }
+    if (ctx) {
+      const closing = ctx.close().catch(() => undefined);
+      this.contextClose = closing;
+      void closing.finally(() => {
+        if (this.contextClose === closing) this.contextClose = null;
+      });
+    }
+  }
+
   private async ensureContext(): Promise<AudioContext> {
+    // Do not overlap a new capture graph with teardown of the previous one.
+    // Besides avoiding an AudioContext leak, this keeps CoreAudio session
+    // transitions deterministic on macOS.
+    await this.contextClose;
     if (!this.ctx) {
       this.ctx = new AudioContext({ sampleRate: 24_000 });
     }
+    const ctx = this.ctx;
     if (!this.moduleReady) {
-      this.moduleReady = this.ctx.audioWorklet.addModule(captureWorkletUrl);
+      this.moduleReady = ctx.audioWorklet.addModule(captureWorkletUrl);
     }
     await this.moduleReady;
+    if (ctx !== this.ctx || ctx.state === 'closed') {
+      throw new DOMException('microphone capture was stopped during audio setup', 'AbortError');
+    }
     if (!this.node) {
-      this.node = new AudioWorkletNode(this.ctx, 'pcm-capture', {
+      this.node = new AudioWorkletNode(ctx, 'pcm-capture', {
         numberOfInputs: 1,
         numberOfOutputs: 1,
         channelCount: 1,
@@ -220,13 +277,13 @@ export class MicCapture {
       this.node.port.onmessage = (e: MessageEvent<ArrayBuffer>) => this.onChunk(e.data);
       // A worklet with no route to the destination gets culled from the
       // render graph — keep it pulled via a muted gain node.
-      const mute = this.ctx.createGain();
+      const mute = ctx.createGain();
       mute.gain.value = 0;
       this.node.connect(mute);
-      mute.connect(this.ctx.destination);
+      mute.connect(ctx.destination);
     }
-    if (this.ctx.state !== 'running') await this.ctx.resume();
-    return this.ctx;
+    if (ctx.state !== 'running') await ctx.resume();
+    return ctx;
   }
 
   private onChunk(buf: ArrayBuffer): void {

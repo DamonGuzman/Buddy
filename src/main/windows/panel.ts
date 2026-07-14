@@ -73,6 +73,11 @@ export function togglePanel(): void {
   activePanel?.toggle();
 }
 
+/** Open the control panel without turning an already-visible panel into a close action. */
+export function openPanel(): void {
+  activePanel?.show();
+}
+
 export class PanelManager {
   private win: BrowserWindow | null = null;
   private crashGuard = new CrashLoopGuard(3, 5 * 60_000, 'panel');

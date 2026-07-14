@@ -39,7 +39,8 @@ import type {
   Rect,
 } from '../../shared/types';
 import { getSettingsStore } from '../settings';
-import { togglePanel } from './panel';
+import { isBuddyClick } from './buddy-click';
+import { openPanel } from './panel';
 import { CrashLoopGuard, lockdownNavigation, recoverOnRenderProcessGone } from './harden';
 import { listeningBlocksHover } from './hover-policy';
 import { offsetPointerForWindow } from './overlay-offset';
@@ -71,6 +72,8 @@ export class OverlayManager {
   private lastAssistantState: AssistantState = 'idle';
   /** screenIndex of the window currently showing the buddy; null = hidden. */
   private buddyHostIndex: number | null = null;
+  /** Global clicks only target Buddy while it is settled at its rest position. */
+  private buddyAtRest = false;
   /** displayId of the overlay currently interactive (dwell), or null. */
   private interactiveDisplayId: number | null = null;
   /** Latest padded buddy region for the interactive overlay, window-local DIP. */
@@ -94,6 +97,7 @@ export class OverlayManager {
     // At boot the buddy rests on the rest display (did-finish-load sends it
     // 'idle'), so that window hosts the buddy for mouse forwarding.
     this.buddyHostIndex = this.restScreenIndex();
+    this.buddyAtRest = true;
     this.updateMouseForwarding();
     screen.on('display-added', () => this.syncDisplays());
     screen.on('display-removed', () => this.syncDisplays());
@@ -153,6 +157,7 @@ export class OverlayManager {
         );
       }
       this.buddyHostIndex = cmd.screenIndex;
+      this.buddyAtRest = false;
     } else if (cmd.type === 'idle') {
       const restIndex = this.restScreenIndex();
       for (const [displayId, index] of this.indexByDisplayId) {
@@ -164,9 +169,11 @@ export class OverlayManager {
         );
       }
       this.buddyHostIndex = restIndex;
+      this.buddyAtRest = true;
     } else {
       this.broadcast('overlay:pointer', cmd);
       this.buddyHostIndex = null;
+      this.buddyAtRest = false;
     }
     // M15: a pointer command can move the buddy off the interactive window
     // (or into a flight) — hover must never fight the flight engine.
@@ -397,7 +404,7 @@ export class OverlayManager {
     ipcMain.on('overlay:hover', (event, evt: OverlayHoverEvent) => {
       this.onHoverEvent(event.sender, evt);
     });
-    ipcMain.on('overlay:buddy-click', () => togglePanel());
+    ipcMain.on('overlay:buddy-click', () => openPanel());
     ipcMain.on('overlay:buddy-move', (event, rest: { xFrac: number; yFrac: number }) => {
       this.onBuddyMove(event.sender, rest);
     });
@@ -510,6 +517,30 @@ export class OverlayManager {
       clearInterval(this.interactivePoll);
       this.interactivePoll = null;
     }
+  }
+
+  /**
+   * Open the panel when the global cursor is on the resting Buddy.
+   *
+   * macOS overlays must remain unconditionally click-through, so their
+   * renderer cannot receive mousedown/up. The existing uiohook input stream
+   * calls this after a global primary click; hit-testing stays here because
+   * Electron owns the authoritative mixed-DPI DIP coordinates.
+   */
+  openPanelIfBuddyClicked(): boolean {
+    if (!this.buddyAtRest || this.buddyHostIndex === null || this.pushToTalkHoldActive()) {
+      return false;
+    }
+    for (const [displayId, index] of this.indexByDisplayId) {
+      if (index !== this.buddyHostIndex) continue;
+      const win = this.windows.get(displayId);
+      const status = this.hoverStatusByDisplay.get(displayId);
+      if (!win || win.isDestroyed() || !status || status.dragging) return false;
+      if (!isBuddyClick(screen.getCursorScreenPoint(), win.getBounds(), status.buddy)) return false;
+      openPanel();
+      return true;
+    }
+    return false;
   }
 
   /** Drag-reposition finished: persist the rest spot and re-push configs. */
