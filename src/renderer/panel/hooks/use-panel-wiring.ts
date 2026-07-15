@@ -7,7 +7,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clicky } from '../clicky';
 import { audioPlayer, micCapture } from '../audio/engines';
-import type { AssistantState, RuntimeFlags, SessionStatus, Settings } from '../../../shared/types';
+import type {
+  AssistantState,
+  PermissionHealth,
+  RuntimeFlags,
+  SessionStatus,
+  Settings,
+} from '../../../shared/types';
 
 export interface PanelWiringDeps {
   /** Mic capture start reported an error (or cleared it). */
@@ -19,6 +25,8 @@ export interface PanelWiring {
   session: SessionStatus | null;
   settings: Settings | null;
   runtime: RuntimeFlags | null;
+  permissions: PermissionHealth | null;
+  setPermissions: (health: PermissionHealth) => void;
   /** Current mic preference (a live ref read — no resubscribe on change). */
   getMicDeviceId: () => string;
 }
@@ -29,6 +37,7 @@ export function usePanelWiring({ onMicError }: PanelWiringDeps): PanelWiring {
   const [settings, setSettings] = useState<Settings | null>(null);
   // M11 addition (orchestrator-approved): hookAlive + dev flags from main.
   const [runtime, setRuntime] = useState<RuntimeFlags | null>(null);
+  const [permissions, setPermissions] = useState<PermissionHealth | null>(null);
 
   // Capture needs the *current* mic preference without resubscribing.
   const micDeviceIdRef = useRef('');
@@ -42,6 +51,7 @@ export function usePanelWiring({ onMicError }: PanelWiringDeps): PanelWiring {
     // M11: tolerate an older preload (crash-recreate races) — best-effort.
     try {
       void clicky.getRuntime().then(setRuntime);
+      void clicky.getPermissionHealth().then(setPermissions);
     } catch {
       /* runtime flags are progressive enhancement */
     }
@@ -51,6 +61,7 @@ export function usePanelWiring({ onMicError }: PanelWiringDeps): PanelWiring {
       clicky.onSessionStatus(setSession),
       clicky.onSettings(setSettings),
       clicky.onRuntime(setRuntime),
+      clicky.onPermissions(setPermissions),
       // M17: merge the Codex sign-in snapshot into settings (the "ChatGPT"
       // settings card reads it) — lower latency than waiting for the next
       // panel:settings, and reflects the CLI's auth.json rotating live.
@@ -87,6 +98,8 @@ export function usePanelWiring({ onMicError }: PanelWiringDeps): PanelWiring {
     session,
     settings,
     runtime,
+    permissions,
+    setPermissions,
     getMicDeviceId,
   };
 }

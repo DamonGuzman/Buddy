@@ -17,10 +17,13 @@ import { SettingsView } from './components/SettingsView';
 export function App(): React.JSX.Element {
   const [micError, setMicError] = useState<string | null>(null);
 
-  const { assistantState, session, settings, runtime } = usePanelWiring({
-    onMicError: setMicError,
-  });
-  const micDevices = useMicDevices(setMicError);
+  const { assistantState, session, settings, runtime, permissions, setPermissions } =
+    usePanelWiring({
+      onMicError: setMicError,
+    });
+  const canPrewarmMic =
+    permissions?.supported !== true || permissions.grants.microphone === 'granted';
+  const micDevices = useMicDevices(setMicError, canPrewarmMic);
 
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
@@ -31,7 +34,13 @@ export function App(): React.JSX.Element {
       />
       <main className="flex min-h-0 flex-1 flex-col">
         {settings ? (
-          <SettingsView settings={settings} micDevices={micDevices} micError={micError} />
+          <SettingsView
+            settings={settings}
+            micDevices={micDevices}
+            micError={micError}
+            permissions={permissions}
+            onPermissionHealth={setPermissions}
+          />
         ) : null}
       </main>
     </div>

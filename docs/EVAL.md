@@ -557,7 +557,7 @@ published gpt-realtime rates (M8.6 methodology).
 
 ## 10. Layered grounding — headless validation (M10, 2026-07-12)
 
-M10 adds the REST grounding fallback behind the M9 UIA snap (uia → rest → raw;
+M10 adds the REST grounding fallback behind native accessibility (uia/ax → rest → raw;
 docs/ARCHITECTURE.md §6b, rationale in docs/COORD-STUDY.md §8-§9): when the snap finds no
 match, `rest-grounder.ts` re-grounds the model's spoken label with **gpt-5.4-mini (reasoning
 effort low, bare screenshot, strict-JSON pixel coords)** against the same JPEG the realtime
@@ -598,7 +598,7 @@ and `tests/grounding-layered.test.ts` (170/170 green). Validation spend: 30 REST
 (two 15-target passes) ≈ **$0.03** at mini rates.
 
 **Layered grounding validated headlessly as above; the full ON-SCREEN pointing re-gate
-(§9.3 methodology, kiosk scenes, `groundingSource` attribution across uia/rest/raw) is
+(§9.3 methodology, kiosk scenes, `groundingSource` attribution across uia/ax/rest/raw) is
 PENDING** — rerun `node eval/run.mjs --live` when the machine is free, plus an A/B with
 `CLICKY_NO_REST_GROUND=1` to isolate the rest layer's contribution on unsnappable targets
 (emoji glyphs, canvas UI — exactly §9.7's known gaps).

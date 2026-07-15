@@ -19,6 +19,7 @@ import { DEFAULT_SETTINGS, applySettingsPatch } from '../shared/types';
 import type { BuddyRest, CodexSignInState, Settings, SettingsPatch } from '../shared/types';
 import { getCodexAuthProvider } from './auth/codex-auth';
 import { shouldImportApiKeyFromEnv } from './env';
+import { hotkeyLabelForPlatform } from './platform';
 
 /** M17: signed-out fallback when the Codex auth provider is unavailable. */
 const CODEX_SIGNED_OUT: CodexSignInState = {
@@ -156,7 +157,7 @@ export class SettingsStore {
       micDeviceId: this.file.micDeviceId,
       fullRealtimeMode: this.file.fullRealtimeMode,
       voiceMuted: this.file.voiceMuted,
-      hotkeyLabel: DEFAULT_SETTINGS.hotkeyLabel,
+      hotkeyLabel: hotkeyLabelForPlatform(),
       // M15 addition (orchestrator-approved).
       buddyRest: this.file.buddyRest,
       // M17 additions (integration-approved): ChatGPT-subscription sign-in

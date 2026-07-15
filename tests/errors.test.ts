@@ -46,6 +46,7 @@ describe('error catalog (describeKind)', () => {
         'model_unavailable',
         'mic_unavailable',
         'audio_output_failed',
+        'capture_failed',
         // Fix items 1 and 6 explicitly add these two actionable kinds.
         'hotkey_dead',
         'settings_reset',
@@ -102,6 +103,13 @@ describe('error catalog (describeKind)', () => {
     expect(pres.autoShowPanel).toBe(true);
   });
 
+  it('gives macOS hotkey failures the stale-build and Input Monitoring repair steps', () => {
+    const pres = describeKind('hotkey_dead', { macHotkeyPermissions: true });
+    expect(pres.message).toContain('settings → permissions');
+    expect(pres.message).toContain('reset stale grants');
+    expect(pres.message).toContain('recheck automatically');
+  });
+
   it('interpolates the model into model_unavailable copy', () => {
     const pres = describeKind('model_unavailable', { model: 'gpt-realtime-2.1' });
     expect(pres.message).toBe(
@@ -114,11 +122,11 @@ describe('error catalog (describeKind)', () => {
   it('mic_unavailable leads with the privacy toggle for NotAllowedError', () => {
     const denied = describeKind('mic_unavailable', { micErrorName: 'NotAllowedError' });
     expect(denied.message).toBe(
-      'windows is blocking desktop apps from using the microphone — flip it on in ' +
-        "settings > privacy > microphone and i'll hear you. typing works meanwhile.",
+      'your system is blocking buddy from using the microphone — allow buddy in system ' +
+        "privacy settings and i'll hear you. typing works meanwhile.",
     );
     const generic = describeKind('mic_unavailable', { micErrorName: 'NotFoundError' });
-    expect(generic.message).toContain("check it's plugged in");
+    expect(generic.message).toContain("check it's connected");
   });
 
   it('keeps the quota copy verbatim', () => {

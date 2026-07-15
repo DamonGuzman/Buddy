@@ -15,7 +15,7 @@
  *   permission prompt (use-fake-ui-for-media-stream).
  */
 
-import { app, powerMonitor, shell } from 'electron';
+import { app, Notification, powerMonitor, shell } from 'electron';
 import type { Tray } from 'electron';
 import { appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -51,7 +51,6 @@ import { SettingsStore } from './settings';
 import { SessionRecorder } from './session-recorder';
 import {
   TRAY_HINT_CRASHED,
-  TRAY_HINT_FULL_REALTIME,
   TRAY_HINT_HOTKEY_DEAD,
   createTray,
   setTrayHint,
@@ -60,6 +59,7 @@ import {
 import { OverlayManager } from './windows/overlay';
 import { PanelManager } from './windows/panel';
 import { WhisperManager } from './windows/whisper';
+import { PermissionController } from './windows/permission-controller';
 import { PhoneAudioBridgeClient } from './phone-audio-bridge';
 import {
   DEFAULT_PHONE_AUDIO_URL,
@@ -101,6 +101,8 @@ if (fakeMicWav) {
   app.commandLine.appendSwitch('use-file-for-fake-audio-capture', fakeMicWav);
 }
 
+if (process.platform === 'darwin') app.setActivationPolicy('accessory');
+
 // Single instance: a second launch just pops the panel of the first.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -120,6 +122,7 @@ interface Services {
   panel: PanelManager;
   whisper: WhisperManager;
   hotkey: HotkeyManager;
+  permissions: PermissionController;
   agents: AgentManager;
   conversation: Conversation;
   phoneAudio: PhoneAudioBridgeClient | null;
@@ -153,7 +156,8 @@ async function main(): Promise<void> {
   // Boot
   // ---------------------------------------------------------------------
   await app.whenReady();
-  app.setAppUserModelId('ai.fastyr.buddy');
+  if (process.platform === 'win32') app.setAppUserModelId('ai.fastyr.buddy');
+  if (process.platform === 'darwin') app.dock?.hide();
 
   services.overlays.start();
 
@@ -165,33 +169,39 @@ async function main(): Promise<void> {
   tray.current = createTray({
     // M21: the tray click summons the whisper; settings is a menu item.
     onToggleWhisper: () => services.whisper.toggle(),
-    onOpenSettings: () => services.panel.show(),
+    onOpenSettings: (anchor) => services.panel.show(anchor),
+    onOpenPermissions: (anchor) => {
+      services.panel.show(anchor);
+      services.panel.send('panel:permissions', services.permissions.current());
+    },
     onQuit: () => app.quit(),
   });
   if (services.settings.get().fullRealtimeMode) {
-    setTrayHint(tray.current, TRAY_HINT_FULL_REALTIME);
+    setTrayHint(tray.current, trayHintForMode(true));
   }
 
-  services.hotkey.on('error', () => {
-    // hotkey_dead: transcript entry + one-time panel auto-show (catalog
-    // policy) + a tray tooltip that points at the typing fallback.
-    services.conversation.reportError('hotkey_dead');
-    setTrayHint(tray.current, TRAY_HINT_HOTKEY_DEAD);
-    runtime.push(); // the panel hero hint adapts to hookAlive === false
-  });
-
-  services.hotkey.start();
+  services.hotkey.on('error', (error) => services.permissions.noteHotkeyError(error));
+  services.permissions.refresh(true);
 
   wirePanelLifecycle(services, tray, runtime, codexSignin.push);
   const codexPoll = startCodexSigninPolling(codexSignin.push);
+  const permissionPoll = setInterval(() => {
+    if (process.platform === 'darwin') services.permissions.refresh();
+  }, 3_000);
+  permissionPoll.unref?.();
   wirePowerMonitor(services);
 
   // M21: a second launch summons the whisper (the panel is settings-only now).
   app.on('second-instance', () => services.whisper.show());
+  app.on('activate', () => {
+    services.panel.show();
+    services.permissions.refresh();
+  });
+  app.on('browser-window-focus', () => services.permissions.refresh());
 
   scheduleTestThrow();
   buildDebugSurface(services);
-  registerShutdown(services, codexSignin.oauth, codexPoll);
+  registerShutdown(services, codexSignin.oauth, codexPoll, permissionPoll);
 
   // --- M3 capture self-test (CLICKY_CAPTURE_TEST=1) ---
   if (isCaptureSelfTestEnabled()) await runCaptureSelfTest();
@@ -320,6 +330,49 @@ function createServices(tray: TrayRef): Services {
   });
   conversationRef.current = conversation;
 
+  const notifyUser = (title: string, body: string): void => {
+    try {
+      if (process.platform === 'darwin' && Notification.isSupported()) {
+        new Notification({ title, body }).show();
+      } else {
+        tray.current?.displayBalloon({ title, content: body });
+      }
+    } catch {
+      /* notifications may be disabled */
+    }
+  };
+  const permissions = new PermissionController({
+    hotkey,
+    onHealth: (health) => panel.send('panel:permissions', health),
+    onHookState: () =>
+      panel.send('panel:runtime', {
+        hookAlive: hotkey.status().hookAlive,
+        devFlags: devChipFlags(),
+      }),
+    onRecovered: () => setTrayHint(tray.current, trayHintForMode(settings.get().fullRealtimeMode)),
+    onUnavailable: (error, health) => {
+      sessionRecorder?.record('hotkey_start_failed', {
+        name: error.name,
+        message: error.message,
+        permissions: health,
+      });
+      sessionRecorder?.flush();
+      conversation.reportError('hotkey_dead', {
+        macHotkeyPermissions: process.platform === 'darwin',
+      });
+      setTrayHint(
+        tray.current,
+        process.platform === 'darwin'
+          ? 'buddy — permissions need attention, click to fix or type'
+          : TRAY_HINT_HOTKEY_DEAD,
+      );
+      notifyUser(
+        'Buddy permissions need attention',
+        'Push-to-talk is offline. Open Buddy Settings to repair it; typing still works.',
+      );
+    },
+  });
+
   phoneAudio?.on('audio', (chunk) => conversation.handleAudioChunk(chunk));
   phoneAudio?.on('connected', () => {
     sessionRecorder?.record('phone_audio_bridge_client', { state: 'connected' });
@@ -338,6 +391,7 @@ function createServices(tray: TrayRef): Services {
     panel,
     whisper,
     hotkey,
+    permissions,
     agents,
     conversation,
     phoneAudio,
@@ -468,7 +522,7 @@ function startCodexSigninPolling(push: (force: boolean) => void): NodeJS.Timeout
 // ===========================================================================
 
 function registerInvokeHandlers(
-  { settings, conversation, agents }: Services,
+  { settings, conversation, agents, permissions }: Services,
   codexOAuth: CodexOAuthLoopback,
   runtime: RuntimeReporter,
 ): void {
@@ -484,6 +538,8 @@ function registerInvokeHandlers(
   handle('overlay:get-state', () => conversation.assistantState());
   // M11 addition (orchestrator-approved): runtime flags bootstrap.
   handle('panel:get-runtime', () => runtime.flags());
+  handle('permissions:get', () => permissions.current());
+  handle('permissions:action', (action) => permissions.act(action));
   // M17 addition (integration-approved): Codex sign-in snapshot bootstrap.
   handle('codex:signin-state', () => getCodexAuthProvider().codexSignInState());
   handle('codex:sign-in', () => codexOAuth.start());
@@ -559,7 +615,7 @@ function wireSettingsBroadcast(
   });
 }
 
-function wireHotkey({ hotkey, settings, conversation, whisper }: Services): void {
+function wireHotkey({ hotkey, settings, conversation, whisper, overlays }: Services): void {
   hotkey.on('hold-start', () => {
     if (settings.get().fullRealtimeMode) void conversation.toggleFullRealtime();
     else conversation.holdStart();
@@ -576,6 +632,9 @@ function wireHotkey({ hotkey, settings, conversation, whisper }: Services): void
   hotkey.on('tap', () => {
     if (!settings.get().fullRealtimeMode) whisper.toggle();
   });
+  hotkey.on('primary-click', () => {
+    if (process.platform === 'darwin') overlays.openWhisperIfBuddyClicked();
+  });
   // F1 fix (C1): forced release (max-hold watchdog / lock / suspend) cancels
   // the hold — mic released, held audio cleared, NO turn committed.
   // M11 (hold_too_long): the 30s watchdog cancel additionally TELLS the user
@@ -588,7 +647,7 @@ function wireHotkey({ hotkey, settings, conversation, whisper }: Services): void
 }
 
 function wirePanelLifecycle(
-  { panel, whisper, settings, conversation }: Services,
+  { panel, whisper, settings, conversation, permissions }: Services,
   tray: TrayRef,
   runtime: RuntimeReporter,
   pushCodexSignin: (force: boolean) => void,
@@ -613,6 +672,7 @@ function wirePanelLifecycle(
     conversation.replayToPanel();
     panel.send('panel:settings', settings.get());
     runtime.push();
+    panel.send('panel:permissions', permissions.current());
     // M17: hand the (re)loaded panel the current Codex sign-in snapshot.
     pushCodexSignin(true);
   });
@@ -627,7 +687,7 @@ function wirePanelLifecycle(
   });
 }
 
-function wirePowerMonitor({ sessionRecorder, hotkey, conversation }: Services): void {
+function wirePowerMonitor({ sessionRecorder, hotkey, conversation, permissions }: Services): void {
   // F1 fix (C1 + sleep/resume): the secure desktop (Ctrl+Alt+Del) and lock
   // screen swallow keyups — force-cancel any live hold and reset modifier
   // state so the mic can never stay hot on a locked machine. On resume, the
@@ -646,6 +706,7 @@ function wirePowerMonitor({ sessionRecorder, hotkey, conversation }: Services): 
   powerMonitor.on('resume', () => {
     sessionRecorder?.record('system_resume', null);
     conversation.onSystemResume();
+    permissions.refresh();
   });
 }
 
@@ -739,6 +800,7 @@ function registerShutdown(
   }: Services,
   codexOAuth: CodexOAuthLoopback,
   codexPoll: NodeJS.Timeout,
+  permissionPoll: NodeJS.Timeout,
 ): void {
   // Tray app: stay alive with zero visible windows.
   app.on('window-all-closed', () => {
@@ -748,6 +810,7 @@ function registerShutdown(
   // supervisor → agents → recorder → overlays → panel.
   app.on('will-quit', () => {
     clearInterval(codexPoll); // M17: stop the Codex sign-in refresh poll
+    clearInterval(permissionPoll);
     codexOAuth.stop();
     hotkey.stop();
     conversation.close();

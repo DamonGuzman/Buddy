@@ -14,8 +14,7 @@ function subscribe<C extends Extract<keyof MainToWhisperEvents, string>>(
   channel: C,
   cb: (payload: MainToWhisperEvents[C]) => void,
 ): Unsubscribe {
-  const listener = (_event: IpcRendererEvent, payload: MainToWhisperEvents[C]): void =>
-    cb(payload);
+  const listener = (_event: IpcRendererEvent, payload: MainToWhisperEvents[C]): void => cb(payload);
   ipcRenderer.on(channel, listener);
   return () => ipcRenderer.removeListener(channel, listener);
 }

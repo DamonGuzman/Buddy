@@ -37,7 +37,14 @@ import { parseOverlayParams } from './query-params';
 import { AgentCluster } from './AgentHelpers';
 import type { HelperView } from './agents-ui';
 import { TriangleSvg } from './TriangleSvg';
-import type { AssistantState, OverlayHoverConfig, Rect } from '../../shared/types';
+import { BuddyIsland } from './BuddyIsland';
+import type {
+  AgentSummary,
+  AssistantState,
+  OverlayDisplaySurface,
+  OverlayHoverConfig,
+  Rect,
+} from '../../shared/types';
 import './overlay.css';
 
 // ---------------------------------------------------------------------------
@@ -117,6 +124,13 @@ function App(): React.JSX.Element {
   const [helperHover, setHelperHover] = useState<string | null>(null);
   const [cluster, setCluster] = useState<ClusterGeom | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
+  const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [displaySurface, setDisplaySurface] = useState<OverlayDisplaySurface>({
+    kind: 'off',
+    notchWidth: 0,
+    notchHeight: 0,
+    menuBarHeight: 0,
+  });
   const cardRef = useRef<HTMLDivElement | null>(null);
   /** Measured card bounds, window-local DIP (grows the interactive region). */
   const cardRectRef = useRef<Rect | null>(null);
@@ -370,11 +384,22 @@ function App(): React.JSX.Element {
     // ------------------------------------------------------- end M15 hover --
 
     // ------------------------------------------- M19 agent helpers wiring --
-    const offAgents = clicky.onAgents((list) => helpers.setAgents(list));
+    const offAgents = clicky.onAgents((list) => {
+      setAgents(list);
+      helpers.setAgents(list);
+    });
+    const offDisplaySurface = clicky.onDisplaySurface(setDisplaySurface);
+    void clicky
+      .getDisplaySurface()
+      .then(setDisplaySurface)
+      .catch(() => undefined);
     // Bootstrap for late-created overlays (display hotplug) — push wins races.
     void clicky
       .getAgents()
-      .then((list) => helpers.bootstrap(list))
+      .then((list) => {
+        setAgents(list);
+        helpers.bootstrap(list);
+      })
       .catch(() => {});
     helpersRef.current = helpers;
     // --------------------------------------- end M19 agent helpers wiring --
@@ -400,6 +425,7 @@ function App(): React.JSX.Element {
       offCursor(); // M20 cursor feed
       // M19 agent-helper teardown.
       offAgents();
+      offDisplaySurface();
       helpersRef.current = null;
       window.removeEventListener('resize', onResize);
       hoverCtrl.dispose();
@@ -456,6 +482,13 @@ function App(): React.JSX.Element {
   return (
     <>
       <div className="edge-pulse" data-active={capturing ? '' : undefined} />
+      <BuddyIsland
+        surface={displaySurface}
+        assistantState={assistantState}
+        capturing={capturing}
+        agents={agents}
+        visible={buddyVisible}
+      />
       <div
         ref={rootRef}
         className="buddy-root"
@@ -474,6 +507,14 @@ function App(): React.JSX.Element {
       >
         <div className="listen-ring r1" />
         <div className="listen-ring r2" />
+        <div className="speech-rays left" aria-hidden="true">
+          <span className="near" />
+          <span className="far" />
+        </div>
+        <div className="speech-rays right" aria-hidden="true">
+          <span className="near" />
+          <span className="far" />
+        </div>
         <div ref={rotRef} className="buddy-rot">
           <div className="buddy-fx">
             <div className="buddy-bob">

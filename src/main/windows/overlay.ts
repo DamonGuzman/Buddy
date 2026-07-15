@@ -33,6 +33,7 @@ import type { MainToOverlayChannel, MainToOverlayEvents } from '../../shared/ipc
 import type {
   AssistantState,
   BuddyRest,
+  OverlayDisplaySurface,
   OverlayHoverConfig,
   OverlayHoverEvent,
   OverlayHoverStatus,
@@ -58,6 +59,10 @@ import { HoverController } from './hover-controller';
 import { listeningBlocksHover } from './hover-policy';
 import { markNativeWindowNonRude } from './non-rude';
 import { computePointerRouting, forwardingModeFor } from './pointer-routing';
+import { isBuddyClick } from './buddy-click';
+import { resolveDisplaySurface } from './display-surface';
+import { coverMacDisplayWithWindow, getMacDisplaySurface } from './mac-screen-permission';
+import { offsetPointerForWindow } from './overlay-offset';
 
 /**
  * Module-level handle to the started manager so sibling main modules (e.g.
@@ -117,6 +122,7 @@ export class OverlayManager {
   private lastAssistantState: AssistantState = 'idle';
   /** screenIndex of the window currently showing the buddy; null = hidden. */
   private buddyHostIndex: number | null = null;
+  private buddyAtRest = true;
   /** The dwell-to-interact state machine (owns the interactive flip + poll). */
   private readonly hover = new HoverController({
     isWindowLive: (displayId) => {
@@ -235,6 +241,23 @@ export class OverlayManager {
     return { x: Math.round(x), y: Math.round(y), workArea };
   }
 
+  /** Hit-test a global primary click while macOS keeps overlays unconditionally click-through. */
+  openWhisperIfBuddyClicked(): boolean {
+    if (!this.buddyAtRest || this.buddyHostIndex === null || this.pushToTalkHoldActive()) {
+      return false;
+    }
+    for (const [displayId, entry] of this.overlays) {
+      if (entry.screenIndex !== this.buddyHostIndex || entry.win.isDestroyed()) continue;
+      const status = this.hoverStatusByDisplay.get(displayId);
+      if (!status || status.dragging) return false;
+      if (isBuddyClick(screen.getCursorScreenPoint(), entry.win.getBounds(), status.buddy)) {
+        toggleWhisper();
+        return true;
+      }
+    }
+    return false;
+  }
+
   /**
    * M15: the one entry point for assistant-state changes (production and
    * debug both route through broadcast) — the dwell flip must be suppressed
@@ -273,16 +296,26 @@ export class OverlayManager {
    */
   routePointer(cmd: PointerCommand): void {
     const routing = computePointerRouting(cmd, this.restScreenIndex());
+    this.buddyAtRest = cmd.type === 'idle';
     if (routing.targetIndex === null) {
-      this.broadcast('overlay:pointer', cmd);
+      for (const [displayId, entry] of this.entriesByScreenIndex()) {
+        if (!entry.win.isDestroyed()) {
+          entry.win.webContents.send(
+            'overlay:pointer',
+            this.pointerForEntry(displayId, entry, cmd),
+          );
+        }
+      }
     } else {
-      for (const [, entry] of this.entriesByScreenIndex()) {
+      for (const [displayId, entry] of this.entriesByScreenIndex()) {
         if (entry.win.isDestroyed()) continue;
-        entry.win.webContents.send(
-          'overlay:pointer',
+        const routed =
           entry.screenIndex === routing.targetIndex
             ? cmd
-            : ({ type: 'hide' } satisfies PointerCommand),
+            : ({ type: 'hide' } satisfies PointerCommand);
+        entry.win.webContents.send(
+          'overlay:pointer',
+          this.pointerForEntry(displayId, entry, routed),
         );
       }
     }
@@ -291,6 +324,16 @@ export class OverlayManager {
     // (or into a flight) — hover must never fight the flight engine.
     this.hover.restoreClickThrough();
     this.updateMouseForwarding();
+  }
+
+  private pointerForEntry(
+    displayId: number,
+    entry: OverlayEntry,
+    cmd: PointerCommand,
+  ): PointerCommand {
+    const display = screen.getAllDisplays().find((candidate) => candidate.id === displayId);
+    if (!display || entry.win.isDestroyed()) return cmd;
+    return offsetPointerForWindow(cmd, display.bounds, entry.win.getBounds());
   }
 
   destroy(): void {
@@ -305,6 +348,7 @@ export class OverlayManager {
     ipcMain.removeAllListeners('overlay:buddy-click');
     ipcMain.removeAllListeners('overlay:buddy-move');
     ipcMain.removeHandler('overlay:get-hover-config');
+    ipcMain.removeHandler('overlay:get-display-surface');
     for (const entry of this.overlays.values()) {
       if (!entry.win.isDestroyed()) entry.win.destroy();
     }
@@ -353,6 +397,9 @@ export class OverlayManager {
       if (existing && !existing.win.isDestroyed()) {
         existing.screenIndex = index;
         existing.win.setBounds(display.bounds);
+        if (process.platform === 'darwin') {
+          coverMacDisplayWithWindow(existing.win.getNativeWindowHandle(), display.id);
+        }
       } else {
         this.overlays.set(display.id, {
           win: this.createWindow(display, index),
@@ -360,6 +407,7 @@ export class OverlayManager {
         });
       }
     });
+    this.pushDisplaySurfaces();
     // M15: re-assert forwarding after hotplug (indices may have shifted).
     this.updateMouseForwarding();
   }
@@ -367,6 +415,7 @@ export class OverlayManager {
   private createWindow(display: Display, screenIndex: number): BrowserWindow {
     const isPrimary = screen.getPrimaryDisplay().id === display.id;
     const win = createHardenedWindow({
+      ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}),
       x: display.bounds.x,
       y: display.bounds.y,
       width: display.bounds.width,
@@ -419,6 +468,9 @@ export class OverlayManager {
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     // Belt-and-braces: bounds again after frameless quirks on scaled displays.
     win.setBounds(display.bounds);
+    if (process.platform === 'darwin') {
+      coverMacDisplayWithWindow(win.getNativeWindowHandle(), display.id);
+    }
     // Must settle before the first show: otherwise Explorer can classify this
     // full-monitor transparent window as fullscreen and demote the taskbar.
     const nonRudeReady = markNativeWindowNonRude(win.getNativeWindowHandle());
@@ -450,6 +502,7 @@ export class OverlayManager {
       if (index !== undefined) {
         win.webContents.send('overlay:hover-config', this.hoverConfigFor(index));
       }
+      win.webContents.send('overlay:display-surface', this.displaySurfaceFor(display.id));
       this.updateMouseForwarding();
     });
 
@@ -460,6 +513,9 @@ export class OverlayManager {
         // keeping the buddy above every application window.
         if (!marked && process.platform === 'win32') win.setAlwaysOnTop(false);
         win.showInactive();
+        if (process.platform === 'darwin') {
+          coverMacDisplayWithWindow(win.getNativeWindowHandle(), display.id);
+        }
       });
     });
     return win;
@@ -519,6 +575,10 @@ export class OverlayManager {
     displayId: number,
     interactiveDisplayId: number | null,
   ): void {
+    if (process.platform === 'darwin') {
+      entry.win.setIgnoreMouseEvents(true);
+      return;
+    }
     const mode = forwardingModeFor({
       displayId,
       screenIndex: entry.screenIndex,
@@ -548,6 +608,31 @@ export class OverlayManager {
       const index = displayId === null ? undefined : this.overlays.get(displayId)?.screenIndex;
       return this.hoverConfigFor(index ?? 0);
     });
+    ipcMain.handle('overlay:get-display-surface', (event) => {
+      const displayId = this.displayIdFor(event.sender);
+      return displayId === null
+        ? ({
+            kind: 'off',
+            notchWidth: 0,
+            notchHeight: 0,
+            menuBarHeight: 0,
+          } satisfies OverlayDisplaySurface)
+        : this.displaySurfaceFor(displayId);
+    });
+  }
+
+  private displaySurfaceFor(displayId: number): OverlayDisplaySurface {
+    const display = screen.getAllDisplays().find((candidate) => candidate.id === displayId);
+    if (!display) return { kind: 'off', notchWidth: 0, notchHeight: 0, menuBarHeight: 0 };
+    return resolveDisplaySurface(process.platform, display, getMacDisplaySurface(displayId));
+  }
+
+  private pushDisplaySurfaces(): void {
+    for (const [displayId, entry] of this.overlays) {
+      if (!entry.win.isDestroyed() && !entry.win.webContents.isLoadingMainFrame()) {
+        entry.win.webContents.send('overlay:display-surface', this.displaySurfaceFor(displayId));
+      }
+    }
   }
 
   private displayIdFor(sender: WebContents): number | null {
@@ -571,6 +656,7 @@ export class OverlayManager {
       return;
     }
     if (evt.kind === 'dwell' && evt.region && isFiniteRect(evt.region)) {
+      if (process.platform === 'darwin') return;
       // Suppress the interactive flip while the user is physically holding
       // push-to-talk, and never flip a
       // window that isn't hosting the buddy.

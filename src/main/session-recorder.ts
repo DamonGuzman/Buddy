@@ -41,6 +41,7 @@ import type {
   Settings,
   TranscriptEntry,
   TurnTimings,
+  PermissionHealth,
 } from '../shared/types';
 
 const FORMAT_VERSION = 1;
@@ -148,6 +149,7 @@ export interface SessionEventMap {
   phone_audio_bridge_status: PhoneAudioBridgeStatus;
   phone_audio_bridge_client: { state: 'connected' | 'disconnected' };
   agents_changed: AgentSummary[];
+  hotkey_start_failed: { name: string; message: string; permissions: PermissionHealth };
   fatal_error: { kind: string; error: unknown };
   system_lock: null;
   system_suspend: null;

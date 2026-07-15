@@ -32,6 +32,7 @@ import { PlaybackTap } from './playback-tap';
 import { CHUNK_SAMPLES, int16ToFloat32, SAMPLE_RATE } from './pcm';
 import { parsePlayerWorkletMessage, type PlayerWorkletCommand } from './worklet-messages';
 import type { PlaybackPort } from './port';
+import { isMacOS, macAudioLifecycle } from './mac-audio-lifecycle';
 import type { AudioOutputDelta, PlaybackCommand } from '../../../shared/types';
 
 const STALE_IDS_MAX = 64;
@@ -53,6 +54,10 @@ export class AudioPlayer {
   private readonly gate = new PlaybackEpochGate();
   /** F1 (battery): pending context-suspend after the queue drained. */
   private suspendTimer: ReturnType<typeof setTimeout> | null = null;
+  private graphGeneration = 0;
+  private deliveryGeneration = 0;
+  private deliveryChain: Promise<void> = Promise.resolve();
+  private graphClose: Promise<void> = Promise.resolve();
   /** M8.5: accounts the samples the worklet actually rendered. */
   private readonly tap: PlaybackTap;
   /** M11: playback init failed and main was told (re-armed on recovery). */
@@ -64,6 +69,7 @@ export class AudioPlayer {
     tap?: PlaybackTap,
   ) {
     this.tap = tap ?? new PlaybackTap(port);
+    macAudioLifecycle.onCaptureTeardown(() => this.disposeGraph());
   }
 
   /** Queue a model audio chunk (drops stale-item and stale-epoch chunks). */
@@ -76,18 +82,23 @@ export class AudioPlayer {
     }
     this.cancelSuspend();
     const samples = int16ToFloat32(delta.chunk);
-    void this.withNode((node) => {
-      // F1 (battery): wake the render thread back up for the new audio.
-      if (this.ctx !== null && this.ctx.state === 'suspended') {
-        void this.ctx.resume().catch(() => undefined);
-      }
-      const msg: PlayerWorkletCommand = {
-        type: 'chunk',
-        samples: samples.buffer,
-        itemId: delta.itemId,
-      };
-      node.port.postMessage(msg, [samples.buffer]);
-    });
+    const generation = this.deliveryGeneration;
+    this.deliveryChain = this.deliveryChain
+      .then(async () => {
+        if (generation !== this.deliveryGeneration) return;
+        const { ctx, node } = await this.ensureNode();
+        if (generation !== this.deliveryGeneration) return;
+        if (ctx.state !== 'running') await ctx.resume();
+        if (generation !== this.deliveryGeneration || ctx.state !== 'running') return;
+        const msg: PlayerWorkletCommand = {
+          type: 'chunk',
+          samples: samples.buffer,
+          itemId: delta.itemId,
+        };
+        node.port.postMessage(msg, [samples.buffer]);
+        this.initErrorReported = false;
+      })
+      .catch((err: unknown) => this.handleOutputError(err));
   }
 
   /**
@@ -98,14 +109,15 @@ export class AudioPlayer {
   control(command: PlaybackCommand, epoch?: number): void {
     void command; // both commands clear the queue and staleify the current item
     this.gate.flush(epoch);
+    this.deliveryGeneration++;
+    this.cancelSuspend();
     if (this.currentItemId !== null) {
       this.markStale(this.currentItemId);
       this.currentItemId = null;
     }
-    void this.withNode((node) => {
-      const msg: PlayerWorkletCommand = { type: 'clear' };
-      node.port.postMessage(msg);
-    });
+    const msg: PlayerWorkletCommand = { type: 'clear' };
+    this.node?.port.postMessage(msg);
+    if (isMacOS()) this.disposeGraph();
   }
 
   /** Notifies when the worklet queue runs empty (playback finished). */
@@ -146,11 +158,13 @@ export class AudioPlayer {
 
   // ---- F1 (battery): suspend the context while nothing is queued ----
 
-  private scheduleSuspend(): void {
+  private scheduleSuspend(generation: number, ctx: AudioContext): void {
     this.cancelSuspend();
     this.suspendTimer = setTimeout(() => {
       this.suspendTimer = null;
-      void this.ctx?.suspend().catch(() => undefined);
+      if (generation !== this.graphGeneration || ctx !== this.ctx) return;
+      if (isMacOS()) this.disposeGraph();
+      else void ctx.suspend().catch(() => undefined);
     }, SUSPEND_AFTER_DRAIN_MS);
   }
 
@@ -161,60 +175,98 @@ export class AudioPlayer {
     }
   }
 
-  private async withNode(fn: (node: AudioWorkletNode) => void): Promise<void> {
+  private handleOutputError(err: unknown): void {
+    console.warn('[playback] audio output unavailable:', err);
+    this.disposeGraph();
+    if (this.initErrorReported) return;
+    this.initErrorReported = true;
     try {
-      await this.ensure();
-      if (this.node) fn(this.node);
-      this.initErrorReported = false;
-    } catch (err) {
-      console.warn('[playback] audio output unavailable:', err);
-      // M11 addition (orchestrator-approved): report the failure to main —
-      // audio_output_failed copy + forced captions — instead of a silent
-      // console.warn while the user hears nothing. Reset `ready` so the next
-      // chunk retries init (audio devices come back).
-      this.ready = null;
-      this.node = null;
-      void this.ctx?.close().catch(() => undefined);
-      this.ctx = null;
-      if (!this.initErrorReported) {
-        this.initErrorReported = true;
-        try {
-          this.port.reportAudioError({
-            source: 'playback',
-            name: err instanceof Error ? err.name : 'Error',
-            message: err instanceof Error ? err.message : String(err),
-          });
-        } catch {
-          /* reporting is best-effort */
-        }
+      this.port.reportAudioError({
+        source: 'playback',
+        name: err instanceof Error ? err.name : 'Error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } catch {
+      /* reporting is best-effort */
+    }
+  }
+
+  private async ensureNode(): Promise<{ ctx: AudioContext; node: AudioWorkletNode }> {
+    for (;;) {
+      const generation = this.graphGeneration;
+      try {
+        await this.ensure();
+      } catch (err) {
+        if (generation !== this.graphGeneration) continue;
+        throw err;
       }
+      if (generation !== this.graphGeneration) continue;
+      if (this.ctx && this.node) return { ctx: this.ctx, node: this.node };
     }
   }
 
   private ensure(): Promise<void> {
     if (!this.ready) {
-      this.ready = (async () => {
-        this.ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
-        await this.ctx.audioWorklet.addModule(this.workletUrl);
-        this.node = new AudioWorkletNode(this.ctx, 'pcm-player', {
+      const generation = this.graphGeneration;
+      const ready = (async () => {
+        await Promise.all([macAudioLifecycle.waitForCaptureTeardown(), this.graphClose]);
+        if (generation !== this.graphGeneration) return;
+        const ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
+        this.ctx = ctx;
+        await ctx.audioWorklet.addModule(this.workletUrl);
+        if (generation !== this.graphGeneration || ctx !== this.ctx) {
+          await ctx.close().catch(() => undefined);
+          return;
+        }
+        const node = new AudioWorkletNode(ctx, 'pcm-player', {
           numberOfInputs: 0,
           numberOfOutputs: 1,
           outputChannelCount: [1],
         });
-        this.node.port.onmessage = (e: MessageEvent<unknown>) => {
+        this.node = node;
+        node.port.onmessage = (e: MessageEvent<unknown>) => {
+          if (generation !== this.graphGeneration || node !== this.node) return;
           const msg = parsePlayerWorkletMessage(e.data);
           if (msg === null) return;
           if (msg.type === 'drained') {
-            this.scheduleSuspend(); // F1 (battery)
+            this.scheduleSuspend(generation, ctx);
             this.onDrainedCb?.();
           } else {
             this.tap.onPlayedBlock(msg);
           }
         };
-        this.node.connect(this.ctx.destination);
-        if (this.ctx.state !== 'running') await this.ctx.resume();
+        node.connect(ctx.destination);
+        if (ctx.state !== 'running') await ctx.resume();
       })();
+      this.ready = ready;
+      void ready.finally(() => {
+        if (this.ready === ready && generation !== this.graphGeneration) this.ready = null;
+      });
     }
     return this.ready;
+  }
+
+  private disposeGraph(): void {
+    this.cancelSuspend();
+    this.graphGeneration++;
+    const ctx = this.ctx;
+    const node = this.node;
+    this.ready = null;
+    this.ctx = null;
+    this.node = null;
+    if (node) {
+      node.port.onmessage = null;
+      try {
+        node.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+    }
+    if (ctx) {
+      const priorClose = this.graphClose;
+      this.graphClose = Promise.all([priorClose, ctx.close().catch(() => undefined)]).then(
+        () => undefined,
+      );
+    }
   }
 }

@@ -5,13 +5,19 @@
  * state-dependent hints through setTrayHint.
  */
 
-import { Menu, Tray, nativeImage } from 'electron';
+import { app, Menu, Tray, nativeImage } from 'electron';
+import type { NativeImage, Rectangle } from 'electron';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { APP_NAME } from '../shared/constants';
 
 // --- Tooltip copy (user-facing, byte-exact) --------------------------------
 
 /** Initial tooltip before any settings-driven hint lands. */
-export const TRAY_HINT_DEFAULT = `${APP_NAME} — hold Ctrl + left Alt and talk`;
+export const TRAY_HINT_DEFAULT =
+  process.platform === 'darwin'
+    ? `${APP_NAME} — hold Control + left Option and talk`
+    : `${APP_NAME} — hold Ctrl + left Alt and talk`;
 /** Push-to-talk mode (settings.fullRealtimeMode off). */
 export const TRAY_HINT_PUSH_TO_TALK = 'buddy - hold Ctrl + left Alt and talk';
 /** Full realtime mode (the hotkey toggles an open-mic session). */
@@ -23,6 +29,11 @@ export const TRAY_HINT_CRASHED = 'buddy tripped over something — a restart wil
 
 /** The ptt/realtime tooltip pair, selected by the current mode. */
 export function trayHintForMode(fullRealtimeMode: boolean): string {
+  if (process.platform === 'darwin') {
+    return fullRealtimeMode
+      ? 'buddy - press Control + left Option to start or stop realtime'
+      : 'buddy - hold Control + left Option and talk';
+  }
   return fullRealtimeMode ? TRAY_HINT_FULL_REALTIME : TRAY_HINT_PUSH_TO_TALK;
 }
 
@@ -41,26 +52,59 @@ const TRAY_ICON_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAbUlEQVR42u3WMQ7AIAhGYe/V23norjYOJg61KQK+Af6E+X0jpeRyyl31bnEBPT4uHmCOIwgU8BY/ikABX/EjCBTwJ+6KQAGSuAsCBezETREoQBM3QaAAi7gKgQIs41sIFOARFyFQgGcc/aBzqz18k0vQsHKADQAAAABJRU5ErkJggg==';
 
 export interface TrayCallbacks {
-  onToggleWhisper: () => void;
-  onOpenSettings: () => void;
+  onToggleWhisper: (anchor?: Rectangle) => void;
+  onOpenSettings: (anchor?: Rectangle) => void;
+  onOpenPermissions?: (anchor?: Rectangle) => void;
   onQuit: () => void;
 }
 
 export function createTray(callbacks: TrayCallbacks): Tray {
-  const icon = nativeImage.createFromBuffer(Buffer.from(TRAY_ICON_BASE64, 'base64'));
-  // Windows tray wants a 16x16 variant; nativeImage handles DPI from the 32px source.
-  const tray = new Tray(icon.resize({ width: 16, height: 16 }));
+  const tray = new Tray(trayIcon());
   tray.setToolTip(TRAY_HINT_DEFAULT);
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Whisper to Buddy', click: () => callbacks.onToggleWhisper() },
-    { label: 'Settings', click: () => callbacks.onOpenSettings() },
+    { label: 'Whisper to Buddy', click: () => callbacks.onToggleWhisper(tray.getBounds()) },
+    { label: 'Settings', click: () => callbacks.onOpenSettings(tray.getBounds()) },
+    ...(process.platform === 'darwin'
+      ? [
+          {
+            label: 'Permissions…',
+            click: () => callbacks.onOpenPermissions?.(tray.getBounds()),
+          } as const,
+        ]
+      : []),
     { type: 'separator' },
-    { label: 'Quit', click: () => callbacks.onQuit() },
+    { label: `Quit ${APP_NAME}`, click: () => callbacks.onQuit() },
   ]);
-  tray.setContextMenu(contextMenu);
-
-  tray.on('click', () => callbacks.onToggleWhisper());
+  if (process.platform === 'darwin') {
+    tray.on('click', (_event, bounds) => callbacks.onToggleWhisper(bounds));
+    tray.on('right-click', () => tray.popUpContextMenu(contextMenu));
+  } else {
+    tray.setContextMenu(contextMenu);
+    tray.on('click', (_event, bounds) => callbacks.onToggleWhisper(bounds));
+  }
 
   return tray;
+}
+
+function trayIcon(): NativeImage {
+  if (process.platform === 'darwin') {
+    const templatePath = app.isPackaged
+      ? join(process.resourcesPath, 'trayTemplate.png')
+      : join(app.getAppPath(), 'build', 'trayTemplate.png');
+    if (existsSync(templatePath)) {
+      const image = nativeImage.createFromPath(templatePath);
+      image.setTemplateImage(true);
+      return image;
+    }
+    const fallback = nativeImage.createFromBuffer(Buffer.from(TRAY_ICON_BASE64, 'base64')).resize({
+      width: 18,
+      height: 18,
+    });
+    fallback.setTemplateImage(true);
+    return fallback;
+  }
+  return nativeImage
+    .createFromBuffer(Buffer.from(TRAY_ICON_BASE64, 'base64'))
+    .resize({ width: 16, height: 16 });
 }

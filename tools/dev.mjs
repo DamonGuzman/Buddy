@@ -15,6 +15,7 @@
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 const repoRoot = join(import.meta.dirname, '..');
@@ -57,9 +58,12 @@ const electronVitePackage = require.resolve('electron-vite/package.json');
 const electronViteCli = join(dirname(electronVitePackage), 'bin', 'electron-vite.js');
 
 const appData =
-  process.env.APPDATA ?? join(process.env.USERPROFILE ?? process.cwd(), 'AppData', 'Roaming');
+  process.platform === 'darwin'
+    ? join(homedir(), 'Library', 'Application Support')
+    : (process.env.APPDATA ?? join(process.env.USERPROFILE ?? process.cwd(), 'AppData', 'Roaming'));
 const devUserData = join(appData, 'Buddy Dev');
 const activeDevUserData = process.env.CLICKY_USER_DATA ?? devUserData;
+const usePhoneBridge = process.platform === 'win32' && process.env.CLICKY_SKIP_PHONE_AUDIO !== '1';
 
 function readLocalApiKey() {
   const processKey = process.env.OPENAI_API_KEY?.trim() ?? '';
@@ -83,7 +87,11 @@ function spawnElectron(phoneAudioUrl) {
   const localApiKey = readLocalApiKey();
   console.log(`[dev] profile: ${activeDevUserData}`);
   console.log('[dev] renderer edits hot-reload; main and preload edits restart Electron');
-  console.log('[dev] quit the installed Buddy from its tray icon before testing Ctrl+Alt');
+  console.log(
+    process.platform === 'darwin'
+      ? '[dev] quit the installed Buddy from its menu-bar icon before testing Control+Option'
+      : '[dev] quit the installed Buddy from its tray icon before testing Ctrl+Alt',
+  );
   if (localApiKey !== '') {
     console.log('[dev] local OPENAI_API_KEY will be encrypted into the development profile');
   } else {
@@ -201,7 +209,14 @@ async function main() {
   const phoneAudioUrl = explicitPhoneAudioUrl ?? bridgeSocketUrl;
 
   if (cliArgs.some((arg) => ['--help', '-h', '--version', '-v'].includes(arg))) {
-    spawnElectron(phoneAudioUrl);
+    spawnElectron(usePhoneBridge ? phoneAudioUrl : '');
+    return;
+  }
+
+  // The optional iPhone-audio bridge is Windows-only. macOS uses the
+  // renderer's ordinary microphone path and must not try to launch PowerShell.
+  if (!usePhoneBridge) {
+    spawnElectron('');
     return;
   }
 

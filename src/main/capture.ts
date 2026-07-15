@@ -12,7 +12,7 @@
  * lives in capture-math.ts so it can be unit-tested without Electron.
  */
 
-import { BrowserWindow, desktopCapturer, screen } from 'electron';
+import { BrowserWindow, desktopCapturer, screen, systemPreferences } from 'electron';
 import type { Display, DesktopCapturerSource } from 'electron';
 import { CAPTURE_JPEG_QUALITY } from '../shared/constants';
 import type { CaptureMeta } from '../shared/types';
@@ -22,6 +22,7 @@ import {
   matchSourcesToDisplays,
   planResize,
 } from './capture-math';
+import { requestMacScreenCaptureAccess } from './windows/mac-screen-permission';
 
 export interface CaptureResult {
   meta: CaptureMeta;
@@ -61,7 +62,7 @@ export function exemptFromCaptureProtection(win: BrowserWindow): void {
  * sees the buddy/caption/panel in screenshots. Best-effort per window (a
  * window may be destroyed mid-iteration).
  */
-function setClickyWindowsContentProtection(enabled: boolean, logger: CaptureLogger): void {
+function setBuddyWindowsContentProtection(enabled: boolean, logger: CaptureLogger): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.isDestroyed() || captureVisibleWindows.has(win)) continue;
     try {
@@ -70,6 +71,35 @@ function setClickyWindowsContentProtection(enabled: boolean, logger: CaptureLogg
       logger.warn(`[capture] setContentProtection failed: ${String(err)}`);
     }
   }
+}
+
+/** ScreenCaptureKit can ignore NSWindowSharingNone; hide Buddy for one compositor beat too. */
+function hideBuddyWindowsForMacCapture(logger: CaptureLogger): () => void {
+  if (process.platform !== 'darwin') return () => undefined;
+  const prior = new Map<BrowserWindow, number>();
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed() || captureVisibleWindows.has(win)) continue;
+    try {
+      prior.set(win, win.getOpacity());
+      win.setOpacity(0);
+    } catch (err) {
+      logger.warn(`[capture] temporary macOS window exclusion failed: ${String(err)}`);
+    }
+  }
+  return () => {
+    for (const [win, opacity] of prior) {
+      if (win.isDestroyed()) continue;
+      try {
+        win.setOpacity(opacity);
+      } catch (err) {
+        logger.warn(`[capture] restoring macOS window opacity failed: ${String(err)}`);
+      }
+    }
+  };
+}
+
+function compositorBeat(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 34));
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +159,18 @@ function captureOneDisplay(
 export async function captureAllDisplays(
   logger: CaptureLogger = consoleCaptureLogger,
 ): Promise<CaptureResult[]> {
+  if (process.platform === 'darwin') {
+    let status = systemPreferences.getMediaAccessStatus('screen');
+    if (status !== 'granted') {
+      requestMacScreenCaptureAccess();
+      status = systemPreferences.getMediaAccessStatus('screen');
+    }
+    if (status !== 'granted') {
+      throw new Error(
+        'screen recording permission is denied; allow Buddy in System Settings > Privacy & Security > Screen & System Audio Recording',
+      );
+    }
+  }
   const displays = screen.getAllDisplays();
   if (displays.length === 0) return [];
 
@@ -147,15 +189,18 @@ export async function captureAllDisplays(
   }
 
   // SELF-EXCLUSION: hide Clicky's windows from the grab, always restore.
-  setClickyWindowsContentProtection(true, logger);
+  setBuddyWindowsContentProtection(true, logger);
+  const restoreMacVisibility = hideBuddyWindowsForMacCapture(logger);
   let sources;
   try {
+    if (process.platform === 'darwin') await compositorBeat();
     sources = await desktopCapturer.getSources({
       types: ['screen'],
       thumbnailSize: { width: thumbW, height: thumbH },
     });
   } finally {
-    setClickyWindowsContentProtection(false, logger);
+    restoreMacVisibility();
+    setBuddyWindowsContentProtection(false, logger);
   }
 
   const match = matchSourcesToDisplays(

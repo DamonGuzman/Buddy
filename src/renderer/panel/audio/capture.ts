@@ -18,6 +18,7 @@
 import { rmsOfInt16, SAMPLE_RATE } from './pcm';
 import type { MicCapturePort } from './port';
 import type { CaptureWorkletReset } from './worklet-messages';
+import { isMacOS, macAudioLifecycle } from './mac-audio-lifecycle';
 
 export interface CaptureStats {
   running: boolean;
@@ -53,6 +54,7 @@ export class MicCapture {
   private stream: MediaStream | null = null;
   private testOsc: OscillatorNode | null = null;
   private moduleReady: Promise<void> | null = null;
+  private contextClose: Promise<void> | null = null;
   private prewarmResult: Promise<boolean> | null = null;
   private generation = 0; // invalidates in-flight async starts on stop()
   private running = false;
@@ -81,6 +83,7 @@ export class MicCapture {
   async start(deviceId: string): Promise<MicStartResult> {
     const gen = this.beginCapture();
     if (gen === null) return { status: 'already-running' };
+    let pendingStream: MediaStream | null = null;
 
     try {
       const constraints: MediaStreamConstraints = {
@@ -91,25 +94,33 @@ export class MicCapture {
         },
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      pendingStream = stream;
       if (gen !== this.generation) {
         // stop() arrived while we were acquiring the mic — release and bail.
         releaseTracks(stream);
+        pendingStream = null;
         return { status: 'superseded' };
       }
 
       const ctx = await this.ensureContext();
       if (gen !== this.generation) {
         releaseTracks(stream);
+        pendingStream = null;
         return { status: 'superseded' };
       }
 
       this.attach(ctx, stream, stream.getAudioTracks()[0]?.label ?? '(unknown)');
+      pendingStream = null;
       this.lastError = null;
       return { status: 'started' };
     } catch (err) {
+      if (pendingStream) releaseTracks(pendingStream);
+      // A normal release can race initial worklet setup; stop() owns cleanup.
+      if (gen !== this.generation) return { status: 'superseded' };
       this.lastError = err instanceof Error ? err.message : String(err);
       console.warn('[capture] failed to start mic capture:', this.lastError);
       this.running = false;
+      this.releaseAudioGraph();
       // M11 addition (orchestrator-approved): report the failure to main so
       // the hold that produced no audio surfaces mic_unavailable (with the
       // NotAllowedError privacy-toggle variant) instead of a silent nothing.
@@ -149,6 +160,7 @@ export class MicCapture {
     } catch (err) {
       console.warn('[capture] test tone failed:', err);
       this.running = false;
+      this.releaseAudioGraph();
       return { status: 'error', error: err instanceof Error ? err.message : String(err) };
     }
   }
@@ -179,7 +191,7 @@ export class MicCapture {
       releaseTracks(this.stream);
       this.stream = null;
     }
-    void this.ctx?.suspend().catch(() => undefined);
+    this.releaseAudioGraph();
     console.debug(
       `[capture] stopped after ${this.chunkCount} chunks (peak rms ${this.peakRms.toFixed(4)})`,
     );
@@ -233,16 +245,52 @@ export class MicCapture {
     if (this.node) this.source.connect(this.node);
   }
 
+  private releaseAudioGraph(): void {
+    if (isMacOS()) {
+      macAudioLifecycle.beginCaptureTeardown(this.closeContext());
+    } else {
+      void this.ctx?.suspend().catch(() => undefined);
+    }
+  }
+
+  private closeContext(): Promise<void> {
+    const ctx = this.ctx;
+    const node = this.node;
+    this.ctx = null;
+    this.node = null;
+    this.moduleReady = null;
+    if (node) {
+      node.port.onmessage = null;
+      try {
+        node.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+    }
+    if (!ctx) return this.contextClose ?? Promise.resolve();
+    const closing = ctx.close().catch(() => undefined);
+    this.contextClose = closing;
+    void closing.finally(() => {
+      if (this.contextClose === closing) this.contextClose = null;
+    });
+    return closing;
+  }
+
   private async ensureContext(): Promise<AudioContext> {
+    await this.contextClose;
     if (!this.ctx) {
       this.ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
     }
+    const ctx = this.ctx;
     if (!this.moduleReady) {
-      this.moduleReady = this.ctx.audioWorklet.addModule(this.workletUrl);
+      this.moduleReady = ctx.audioWorklet.addModule(this.workletUrl);
     }
     await this.moduleReady;
+    if (ctx !== this.ctx || ctx.state === 'closed') {
+      throw new DOMException('microphone capture was stopped during audio setup', 'AbortError');
+    }
     if (!this.node) {
-      this.node = new AudioWorkletNode(this.ctx, 'pcm-capture', {
+      this.node = new AudioWorkletNode(ctx, 'pcm-capture', {
         numberOfInputs: 1,
         numberOfOutputs: 1,
         channelCount: 1,
@@ -251,13 +299,13 @@ export class MicCapture {
       this.node.port.onmessage = (e: MessageEvent<ArrayBuffer>) => this.onChunk(e.data);
       // A worklet with no route to the destination gets culled from the
       // render graph — keep it pulled via a muted gain node.
-      const mute = this.ctx.createGain();
+      const mute = ctx.createGain();
       mute.gain.value = 0;
       this.node.connect(mute);
-      mute.connect(this.ctx.destination);
+      mute.connect(ctx.destination);
     }
-    if (this.ctx.state !== 'running') await this.ctx.resume();
-    return this.ctx;
+    if (ctx.state !== 'running') await ctx.resume();
+    return ctx;
   }
 
   private onChunk(buf: ArrayBuffer): void {

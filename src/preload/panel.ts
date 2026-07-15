@@ -31,11 +31,14 @@ const api: PanelApi = {
   onCaptureCommand: (cb) => subscribe('audio:capture', cb),
   // M11 addition (orchestrator-approved): runtime flags (hookAlive + dev flags).
   onRuntime: (cb) => subscribe('panel:runtime', cb),
+  onPermissions: (cb) => subscribe('panel:permissions', cb),
   // M17 addition (integration-approved): Codex sign-in state push.
   onCodexSignin: (cb) => subscribe('panel:codex-signin', cb),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),
   getRuntime: () => ipcRenderer.invoke('panel:get-runtime'),
+  getPermissionHealth: () => ipcRenderer.invoke('permissions:get'),
+  permissionAction: (action) => ipcRenderer.invoke('permissions:action', action),
   getCodexSigninState: () => ipcRenderer.invoke('codex:signin-state'),
   signInToCodex: () => ipcRenderer.invoke('codex:sign-in'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),

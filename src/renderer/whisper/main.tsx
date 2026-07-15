@@ -20,7 +20,8 @@ const STACK_LIMIT = 6;
 
 function upsert(entries: TranscriptEntry[], entry: TranscriptEntry): TranscriptEntry[] {
   const i = entries.findIndex((e) => e.id === entry.id);
-  const next = i >= 0 ? [...entries.slice(0, i), entry, ...entries.slice(i + 1)] : [...entries, entry];
+  const next =
+    i >= 0 ? [...entries.slice(0, i), entry, ...entries.slice(i + 1)] : [...entries, entry];
   return next.slice(-STACK_LIMIT);
 }
 

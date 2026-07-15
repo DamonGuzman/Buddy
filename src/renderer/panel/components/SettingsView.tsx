@@ -3,14 +3,17 @@ import { ChatGptCard } from './settings/ChatGptCard';
 import { MicrophoneCard } from './settings/MicrophoneCard';
 import { OpenAiCard } from './settings/OpenAiCard';
 import { VoiceCard } from './settings/VoiceCard';
+import { PermissionCard } from './PermissionCard';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { PatchSettings } from './settings/patch';
-import type { MicDevice, Settings } from '../../../shared/types';
+import type { MicDevice, PermissionHealth, Settings } from '../../../shared/types';
 
 interface SettingsViewProps {
   settings: Settings;
   micDevices: MicDevice[];
   micError: string | null;
+  permissions: PermissionHealth | null;
+  onPermissionHealth: (health: PermissionHealth) => void;
 }
 
 /** Settings: API key, model, voice, captions, mic, hotkey, agent-mode teaser. */
@@ -18,12 +21,17 @@ export function SettingsView({
   settings,
   micDevices,
   micError,
+  permissions,
+  onPermissionHealth,
 }: SettingsViewProps): React.JSX.Element {
   const patch: PatchSettings = (p) => clicky.setSettings(p);
 
   return (
     <ScrollArea className="min-h-0 flex-1" data-settings-scroll>
       <div className="flex flex-col gap-3.5 px-4 pt-3.5 pb-4">
+        {permissions?.supported ? (
+          <PermissionCard health={permissions} onHealth={onPermissionHealth} />
+        ) : null}
         <OpenAiCard settings={settings} onPatch={patch} />
         <ChatGptCard settings={settings} onPatch={patch} />
         <VoiceCard settings={settings} onPatch={patch} />

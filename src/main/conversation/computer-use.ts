@@ -11,7 +11,9 @@ import { resolveGroundingAuth } from '../auth/auth-source';
 import type { CodexProvider } from '../auth/auth-source';
 import type { CaptureResult } from '../capture';
 import { ComputerUseOperator } from '../computer/operator';
-import { WindowsInputController } from '../computer/windows-input';
+import { createComputerInputController } from '../computer/input-controller';
+import type { ComputerInputController } from '../computer/input-controller';
+import { supportsComputerUse } from '../platform';
 import { asRecord, asString, errorMessage } from '../util/guards';
 import type { SettingsPort } from './ports';
 import type { TurnGuard } from './turn-guard';
@@ -32,14 +34,14 @@ export interface ComputerUseDeps {
 }
 
 export class ComputerUseRunner {
-  private input: WindowsInputController | null = null;
+  private input: ComputerInputController | null = null;
   private busy = false;
 
   constructor(private readonly deps: ComputerUseDeps) {}
 
-  /** Sol needs Windows + the settings opt-in + a ChatGPT sign-in. */
+  /** Sol needs a supported desktop platform + settings opt-in + ChatGPT sign-in. */
   available(): boolean {
-    if (!this.deps.enabledSnapshot() || process.platform !== 'win32') return false;
+    if (!this.deps.enabledSnapshot() || !supportsComputerUse()) return false;
     try {
       return this.deps.codexProvider().getCodexAuth() !== null;
     } catch {
@@ -65,7 +67,7 @@ export class ComputerUseRunner {
     if (resolved === null || resolved.kind !== 'chatgptCodex') {
       return { error: 'computer use needs chatgpt sign-in' };
     }
-    this.input ??= new WindowsInputController(deps.userDataDir());
+    this.input ??= createComputerInputController(deps.userDataDir());
     this.busy = true;
     try {
       const operator = new ComputerUseOperator({

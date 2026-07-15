@@ -16,7 +16,7 @@
  */
 
 import { app, screen } from 'electron';
-import type { BrowserWindow } from 'electron';
+import type { BrowserWindow, Rectangle } from 'electron';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { PANEL_HEIGHT, PANEL_WIDTH } from '../../shared/constants';
@@ -78,6 +78,9 @@ export function togglePanel(): void {
 
 export class PanelManager {
   private win: BrowserWindow | null = null;
+  private ignoreBlurUntil = 0;
+  private panelLoaded = false;
+  private pendingInactiveShow = false;
   private crashGuard = new CrashLoopGuard(CRASH_LOOP_MAX_RECREATES, CRASH_LOOP_WINDOW_MS, 'panel');
   /** M11: crash recovery gave up — index.ts surfaces it via the tray. */
   private fatalCb: (() => void) | null = null;
@@ -137,18 +140,22 @@ export class PanelManager {
     return this.win !== null && !this.win.isDestroyed() && this.win.isVisible();
   }
 
-  toggle(): void {
+  toggle(anchor?: Rectangle): void {
     if (this.isVisible()) {
       this.hide();
     } else {
-      this.show();
+      this.show(anchor);
     }
   }
 
-  show(): void {
+  show(anchor?: Rectangle): void {
+    this.ignoreBlurUntil = 0;
+    this.pendingInactiveShow = false;
     const win = this.ensureWindow();
-    this.positionNearTray(win);
+    this.positionNearTray(win, anchor);
     win.show();
+    this.positionNearTray(win, anchor);
+    this.stabilizePosition(win, anchor);
     win.focus();
     this.reassertTopmost(win);
   }
@@ -156,9 +163,11 @@ export class PanelManager {
   /** Show without stealing focus (first-run auto-show, background surfacing). */
   showInactive(): void {
     const win = this.ensureWindow();
-    this.positionNearTray(win);
-    win.showInactive();
-    this.reassertTopmost(win);
+    if (!this.panelLoaded) {
+      this.pendingInactiveShow = true;
+      return;
+    }
+    this.presentInactive(win);
   }
 
   /**
@@ -176,6 +185,7 @@ export class PanelManager {
   }
 
   hide(): void {
+    this.pendingInactiveShow = false;
     if (this.win && !this.win.isDestroyed()) this.win.hide();
   }
 
@@ -211,10 +221,15 @@ export class PanelManager {
 
   private ensureWindow(): BrowserWindow {
     if (this.win && !this.win.isDestroyed()) return this.win;
+    this.panelLoaded = false;
 
     // Dev/unpacked runs: give the window the buddy icon (packaged builds get
     // it from the exe resources via electron-builder's win.icon).
-    const icoPath = join(app.getAppPath(), 'build', 'icon.ico');
+    const iconPath = join(
+      app.getAppPath(),
+      'build',
+      process.platform === 'darwin' ? 'icon.icns' : 'icon.ico',
+    );
     const win = createHardenedWindow({
       width: PANEL_WIDTH,
       height: PANEL_HEIGHT,
@@ -226,11 +241,15 @@ export class PanelManager {
       skipTaskbar: true,
       show: false,
       alwaysOnTop: true,
-      ...(existsSync(icoPath) ? { icon: icoPath } : {}),
+      ...(existsSync(iconPath) ? { icon: iconPath } : {}),
       // Keep the renderer (and its AudioWorklets) running at full speed
       // while the window is hidden — mic capture must work unseen.
       webPreferences: hardenedWebPreferences('panel.js'),
     });
+
+    if (process.platform === 'darwin') {
+      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    }
 
     // Crash recovery: a dead panel renderer silently kills mic capture AND
     // model-voice playback (both live in this renderer). Recreate, preserving
@@ -263,14 +282,28 @@ export class PanelManager {
     // M11: notify main wiring on every renderer load (first boot AND
     // crash-recreates) so the transcript ring / status can be replayed —
     // entries pushed before the renderer existed are otherwise lost.
-    win.webContents.on('did-finish-load', () => this.rendererReadyCb?.());
+    win.webContents.on('did-finish-load', () => {
+      if (this.win !== win) return;
+      this.panelLoaded = true;
+      this.rendererReadyCb?.();
+      if (this.pendingInactiveShow) {
+        this.pendingInactiveShow = false;
+        this.presentInactive(win);
+      }
+    });
 
     win.on('blur', () => {
       if (this.options.keepOpenOnBlur) return; // explicit visual QA mode: keep the panel up
-      if (!win.isDestroyed()) win.hide();
+      if (Date.now() < this.ignoreBlurUntil) return;
+      setTimeout(() => {
+        if (!win.isDestroyed() && !win.isFocused()) win.hide();
+      }, 100);
     });
     win.on('closed', () => {
-      this.win = null;
+      if (this.win === win) {
+        this.win = null;
+        this.panelLoaded = false;
+      }
     });
 
     if (this.options.captureTest) {
@@ -288,8 +321,37 @@ export class PanelManager {
   }
 
   /** Bottom-right of the primary display's work area — near the Windows tray. */
-  private positionNearTray(win: BrowserWindow): void {
-    const { workArea } = screen.getPrimaryDisplay();
+  private presentInactive(win: BrowserWindow): void {
+    if (win.isDestroyed()) return;
+    this.positionNearTray(win);
+    this.ignoreBlurUntil = Date.now() + 1_000;
+    win.showInactive();
+    this.positionNearTray(win);
+    this.stabilizePosition(win);
+    this.reassertTopmost(win);
+  }
+
+  private stabilizePosition(win: BrowserWindow, anchor?: Rectangle): void {
+    for (const delay of [100, 400, 1_000]) {
+      setTimeout(() => {
+        if (!win.isDestroyed() && win.isVisible()) this.positionNearTray(win, anchor);
+      }, delay);
+    }
+  }
+
+  private positionNearTray(win: BrowserWindow, anchor?: Rectangle): void {
+    const display = anchor ? screen.getDisplayMatching(anchor) : screen.getPrimaryDisplay();
+    if (process.platform === 'darwin') {
+      const { bounds, workArea } = display;
+      const anchorCenter = anchor ? anchor.x + anchor.width / 2 : bounds.x + bounds.width;
+      const x = Math.min(
+        Math.max(Math.round(anchorCenter - PANEL_WIDTH / 2), bounds.x + MARGIN),
+        bounds.x + bounds.width - PANEL_WIDTH - MARGIN,
+      );
+      win.setPosition(x, Math.round(Math.max(bounds.y, workArea.y) + MARGIN));
+      return;
+    }
+    const { workArea } = display;
     win.setPosition(
       Math.round(workArea.x + workArea.width - PANEL_WIDTH - MARGIN),
       Math.round(workArea.y + workArea.height - PANEL_HEIGHT - MARGIN),

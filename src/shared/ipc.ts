@@ -20,11 +20,15 @@ import type {
   CaptureIndicatorUpdate,
   CodexSignInState,
   MicDevice,
+  OverlayDisplaySurface,
   OverlayHoverConfig,
   OverlayHoverEvent,
   OverlayInteractiveUpdate,
   PlaybackControl,
   PlaybackStatsUpdate,
+  PermissionAction,
+  PermissionActionResult,
+  PermissionHealth,
   PointerCommand,
   RuntimeFlags,
   SessionStatus,
@@ -52,6 +56,8 @@ export interface MainToOverlayEvents {
   'overlay:hover-config': OverlayHoverConfig;
   /** This overlay window's click-through state flipped (dwell-to-interact). */
   'overlay:interactive': OverlayInteractiveUpdate;
+  /** Native top-of-display geometry for this overlay's display. */
+  'overlay:display-surface': OverlayDisplaySurface;
   // M19 addition: agent helpers on the overlay — the same renderer-safe list
   // the panel gets (full-list upsert, broadcast on every agent state change;
   // NEVER carries screenshot bytes). Every overlay receives it; only the
@@ -96,6 +102,8 @@ export interface MainToPanelEvents {
   // M11 addition: runtime flags for the panel — hookAlive (hero hint adapts)
   // + CLICKY_* dev flags (header dev chip).
   'panel:runtime': RuntimeFlags;
+  /** Live macOS privacy and native-hotkey health. */
+  'panel:permissions': PermissionHealth;
   // M21: 'panel:agents' and 'panel:show-agents' retired with the control
   // panel (the agents view is gone; overlay helper clicks summon the
   // whisper). The remaining panel:* channels serve the settings window +
@@ -174,6 +182,10 @@ export interface InvokeChannels {
   // M11 addition: panel bootstrap for runtime flags (push updates ride on
   // 'panel:runtime').
   'panel:get-runtime': { args: []; result: RuntimeFlags };
+  /** Current macOS privacy and native-hotkey health (safe on other platforms). */
+  'permissions:get': { args: []; result: PermissionHealth };
+  /** Run one explicit permission repair action. */
+  'permissions:action': { args: [action: PermissionAction]; result: PermissionActionResult };
   // M17 addition: panel bootstrap for the Codex sign-in snapshot (push
   // updates ride on 'panel:codex-signin').
   'codex:signin-state': { args: []; result: CodexSignInState };
@@ -182,6 +194,8 @@ export interface InvokeChannels {
   // M15 addition: overlay bootstrap for hover config (belt-and-braces vs the
   // did-finish-load push; handled in windows/overlay.ts).
   'overlay:get-hover-config': { args: []; result: OverlayHoverConfig };
+  /** Overlay bootstrap: native top-of-display geometry for this display. */
+  'overlay:get-display-surface': { args: []; result: OverlayDisplaySurface };
   // M18 additions: agent mode (docs/AGENT-MODE.md §6.2).
   /** Panel bootstrap: current agent list (push updates ride on 'panel:agents'). */
   'agents:list': { args: []; result: AgentSummary[] };
@@ -227,6 +241,8 @@ export interface OverlayApi {
   onHoverConfig(cb: (cfg: OverlayHoverConfig) => void): Unsubscribe;
   onInteractive(cb: (payload: OverlayInteractiveUpdate) => void): Unsubscribe;
   getHoverConfig(): Promise<OverlayHoverConfig>;
+  onDisplaySurface(cb: (surface: OverlayDisplaySurface) => void): Unsubscribe;
+  getDisplaySurface(): Promise<OverlayDisplaySurface>;
   /** Fire-and-forget hover events (dwell/exit/status). */
   sendHover(evt: OverlayHoverEvent): void;
   /** The buddy was clicked while interactive (main toggles the panel). */
@@ -263,12 +279,15 @@ export interface PanelApi {
   onCaptureCommand(cb: (payload: CaptureControl) => void): Unsubscribe;
   // M11 addition: runtime flags (hookAlive + dev flags).
   onRuntime(cb: (flags: RuntimeFlags) => void): Unsubscribe;
+  onPermissions(cb: (health: PermissionHealth) => void): Unsubscribe;
   // M17 addition: Codex sign-in state push.
   onCodexSignin(cb: (state: CodexSignInState) => void): Unsubscribe;
 
   getSettings(): Promise<Settings>;
   // M11 addition: runtime flags bootstrap.
   getRuntime(): Promise<RuntimeFlags>;
+  getPermissionHealth(): Promise<PermissionHealth>;
+  permissionAction(action: PermissionAction): Promise<PermissionActionResult>;
   // M17 addition: Codex sign-in state bootstrap.
   getCodexSigninState(): Promise<CodexSignInState>;
   signInToCodex(): Promise<SignInResult>;

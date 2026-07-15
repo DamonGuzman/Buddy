@@ -13,8 +13,7 @@ import type {
   CodexUserTurn,
 } from '../codex/responses-session';
 import { asFiniteNumber, asRecord, errorMessage } from '../util/guards';
-import { type WindowsInputController } from './windows-input';
-import type { MouseButton } from './windows-input';
+import type { ComputerInputController, MouseButton } from './input-controller';
 
 const MAX_ACTIONS = 12;
 const SETTLE_MS = 350;
@@ -37,6 +36,13 @@ rules:
 - never invent hidden state. if the target is unclear, stop and explain what prevented safe completion.
 - do not perform a materially different action from the user's task.
 - when the task is complete, answer with one short plain-language sentence and call no tool.`;
+
+export function operatorInstructions(platform: NodeJS.Platform = process.platform): string {
+  if (platform !== 'darwin') return OPERATOR_INSTRUCTIONS;
+  return `${OPERATOR_INSTRUCTIONS}
+- this is macOS: use META or COMMAND for native Command-key shortcuts (for example META+L and
+  META+TAB). CTRL means the distinct Control key and is not a substitute for Command.`;
+}
 
 export const CLICK_AT_TOOL: CodexToolDef = {
   type: 'function',
@@ -80,6 +86,15 @@ export const PRESS_KEYS_TOOL: CodexToolDef = {
     required: ['keys'],
   },
 };
+
+function pressKeysTool(platform: NodeJS.Platform = process.platform): CodexToolDef {
+  if (platform !== 'darwin') return PRESS_KEYS_TOOL;
+  return {
+    ...PRESS_KEYS_TOOL,
+    description:
+      'Press a macOS key or chord. Examples: ["ENTER"], ["META","L"], ["META","TAB"]. META and COMMAND are the Command key.',
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Pure tool-argument parsing (unknown -> typed | error). The error strings are
@@ -169,7 +184,7 @@ export interface ComputerUseResult {
 
 export interface ComputerUseOperatorOptions {
   auth: ChatGptCodexAuthSource;
-  input: WindowsInputController;
+  input: ComputerInputController;
   initialCaptures?: CaptureResult[];
   isAllowed(): boolean;
   capture?: () => Promise<CaptureResult[]>;
@@ -187,15 +202,15 @@ export class ComputerUseOperator {
 
   constructor(private readonly options: ComputerUseOperatorOptions) {
     this.capture = options.capture ?? captureAllDisplays;
-    this.dipToScreenPoint = options.dipToScreenPoint ?? ((point) => screen.dipToScreenPoint(point));
+    this.dipToScreenPoint = options.dipToScreenPoint ?? inputPointFromDip;
     this.captures = options.initialCaptures ?? [];
     this.session =
       options.buildSession?.(options.auth) ??
       new CodexResponsesSession({
         auth: options.auth,
         model: DEFAULT_CODEX_MODEL,
-        instructions: OPERATOR_INSTRUCTIONS,
-        tools: [CLICK_AT_TOOL, TYPE_TEXT_TOOL, PRESS_KEYS_TOOL],
+        instructions: operatorInstructions(),
+        tools: [CLICK_AT_TOOL, TYPE_TEXT_TOOL, pressKeysTool()],
         reasoningEffort: 'low',
         serviceTier: 'priority',
         timeoutMs: OPERATOR_TIMEOUT_MS,
@@ -318,6 +333,16 @@ function captureContext(captures: CaptureResult[]): string {
       return `screen${m.screenIndex}: ${m.imageW}x${m.imageH} screenshot pixels${m.isActive ? ' (active)' : ''}; coordinates use this image.`;
     })
     .join('\n');
+}
+
+/** CoreGraphics mouse coordinates are macOS global logical points, matching Electron DIPs. */
+export function inputPointFromDip(
+  point: Point,
+  platform: NodeJS.Platform = process.platform,
+): Point {
+  return platform === 'darwin'
+    ? { x: Math.round(point.x), y: Math.round(point.y) }
+    : screen.dipToScreenPoint(point);
 }
 function isButton(value: unknown): value is MouseButton {
   return value === 'left' || value === 'right' || value === 'middle';

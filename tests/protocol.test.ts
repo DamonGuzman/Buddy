@@ -331,9 +331,11 @@ describe('persona tool definition', () => {
 
   it('makes buddy the user-facing orchestrator when agents are available', () => {
     for (const instructions of [getSessionInstructions(true), getTextInstructions(true)]) {
-      expect(instructions).toContain('you are buddy, the warm interaction agent');
+      expect(instructions).toContain("you are buddy, this person's hands-on business assistant");
+      expect(instructions).toContain('own the outcome, not just the conversation');
+      expect(instructions).toContain('produce usable work instead of generic advice');
       expect(instructions).toContain('as buddy, your primary role');
-      expect(instructions).toContain('interface between them and your background subagents');
+      expect(instructions).toContain('interface between the person and your background subagents');
       expect(instructions).toContain('delegate almost every substantive task');
       expect(instructions).toContain('do not try to complete that work yourself first');
       expect(instructions).toContain('evaluate and synthesize its result');

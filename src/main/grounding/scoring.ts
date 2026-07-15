@@ -28,6 +28,8 @@ export interface SnapCandidate {
   y: number;
   w: number;
   h: number;
+  /** Front-to-back visible-window rank (0 is frontmost), when available. */
+  windowRank?: number;
 }
 
 export interface ScoredCandidate {
@@ -47,6 +49,8 @@ export interface ScoredCandidate {
 export const SNAP_TEXT_THRESHOLD = 0.55;
 /** How much being a full search-radius away costs in rank score. */
 const PROXIMITY_WEIGHT = 0.15;
+/** Window order only breaks otherwise-near ties; label identity remains primary. */
+const WINDOW_RANK_WEIGHT = 0.012;
 
 /**
  * Generic UI words that carry no identity: "the save button" == "Save".
@@ -182,13 +186,17 @@ export function selectCandidate(
 ): ScoredCandidate | null {
   let best: ScoredCandidate | null = null;
   for (const c of candidates) {
-    if (!(c.w > 0) || !(c.h > 0) || typeof c.name !== 'string' || c.name.length === 0) continue;
+    // AX/WebArea trees sometimes expose stale virtual nodes as 1px slivers.
+    // They are not useful pointing targets and can otherwise win on text.
+    if (!(c.w >= 3) || !(c.h >= 3) || typeof c.name !== 'string' || c.name.length === 0) continue;
     const textScore = textSimilarity(label, c.name);
     if (textScore < threshold) continue;
     const cx = c.x + c.w / 2;
     const cy = c.y + c.h / 2;
     const distPx = Math.hypot(cx - point.x, cy - point.y);
-    const rankScore = textScore - PROXIMITY_WEIGHT * Math.min(distPx / Math.max(radiusPx, 1), 1);
+    const windowPenalty = WINDOW_RANK_WEIGHT * Math.min(Math.max(c.windowRank ?? 0, 0), 5);
+    const rankScore =
+      textScore - PROXIMITY_WEIGHT * Math.min(distPx / Math.max(radiusPx, 1), 1) - windowPenalty;
     if (best === null || rankScore > best.rankScore) {
       best = { candidate: c, textScore, rankScore, distPx, cx, cy };
     }

@@ -2,9 +2,10 @@ import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { ComputerInputController, MouseButton } from './input-controller';
 import inputScript from './windows-input.ps1?raw';
 
-export type MouseButton = 'left' | 'right' | 'middle';
+export type { MouseButton } from './input-controller';
 
 /**
  * One request line to the PowerShell input daemon (windows-input.ps1). A
@@ -12,7 +13,9 @@ export type MouseButton = 'left' | 'right' | 'middle';
  * line `{id, ok, error?}` per request.
  */
 export type InputRequest =
+  | { action: 'move'; x: number; y: number }
   | { action: 'click'; x: number; y: number; button: MouseButton; count: number }
+  | { action: 'scroll'; deltaX: number; deltaY: number }
   | { action: 'type_text'; text: string }
   | { action: 'press_keys'; keys: string[] };
 
@@ -40,7 +43,7 @@ interface Pending {
   timer: NodeJS.Timeout;
 }
 
-export class WindowsInputController {
+export class WindowsInputController implements ComputerInputController {
   private child: ChildProcessWithoutNullStreams | null = null;
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
@@ -58,8 +61,20 @@ export class WindowsInputController {
     this.requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
   }
 
+  move(x: number, y: number): Promise<void> {
+    return this.request({ action: 'move', x: Math.round(x), y: Math.round(y) });
+  }
+
   click(x: number, y: number, button: MouseButton = 'left', count = 1): Promise<void> {
     return this.request({ action: 'click', x: Math.round(x), y: Math.round(y), button, count });
+  }
+
+  scroll(deltaX: number, deltaY: number): Promise<void> {
+    return this.request({
+      action: 'scroll',
+      deltaX: Math.round(deltaX),
+      deltaY: Math.round(deltaY),
+    });
   }
 
   typeText(text: string): Promise<void> {

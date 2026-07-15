@@ -18,8 +18,7 @@ function subscribe<C extends Extract<keyof MainToOverlayEvents, string>>(
   channel: C,
   cb: (payload: MainToOverlayEvents[C]) => void,
 ): Unsubscribe {
-  const listener = (_event: IpcRendererEvent, payload: MainToOverlayEvents[C]): void =>
-    cb(payload);
+  const listener = (_event: IpcRendererEvent, payload: MainToOverlayEvents[C]): void => cb(payload);
   ipcRenderer.on(channel, listener);
   return () => ipcRenderer.removeListener(channel, listener);
 }
@@ -40,6 +39,8 @@ const api: OverlayApi = {
   onHoverConfig: (cb) => subscribe('overlay:hover-config', cb),
   onInteractive: (cb) => subscribe('overlay:interactive', cb),
   getHoverConfig: () => ipcRenderer.invoke('overlay:get-hover-config'),
+  onDisplaySurface: (cb) => subscribe('overlay:display-surface', cb),
+  getDisplaySurface: () => ipcRenderer.invoke('overlay:get-display-surface'),
   sendHover: (evt) => ipcRenderer.send('overlay:hover', evt),
   sendBuddyClick: () => ipcRenderer.send('overlay:buddy-click', null),
   sendBuddyMove: (rest) => ipcRenderer.send('overlay:buddy-move', rest),

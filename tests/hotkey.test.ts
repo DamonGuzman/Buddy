@@ -33,6 +33,7 @@ interface Harness {
   taps: number;
   down(code: number): void;
   up(code: number): void;
+  click(button: number): void;
 }
 
 function makeHarness(maxHoldMs?: number): Harness {
@@ -46,6 +47,7 @@ function makeHarness(maxHoldMs?: number): Harness {
     taps: 0,
     down: (code) => hook.emit('keydown', { keycode: code }),
     up: (code) => hook.emit('keyup', { keycode: code }),
+    click: (button) => hook.emit('click', { button }),
   };
   hotkey.on('hold-start', () => events.push('start'));
   hotkey.on('hold-end', () => events.push('end'));
@@ -85,6 +87,17 @@ describe('hold-to-talk state machine', () => {
     h.hotkey.simulate('press');
     h.hotkey.simulate('release');
     expect(h.events).toEqual(['start', 'end']);
+  });
+});
+
+describe('global primary click', () => {
+  it('emits only for the left/primary mouse button', () => {
+    const h = makeHarness();
+    let clicks = 0;
+    h.hotkey.on('primary-click', () => clicks++);
+    h.click(2);
+    h.click(1);
+    expect(clicks).toBe(1);
   });
 });
 
@@ -163,6 +176,40 @@ describe('hook start failure (M11 crash fix)', () => {
     hotkey.simulate('press');
     hotkey.simulate('release');
     expect(events).toEqual(['start', 'end']);
+  });
+
+  it('retries a recovered native hook without duplicating event listeners', () => {
+    class RecoveringHook extends EventEmitter implements UiohookLike {
+      starts = 0;
+      stops = 0;
+      start(): void {
+        this.starts++;
+        if (this.starts === 1) throw new Error('access denied');
+      }
+      stop(): void {
+        this.stops++;
+      }
+    }
+
+    const hook = new RecoveringHook();
+    const onSpy = vi.spyOn(hook, 'on');
+    const hotkey = new HotkeyManager({ hook });
+    hotkey.on('error', () => undefined);
+    hotkey.start();
+    expect(hotkey.status().hookAlive).toBe(false);
+    hotkey.start();
+
+    expect(hotkey.status()).toMatchObject({ hookAlive: true, holding: false });
+    expect(hotkey.status().error).toBeUndefined();
+    expect(hook.starts).toBe(2);
+    expect(hook.stops).toBe(1);
+    expect(onSpy).toHaveBeenCalledTimes(3); // keydown, keyup, click — once each
+
+    let starts = 0;
+    hotkey.on('hold-start', () => starts++);
+    hook.emit('keydown', { keycode: L_CTRL });
+    hook.emit('keydown', { keycode: L_ALT });
+    expect(starts).toBe(1);
   });
 });
 

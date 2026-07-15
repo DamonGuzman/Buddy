@@ -30,7 +30,10 @@ async function enumerateMics(): Promise<MicDevice[]> {
   return [...seen.values()];
 }
 
-export function useMicDevices(onMicError: (err: string | null) => void): MicDevice[] {
+export function useMicDevices(
+  onMicError: (err: string | null) => void,
+  canPrewarm = true,
+): MicDevice[] {
   const [micDevices, setMicDevices] = useState<MicDevice[]>([]);
 
   useEffect(() => {
@@ -38,13 +41,15 @@ export function useMicDevices(onMicError: (err: string | null) => void): MicDevi
       void enumerateMics().then(setMicDevices);
     };
     // prewarm() is idempotent — repeat mounts (StrictMode) share one attempt.
-    void micCapture.prewarm().then((ok) => {
-      onMicError(ok ? null : micCapture.error());
-      refresh();
-    });
+    if (canPrewarm) {
+      void micCapture.prewarm().then((ok) => {
+        onMicError(ok ? null : micCapture.error());
+        refresh();
+      });
+    }
     navigator.mediaDevices.addEventListener('devicechange', refresh);
     return () => navigator.mediaDevices.removeEventListener('devicechange', refresh);
-  }, [onMicError]);
+  }, [canPrewarm, onMicError]);
 
   return micDevices;
 }

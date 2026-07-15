@@ -58,7 +58,7 @@ import type { CodexFunctionCall, CodexToolDef } from '../codex/responses-session
 import { classifyError, describeKind } from '../errors';
 import type { ErrorKind, ErrorParams } from '../errors';
 import { isCodexSubDisabled, isRestGroundDisabled, isSnapDisabled, mockRealtimeUrl } from '../env';
-import { GroundingService } from '../grounding/snapper';
+import { createElementGrounder } from '../grounding/accessibility-grounder';
 import { RestGrounder } from '../grounding/rest-grounder';
 import {
   getSessionInstructions,
@@ -88,7 +88,7 @@ import {
 } from './constants';
 import { ErrorSurfacer } from './error-surfacer';
 import { PointerPipeline } from './pointer-pipeline';
-import type { RestGroundPort, UiaSnapPort } from './pointer-pipeline';
+import type { NativeSnapPort, RestGroundPort } from './pointer-pipeline';
 import type { AgentsPort, OverlayPort, PanelPort, RecorderPort, SettingsPort } from './ports';
 import {
   NO_CAPTURE_ERROR,
@@ -123,7 +123,7 @@ export interface ConversationDeps {
   /** Durable local journal + turn artifacts; omitted in focused tests. */
   sessionRecorder?: RecorderPort;
   /** M9 seam: the UIA element snapper. Optional — defaults to the real daemon. */
-  buildUiaSnapper?: () => UiaSnapPort;
+  buildUiaSnapper?: () => NativeSnapPort;
   /** M10 seam: the REST grounder. Optional — defaults to the real transport. */
   buildRestGrounder?: () => RestGroundPort;
 }
@@ -301,7 +301,7 @@ export class Conversation {
       buildUiaSnapper:
         deps.buildUiaSnapper ??
         (() =>
-          new GroundingService({
+          createElementGrounder({
             scriptDir: app.getPath('userData'),
             excludePid: process.pid, // never scope into our own overlay windows
           })),

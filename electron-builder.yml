@@ -1,6 +1,8 @@
-# electron-builder config — Windows portable + NSIS, unsigned (MVP).
+# electron-builder config — native Windows and macOS artifacts.
 appId: ai.fastyr.buddy
 productName: Buddy
+afterPack: build/after-pack.mjs
+afterSign: build/after-sign.mjs
 directories:
   output: dist
 files:
@@ -30,6 +32,34 @@ win:
   # Executable editing must stay ON so the icon/version resources get stamped
   # into Buddy.exe; the build remains unsigned (no certificate configured).
   signAndEditExecutable: true
+mac:
+  target:
+    - dmg
+    - zip
+  icon: build/icon.icns
+  category: public.app-category.utilities
+  minimumSystemVersion: '12.0'
+  # Direct distribution uses the hardened runtime. electron-builder only
+  # submits to Apple's notary service when a complete supported credential
+  # set is present; `npm run dist:release:mac` enforces that precondition.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  notarize: true
+  artifactName: '${productName}-${version}-${arch}.${ext}'
+  extendInfo:
+    LSUIElement: true
+    NSMicrophoneUsageDescription: Buddy uses the microphone only while you explicitly talk to it.
+    NSScreenCaptureUsageDescription: Buddy captures your screens only when you press the hotkey or submit a typed request.
+  extraResources:
+    - from: build/native/macos-screen-permission.node
+      to: macos-screen-permission.node
+    - from: build/trayTemplate.png
+      to: trayTemplate.png
+    - from: build/trayTemplate@2x.png
+      to: trayTemplate@2x.png
+dmg:
+  sign: false
 nsis:
   oneClick: true
   perMachine: false

@@ -65,6 +65,8 @@ export interface SnapDebugCandidate {
   ct?: string | undefined;
   rect: { x: number; y: number; w: number; h: number };
   textScore: number;
+  /** Front-to-back native window rank (0 is frontmost), when available. */
+  windowRank?: number | undefined;
 }
 
 export interface SnapOutcome {
@@ -172,6 +174,7 @@ export class GroundingService {
           ct: c.ct,
           rect: { x: c.x, y: c.y, w: c.w, h: c.h },
           textScore: Math.round(textSimilarity(query.label, c.name) * 100) / 100,
+          ...(c.windowRank !== undefined ? { windowRank: c.windowRank } : {}),
         }));
       }
       const best = selectCandidate(query.label, { x: query.x, y: query.y }, candidates, radius);

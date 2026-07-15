@@ -49,6 +49,8 @@ class FakeNativeImage {
 class FakeBrowserWindow {
   destroyed = false;
   protectionCalls: boolean[] = [];
+  opacityCalls: number[] = [];
+  opacity = 1;
 
   isDestroyed(): boolean {
     return this.destroyed;
@@ -57,6 +59,16 @@ class FakeBrowserWindow {
   setContentProtection(enabled: boolean): void {
     if (this.destroyed) throw new Error('Object has been destroyed');
     this.protectionCalls.push(enabled);
+  }
+
+  getOpacity(): number {
+    return this.opacity;
+  }
+
+  setOpacity(opacity: number): void {
+    if (this.destroyed) throw new Error('Object has been destroyed');
+    this.opacity = opacity;
+    this.opacityCalls.push(opacity);
   }
 }
 
@@ -68,6 +80,9 @@ const mockState = {
   windows: [] as FakeBrowserWindow[],
   getSourcesOptions: null as unknown,
   getSourcesImpl: null as (() => Promise<unknown[]>) | null,
+  mediaAccessStatus: 'granted' as string,
+  screenPermissionRequests: 0,
+  requestScreenPermissionImpl: null as (() => boolean) | null,
 };
 
 vi.mock('electron', () => ({
@@ -85,6 +100,16 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: {
     getAllWindows: () => mockState.windows,
+  },
+  systemPreferences: {
+    getMediaAccessStatus: () => mockState.mediaAccessStatus,
+  },
+}));
+
+vi.mock('../src/main/windows/mac-screen-permission', () => ({
+  requestMacScreenCaptureAccess: () => {
+    mockState.screenPermissionRequests += 1;
+    return mockState.requestScreenPermissionImpl?.() ?? false;
   },
 }));
 
@@ -112,6 +137,9 @@ beforeEach(() => {
   mockState.windows = [];
   mockState.getSourcesOptions = null;
   mockState.getSourcesImpl = null;
+  mockState.mediaAccessStatus = 'granted';
+  mockState.screenPermissionRequests = 0;
+  mockState.requestScreenPermissionImpl = null;
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
@@ -352,6 +380,34 @@ describe('captureAllDisplays', () => {
     await expect(captureAllDisplays()).resolves.toEqual([]);
   });
 
+  it.runIf(process.platform === 'darwin')(
+    'fails clearly when macOS screen recording permission was denied',
+    async () => {
+      setupSingle4kDisplay();
+      mockState.mediaAccessStatus = 'denied';
+      await expect(captureAllDisplays()).rejects.toThrow(/screen recording permission is denied/i);
+      expect(mockState.screenPermissionRequests).toBe(1);
+      expect(mockState.getSourcesOptions).toBeNull();
+    },
+  );
+
+  it.runIf(process.platform === 'darwin')(
+    'requests native consent on the first explicit capture when status is undetermined',
+    async () => {
+      setupSingle4kDisplay();
+      mockState.mediaAccessStatus = 'not-determined';
+      mockState.requestScreenPermissionImpl = () => {
+        mockState.mediaAccessStatus = 'granted';
+        return true;
+      };
+
+      const results = await captureAllDisplays();
+
+      expect(mockState.screenPermissionRequests).toBe(1);
+      expect(results).toHaveLength(1);
+    },
+  );
+
   describe('content-protection self-exclusion', () => {
     it('enables protection on every Clicky window before the grab, restores after', async () => {
       setupSingle4kDisplay();
@@ -376,6 +432,25 @@ describe('captureAllDisplays', () => {
       expect(protectedDuringGrab).toEqual([true]); // enabled, not yet restored
       expect(w.protectionCalls).toEqual([true, false]);
     });
+
+    it.runIf(process.platform === 'darwin')(
+      'also makes Buddy windows transparent during a macOS ScreenCaptureKit grab',
+      async () => {
+        setupSingle4kDisplay();
+        const w = new FakeBrowserWindow();
+        w.opacity = 0.72;
+        mockState.windows = [w];
+        let opacityDuringGrab = -1;
+        mockState.getSourcesImpl = () => {
+          opacityDuringGrab = w.opacity;
+          return Promise.resolve(mockState.sources);
+        };
+        await captureAllDisplays();
+        expect(opacityDuringGrab).toBe(0);
+        expect(w.opacityCalls).toEqual([0, 0.72]);
+        expect(w.opacity).toBe(0.72);
+      },
+    );
 
     it('restores protection even when the grab throws', async () => {
       setupSingle4kDisplay();

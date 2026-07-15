@@ -37,6 +37,14 @@ export interface OverlayHoverConfig {
   rest: BuddyRestFraction | null;
 }
 
+/** Native top-of-display geometry, expressed in overlay-local DIP. */
+export interface OverlayDisplaySurface {
+  kind: 'notch' | 'floating' | 'off';
+  notchWidth: number;
+  notchHeight: number;
+  menuBarHeight: number;
+}
+
 /** Renderer hover-machine snapshot, reported on transitions (debug/QA). */
 export interface OverlayHoverStatus {
   zone: 'far' | 'aware' | 'hover';

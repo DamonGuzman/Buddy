@@ -37,10 +37,10 @@ import {
   dipToPhysicalPreferScreen,
   dipToPhysicalViaMeta,
   physicalToDipPreferScreen,
-  physicalToDipViaMeta,
 } from '../grounding/convert';
 import type { Pt, ScreenPointApi } from '../grounding/convert';
 import type { SnapDebugCandidate, SnapOutcome, SnapQuery } from '../grounding/snapper';
+import type { ElementGrounder, ElementGroundingOutcome } from '../grounding/accessibility-grounder';
 import type {
   CodexUsedPercent,
   GroundOutcome,
@@ -65,6 +65,8 @@ export interface UiaSnapPort {
   dispose(): void;
   snap(query: SnapQuery, opts?: { debug?: boolean; timeboxMs?: number }): Promise<SnapOutcome>;
 }
+
+export type NativeSnapPort = UiaSnapPort | ElementGrounder;
 
 /** The slice of RestGrounder the pipeline drives (fakes in tests). */
 export interface RestGroundPort {
@@ -106,7 +108,7 @@ export interface PointerPipelineDeps {
   /** M17: fail-closed plan-limit copy, once per episode. */
   surfacePlanLimitOnce: (token: number) => void;
   /** Lazy constructors — injected fakes in tests, real services in the app. */
-  buildUiaSnapper: () => UiaSnapPort;
+  buildUiaSnapper: () => NativeSnapPort;
   buildRestGrounder: () => RestGroundPort;
   screen: ScreenApi;
   /** CLICKY_NO_SNAP / CLICKY_NO_REST_GROUND / CLICKY_NO_CODEX_SUB (eval A/B). */
@@ -117,7 +119,7 @@ export interface PointerPipelineDeps {
 
 export class PointerPipeline {
   // M9: element-snap grounding (docs/EVAL.md §9), spawned lazily.
-  private uia: UiaSnapPort | null = null;
+  private uia: NativeSnapPort | null = null;
   // M10: REST grounding fallback behind the UIA snap (docs/COORD-STUDY.md §9).
   private rest: RestGroundPort | null = null;
   /** M13-core: attribution of the most recent grounding call. */
@@ -130,7 +132,7 @@ export class PointerPipeline {
   constructor(private readonly deps: PointerPipelineDeps) {}
 
   /** M9: lazy snapper (spawned once, killed in dispose()). */
-  private getUia(): UiaSnapPort {
+  private getUia(): NativeSnapPort {
     if (this.uia === null) this.uia = this.deps.buildUiaSnapper();
     return this.uia;
   }
@@ -176,6 +178,46 @@ export class PointerPipeline {
     this.pointerChain = this.pointerChain.then(() => this.dispatch(args, capture, mapped, opts));
   }
 
+  /** Normalize legacy Windows test fakes and the cross-platform UIA/AX provider to global DIP. */
+  private async snapElement(
+    point: Pt,
+    label: string,
+    meta: Pick<CaptureResult['meta'], 'displayBounds' | 'scaleFactor'>,
+    opts: { debug?: boolean; timeboxMs?: number } = {},
+  ): Promise<ElementGroundingOutcome> {
+    const grounder = this.getUia();
+    if (isElementGrounder(grounder)) {
+      return grounder.snap({ point, label, display: meta }, opts);
+    }
+    const physical = dipToPhysicalPreferScreen(point, meta, this.deps.screen);
+    const outcome = await grounder.snap({ x: physical.x, y: physical.y, label }, opts);
+    return {
+      provider: 'uia',
+      matched: outcome.matched,
+      point:
+        outcome.point === null
+          ? null
+          : physicalToDipPreferScreen(outcome.point, meta, this.deps.screen),
+      name: outcome.name,
+      score: outcome.score,
+      elapsedMs: outcome.elapsedMs,
+      nativeMs: outcome.daemonMs,
+      candidates: outcome.candidates,
+      timedOut: outcome.timedOut,
+      ...(outcome.debug !== undefined
+        ? {
+            debug: outcome.debug.map((candidate) => ({
+              name: candidate.name,
+              ...(candidate.ct !== undefined ? { ct: candidate.ct } : {}),
+              rect: candidate.rect,
+              textScore: candidate.textScore,
+              ...(candidate.windowRank !== undefined ? { windowRank: candidate.windowRank } : {}),
+            })),
+          }
+        : {}),
+    };
+  }
+
   private async dispatch(
     args: PointAtArgs,
     capture: CaptureResult,
@@ -189,17 +231,18 @@ export class PointerPipeline {
     const textAccurate = opts.primaryModelIsAccurate === true;
     let local = mapped.local;
     let snap: PointerSnapInfo | undefined;
-    let groundingSource: 'uia' | 'rest' | 'raw' = 'raw';
+    let groundingSource: 'uia' | 'ax' | 'rest' | 'raw' = 'raw';
     if (!deps.snapDisabled && args.label !== undefined && args.label.length > 0) {
       const t0 = Date.now();
       const rawPoint = { x: Math.round(mapped.global.x), y: Math.round(mapped.global.y) };
       try {
-        const phys = dipToPhysicalPreferScreen(mapped.global, meta, deps.screen);
-        const outcome = await this.getUia().snap({ x: phys.x, y: phys.y, label: args.label });
+        const outcome = await this.snapElement(mapped.global, args.label, meta);
         if (outcome.matched && outcome.point !== null) {
-          const dip = physicalToDipPreferScreen(outcome.point, meta, deps.screen);
           local = clampToDisplay(
-            { x: dip.x - meta.displayBounds.x, y: dip.y - meta.displayBounds.y },
+            {
+              x: outcome.point.x - meta.displayBounds.x,
+              y: outcome.point.y - meta.displayBounds.y,
+            },
             meta,
           );
           snap = {
@@ -213,7 +256,7 @@ export class PointerPipeline {
             snapMs: Date.now() - t0,
             candidates: outcome.candidates,
           };
-          groundingSource = 'uia';
+          groundingSource = outcome.provider;
         } else {
           if (outcome.timedOut) {
             console.warn('[grounding] snap timed out — using the raw model point');
@@ -259,6 +302,7 @@ export class PointerPipeline {
       usedPercent = deps.codexTextUsedPercent();
     } else if (
       groundingSource !== 'uia' &&
+      groundingSource !== 'ax' &&
       !deps.restGroundDisabled &&
       args.label !== undefined &&
       args.label.length > 0
@@ -371,26 +415,11 @@ export class PointerPipeline {
       }
       return dipToPhysicalViaMeta({ x: q.x, y: q.y }, geom);
     })();
-    const outcome = await this.getUia().snap(
-      {
-        x: phys.x,
-        y: phys.y,
-        label: q.label,
-        ...(q.radiusPx !== undefined ? { radiusPx: q.radiusPx } : {}),
-      },
-      { debug: true, timeboxMs: 2_500 },
-    );
-    let snappedDip: Pt | null = null;
-    if (outcome.matched && outcome.point !== null) {
-      try {
-        snappedDip = screen.screenToDipPoint({
-          x: Math.round(outcome.point.x),
-          y: Math.round(outcome.point.y),
-        });
-      } catch {
-        snappedDip = physicalToDipViaMeta(outcome.point, geom);
-      }
-    }
+    const outcome = await this.snapElement({ x: q.x, y: q.y }, q.label, geom, {
+      debug: true,
+      timeboxMs: 2_500,
+    });
+    const snappedDip = outcome.matched ? outcome.point : null;
     return {
       query: { ...q, physical: phys },
       matched: outcome.matched,
@@ -398,9 +427,13 @@ export class PointerPipeline {
       name: outcome.name,
       score: outcome.score,
       elapsedMs: outcome.elapsedMs,
-      daemonMs: outcome.daemonMs,
+      daemonMs: outcome.nativeMs,
       timedOut: outcome.timedOut,
       candidates: outcome.debug ?? [],
     };
   }
+}
+
+function isElementGrounder(port: NativeSnapPort): port is ElementGrounder {
+  return 'provider' in port;
 }

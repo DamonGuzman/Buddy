@@ -44,6 +44,8 @@ export interface HotkeyEvents {
    * mode ignores taps (the press itself toggles the open-mic session).
    */
   tap: [];
+  /** Global primary-button click for click-through Buddy hit testing. */
+  'primary-click': [];
   error: [Error];
 }
 
@@ -56,6 +58,7 @@ export interface HotkeyStatus {
 /** Minimal surface of uiohook-napi's uIOhook (injectable for unit tests). */
 export interface UiohookLike {
   on(event: 'keydown' | 'keyup', cb: (e: { keycode: number }) => void): unknown;
+  on(event: 'click', cb: (e: { button: unknown }) => void): unknown;
   start(): void;
   stop(): void;
 }
@@ -94,6 +97,7 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
   private hookAlive = false;
   /** The hook start() attached its listeners to (stop() must target it). */
   private hook: UiohookLike | null = null;
+  private listenersAttached = false;
   private lastError: string | undefined;
   private watchdog: NodeJS.Timeout | null = null;
 
@@ -109,31 +113,43 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
     // FAILED start stays allowed (hookAlive is false).
     if (this.hookAlive) return;
     try {
-      const hook = this.options.hook ?? this.loadUiohook();
+      const hook = this.hook ?? this.options.hook ?? this.loadUiohook();
       this.hook = hook;
 
-      hook.on('keydown', (e: { keycode: number }) => {
-        if (CTRL_KEYCODES.has(e.keycode)) this.ctrlDown = true;
-        else if (e.keycode === ALT_LEFT_KEYCODE) this.altDown = true;
-        // M20: any OTHER key while the hotkey is held makes this a keyboard
-        // CHORD (Ctrl+Alt+X app shortcuts, IME switches), never a tap — the
-        // whisper must not pop open every time such a shortcut is used.
-        else if (this.holding) this.chordSeen = true;
-        this.evaluate();
-      });
-      hook.on('keyup', (e: { keycode: number }) => {
-        if (CTRL_KEYCODES.has(e.keycode)) this.ctrlDown = false;
-        if (e.keycode === ALT_LEFT_KEYCODE) this.altDown = false;
-        this.evaluate();
-      });
+      if (!this.listenersAttached) {
+        hook.on('keydown', (e: { keycode: number }) => {
+          if (CTRL_KEYCODES.has(e.keycode)) this.ctrlDown = true;
+          else if (e.keycode === ALT_LEFT_KEYCODE) this.altDown = true;
+          // M20: any OTHER key while the hotkey is held makes this a keyboard
+          // CHORD (Ctrl+Alt+X app shortcuts, IME switches), never a tap — the
+          // whisper must not pop open every time such a shortcut is used.
+          else if (this.holding) this.chordSeen = true;
+          this.evaluate();
+        });
+        hook.on('keyup', (e: { keycode: number }) => {
+          if (CTRL_KEYCODES.has(e.keycode)) this.ctrlDown = false;
+          if (e.keycode === ALT_LEFT_KEYCODE) this.altDown = false;
+          this.evaluate();
+        });
+        hook.on('click', (e: { button: unknown }) => {
+          if (e.button === 1) this.emit('primary-click');
+        });
+        this.listenersAttached = true;
+      }
 
       hook.start();
       this.hookAlive = true;
+      this.lastError = undefined;
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       this.hookAlive = false;
       this.lastError = error.message;
       console.error('[hotkey] failed to start uiohook, hold-to-talk disabled:', error);
+      try {
+        this.hook?.stop();
+      } catch {
+        /* failed startup may not have a live native loop to stop */
+      }
       // M11 CRASH FIX: an EventEmitter 'error' with no listener THROWS — the
       // throw escaped start() and aborted app boot (tray/powerMonitor/debug
       // server never ran). index.ts now subscribes before start(); this guard
