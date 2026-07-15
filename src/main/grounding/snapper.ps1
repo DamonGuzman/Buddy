@@ -10,14 +10,13 @@
 #              "candidates":[{"name":"Save","ct":"Button","x":..,"y":..,"w":..,"h":..}]}
 #
 # Strategy: Win32 WindowFromPoint (mouse hit-test semantics — naturally skips
-# Clicky's WS_EX_TRANSPARENT click-through overlays) -> GA_ROOT top-level
-# window -> AutomationElement.FromHandle -> DFS its descendants with a
-# bounding-rect prune (subtrees outside the search radius are skipped) under
-# a node/time budget. A CacheRequest batches the properties we read per
-# element into one cross-process call. UIA's own FromPoint hits the overlay
-# (it ignores hit-test transparency), and root-children z-scans return
-# windows in unspecified order — both were tried and picked wrong windows.
-# Elements of the excluded pid (Clicky itself) are never used as the scope.
+# Buddy's WS_EX_TRANSPARENT click-through overlays) selects the first GA_ROOT;
+# EnumWindows then adds nearby, visible top-level roots in front-to-back order.
+# Each root gets a fair DFS time/node slice with bounding-rect pruning, which
+# keeps split-view and point-drift cases from starving the adjacent app. A
+# CacheRequest batches the properties read per element into one cross-process
+# call. UIA's own FromPoint remains only a fallback because it ignores hit-test
+# transparency. Elements of the excluded Buddy pid are never used as a scope.
 
 $ErrorActionPreference = 'Continue'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -26,10 +25,14 @@ Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName WindowsBase
 Add-Type -TypeDefinition @"
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 public static class ClickySnapWin32 {
   [StructLayout(LayoutKind.Sequential)]
   public struct POINT { public int X; public int Y; }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+  private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
   [DllImport("user32.dll")]
   public static extern IntPtr WindowFromPoint(POINT p);
   [DllImport("user32.dll")]
@@ -37,9 +40,45 @@ public static class ClickySnapWin32 {
   [DllImport("user32.dll")]
   public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
   [DllImport("user32.dll")]
+  private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+  [DllImport("user32.dll")]
+  private static extern bool IsWindowVisible(IntPtr hwnd);
+  [DllImport("user32.dll")]
+  private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+  [DllImport("user32.dll")]
   public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
   [DllImport("user32.dll")]
   public static extern bool SetProcessDPIAware();
+
+  // Front-to-back top-level windows intersecting the point's search square.
+  // The exact WindowFromPoint root is first, then nearby visible roots. This
+  // keeps split-view robust when the model point drifts across the divider.
+  public static IntPtr[] CandidateWindows(int x, int y, int radius, int excludePid, int max) {
+    var result = new List<IntPtr>();
+    var seen = new HashSet<IntPtr>();
+    Action<IntPtr> add = (hwnd) => {
+      if (hwnd == IntPtr.Zero) return;
+      var root = GetAncestor(hwnd, 2); // GA_ROOT
+      if (root == IntPtr.Zero) root = hwnd;
+      uint pid;
+      GetWindowThreadProcessId(root, out pid);
+      if ((excludePid >= 0 && pid == (uint)excludePid) || !seen.Add(root)) return;
+      result.Add(root);
+    };
+    var point = new POINT { X = x, Y = y };
+    add(WindowFromPoint(point));
+    EnumWindows((hwnd, _) => {
+      if (result.Count >= max) return false;
+      if (!IsWindowVisible(hwnd)) return true;
+      RECT r;
+      if (!GetWindowRect(hwnd, out r) || r.Right <= r.Left || r.Bottom <= r.Top) return true;
+      if (r.Right < x - radius || r.Left > x + radius ||
+          r.Bottom < y - radius || r.Top > y + radius) return true;
+      add(hwnd);
+      return true;
+    }, IntPtr.Zero);
+    return result.ToArray();
+  }
 }
 "@
 
@@ -87,30 +126,31 @@ function Handle-Request($req) {
   $searchRect = New-Object System.Windows.Rect(($x - $radius), ($y - $radius), (2.0 * $radius), (2.0 * $radius))
   $pt = New-Object System.Windows.Point($x, $y)
 
-  # --- scope: the top-level window under the point (mouse hit-test) ---
-  $scope = $null; $from = $null
+  # --- scopes: point window + nearby visible top-level windows ---
+  # This is deliberately a bounded scene, not "the frontmost app". A model
+  # point near a split-view divider can still match the named control in the
+  # adjacent app; z-order and proximity remain shared-TS tie-breakers.
+  $scopes = New-Object System.Collections.Generic.List[object]
+  $from = $null
   try {
-    $wp = New-Object ClickySnapWin32+POINT
-    $wp.X = [int][Math]::Round($x); $wp.Y = [int][Math]::Round($y)
-    $hwnd = [ClickySnapWin32]::WindowFromPoint($wp)
-    if ($hwnd -ne [IntPtr]::Zero) {
-      $rootHwnd = [ClickySnapWin32]::GetAncestor($hwnd, 2) # GA_ROOT
-      if ($rootHwnd -eq [IntPtr]::Zero) { $rootHwnd = $hwnd }
-      [uint32]$wpid = 0
-      [void][ClickySnapWin32]::GetWindowThreadProcessId($rootHwnd, [ref]$wpid)
-      if ($excludePid -lt 0 -or $wpid -ne $excludePid) {
-        $scope = $AE::FromHandle($rootHwnd)
-        $from = 'windowfrompoint'
-      }
+    $handles = [ClickySnapWin32]::CandidateWindows(
+      [int][Math]::Round($x), [int][Math]::Round($y), [int][Math]::Round($radius),
+      $excludePid, 6)
+    foreach ($hwnd in $handles) {
+      try {
+        $scope = $AE::FromHandle($hwnd)
+        if ($null -ne $scope) { $scopes.Add($scope) }
+      } catch { }
     }
+    if ($scopes.Count -gt 0) { $from = 'visible-window-scene' }
   } catch { }
-  if ($null -eq $scope) {
+  if ($scopes.Count -eq 0) {
     # Fallback: UIA's own hit test (can land on windows WindowFromPoint
     # skips, e.g. when the point sits on a disabled control).
     try {
       $hit = $AE::FromPoint($pt)
       if ($null -ne $hit -and ($excludePid -lt 0 -or $hit.Current.ProcessId -ne $excludePid)) {
-        $scope = Get-TopWindow $hit
+        $scopes.Add((Get-TopWindow $hit))
         $from = 'frompoint'
       }
     } catch { }
@@ -119,46 +159,73 @@ function Handle-Request($req) {
   # --- DFS with rect pruning under node/time budgets ---
   $cands = New-Object System.Collections.Generic.List[object]
   $visited = 0
-  if ($null -ne $scope) {
+  if ($scopes.Count -gt 0) {
     $deadline = [DateTime]::UtcNow.AddMilliseconds($budgetMs)
-    $stack = New-Object System.Collections.Generic.Stack[object]
-    try { $stack.Push($scope.GetUpdatedCache($cache)) } catch { }
-    while ($stack.Count -gt 0 -and $visited -lt $maxNodes -and [DateTime]::UtcNow -lt $deadline) {
-      $el = $stack.Pop()
-      $visited++
-      $rect = $null
-      try { $rect = $el.Cached.BoundingRectangle } catch { continue }
-      $rectEmpty = $rect.IsEmpty -or $rect.Width -le 0 -or $rect.Height -le 0
-      # Prune: a positioned subtree fully outside the search rect can be
-      # skipped wholesale (children live inside their parent's rect in
-      # practice). Zero/empty rects (unpositioned containers) still descend.
-      if (-not $rectEmpty -and -not $rect.IntersectsWith($searchRect)) { continue }
-      if (-not $rectEmpty -and $cands.Count -lt 64) {
-        try {
-          # Size cap: skip window/document-sized containers whose Name is a
-          # page/window title, not a clickable element.
-          if (-not $el.Cached.IsOffscreen -and $rect.Width -le 2200 -and $rect.Height -le 800) {
-            $name = $el.Cached.Name
-            if ([string]::IsNullOrWhiteSpace($name)) { $name = $el.Cached.HelpText }
-            if (-not [string]::IsNullOrWhiteSpace($name)) {
-              $cands.Add(@{
-                name = $name.Trim()
-                ct = ($el.Cached.ControlType.ProgrammaticName -replace '^ControlType\.', '')
-                x = [Math]::Round($rect.X); y = [Math]::Round($rect.Y)
-                w = [Math]::Round($rect.Width); h = [Math]::Round($rect.Height)
-              })
+    # Give each visible window a fair node/time/candidate slice. A complex
+    # front window must not consume the entire budget before an adjacent app.
+    for ($scopeIndex = 0; $scopeIndex -lt $scopes.Count; $scopeIndex++) {
+      if ($visited -ge $maxNodes) { break }
+      # A remote provider can spend the entire nominal slice in
+      # GetUpdatedCache before we inspect even one node. Always probe a small
+      # prefix of the first three windows (point window + likely split-view
+      # neighbors); the TS caller still enforces the hard response timebox.
+      $mustProbeScope = $scopeIndex -lt [Math]::Min(3, $scopes.Count)
+      if (-not $mustProbeScope -and [DateTime]::UtcNow -ge $deadline) { break }
+      $scopesLeft = [Math]::Max(1, $scopes.Count - $scopeIndex)
+      $scopeNodeBudget = [Math]::Max(350, [Math]::Floor(($maxNodes - $visited) / $scopesLeft))
+      $remainingMs = [Math]::Max(50, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+      $scopeDeadline = [DateTime]::UtcNow.AddMilliseconds([Math]::Max(50, $remainingMs / $scopesLeft))
+      $scopeVisited = 0
+      $scopeCandidateStart = $cands.Count
+      $stack = New-Object System.Collections.Generic.Stack[object]
+      try { $stack.Push($scopes[$scopeIndex].GetUpdatedCache($cache)) } catch { continue }
+      $minimumProbeNodes = 16
+      while ($stack.Count -gt 0 -and $visited -lt $maxNodes -and
+             $scopeVisited -lt $scopeNodeBudget -and $cands.Count - $scopeCandidateStart -lt 32 -and
+             ($scopeVisited -lt $minimumProbeNodes -or
+               ([DateTime]::UtcNow -lt $scopeDeadline -and [DateTime]::UtcNow -lt $deadline))) {
+        $el = $stack.Pop()
+        $visited++; $scopeVisited++
+        $rect = $null
+        try { $rect = $el.Cached.BoundingRectangle } catch { continue }
+        $rectEmpty = $rect.IsEmpty -or $rect.Width -le 0 -or $rect.Height -le 0
+        # Prune: a positioned subtree fully outside the search rect can be
+        # skipped wholesale (children live inside their parent's rect in
+        # practice). Zero/empty rects (unpositioned containers) still descend.
+        if (-not $rectEmpty -and -not $rect.IntersectsWith($searchRect)) { continue }
+        if (-not $rectEmpty -and $cands.Count -lt 96) {
+          try {
+            # Size cap: skip window/document-sized containers whose Name is a
+            # page/window title, not a clickable element.
+            if (-not $el.Cached.IsOffscreen -and $rect.Width -ge 3 -and $rect.Height -ge 3 -and
+                $rect.Width -le 2200 -and $rect.Height -le 800) {
+              $controlType = ($el.Cached.ControlType.ProgrammaticName -replace '^ControlType\.', '')
+              $name = $el.Cached.Name
+              if ([string]::IsNullOrWhiteSpace($name)) { $name = $el.Cached.HelpText }
+              # Window titles are traversal scopes, not pointing targets. A
+              # partial label/title match would otherwise snap to the center
+              # of the whole window before its named child control.
+              if ($controlType -ne 'Window' -and -not [string]::IsNullOrWhiteSpace($name)) {
+                $cands.Add(@{
+                  name = $name.Trim()
+                  ct = $controlType
+                  x = [Math]::Round($rect.X); y = [Math]::Round($rect.Y)
+                  w = [Math]::Round($rect.Width); h = [Math]::Round($rect.Height)
+                  windowRank = $scopeIndex
+                })
+              }
             }
+          } catch { }
+        }
+        try {
+          $child = $walker.GetFirstChild($el, $cache)
+          $n = 0
+          while ($null -ne $child -and $n -lt 256) {
+            $stack.Push($child); $n++
+            $child = $walker.GetNextSibling($child, $cache)
           }
         } catch { }
       }
-      try {
-        $child = $walker.GetFirstChild($el, $cache)
-        $n = 0
-        while ($null -ne $child -and $n -lt 256) {
-          $stack.Push($child); $n++
-          $child = $walker.GetNextSibling($child, $cache)
-        }
-      } catch { }
     }
   }
 
@@ -166,7 +233,7 @@ function Handle-Request($req) {
   $sorted = @($cands | Sort-Object {
       $cx = $_.x + $_.w / 2.0; $cy = $_.y + $_.h / 2.0
       [Math]::Sqrt(($cx - $x) * ($cx - $x) + ($cy - $y) * ($cy - $y))
-    } | Select-Object -First 32)
+    } | Select-Object -First 64)
 
   return @{
     id = $req.id

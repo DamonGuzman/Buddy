@@ -11,6 +11,7 @@
  *   POST /overlay/assistant-state    {state}
  *   POST /overlay/caption            {itemId, text, done}
  *   POST /overlay/capture-indicator  {active}
+ *   POST /overlay/display-surface    {kind, notchWidth, notchHeight, menuBarHeight}
  *
  * Later milestones extend ROUTES with: simulate hotkey press/release, inject
  * text turn, dump last capture metadata.
@@ -407,6 +408,34 @@ const OVERLAY_ROUTES: Record<string, RouteHandler> = {
       sendJson(res, 200, { ok: true });
     });
   },
+  'POST /overlay/display-surface': async (_deps, req, res) => {
+    const body = asRecord(await readJsonBody(req));
+    const kind = body?.['kind'];
+    const notchWidth = body?.['notchWidth'];
+    const notchHeight = body?.['notchHeight'];
+    const menuBarHeight = body?.['menuBarHeight'];
+    if (
+      (kind !== 'notch' && kind !== 'floating' && kind !== 'off') ||
+      typeof notchWidth !== 'number' ||
+      typeof notchHeight !== 'number' ||
+      typeof menuBarHeight !== 'number' ||
+      ![notchWidth, notchHeight, menuBarHeight].every(Number.isFinite)
+    ) {
+      sendJson(res, 400, {
+        error: 'expected {kind: notch|floating|off, notchWidth, notchHeight, menuBarHeight}',
+      });
+      return;
+    }
+    withOverlays(res, (overlays) => {
+      overlays.broadcast('overlay:display-surface', {
+        kind,
+        notchWidth: Math.max(0, notchWidth),
+        notchHeight: Math.max(0, notchHeight),
+        menuBarHeight: Math.max(0, menuBarHeight),
+      });
+      sendJson(res, 200, { ok: true });
+    });
+  },
 };
 
 Object.assign(ROUTES, OVERLAY_ROUTES);
@@ -702,8 +731,8 @@ Object.assign(ROUTES, GROUNDING_ROUTES);
 //
 //   GET /hover/state -> OverlayManager.hoverDebugInfo(): assistant state,
 //     buddy host, interactive window + region, persisted buddyRest, and per-
-//     overlay {displayId, screenIndex, bounds, scaleFactor, forwarding,
-//     interactive, rendererPid, hover status} — everything the hover QA
+//     overlay {displayId, screenIndex, bounds, scaleFactor, native display
+//     surface, forwarding, interactive, rendererPid, hover status} — everything the hover QA
 //     harness needs (cursor targeting, CPU sampling by pid, state asserts).
 //
 // Same pattern as the M2 overlay routes: reach the overlays through

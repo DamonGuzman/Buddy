@@ -65,6 +65,10 @@ typed action** and is always signposted by a visible indicator.
   Unsigned/ad-hoc build replacements have a new TCC code identity and must be re-granted unless
   distribution uses a stable signing identity. The macOS distribution pipeline rejects an ad-hoc
   final signature by default; `BUDDY_ALLOW_ADHOC=1` is an explicit disposable-QA escape hatch.
+  Production packaging enables hardened runtime, uses narrowly scoped Electron JIT/audio-input
+  entitlements, requires a Developer ID Application identity, and invokes electron-builder's
+  notarization integration. The QA-only library-validation exception is stored in a separate
+  entitlement file and can never reach the production signing configuration.
 - Audio: renderer `getUserMedia` → `AudioWorklet` → PCM16 (24kHz mono) chunks → main → WS.
   Playback: WS audio deltas → renderer `AudioWorklet` queue. Barge-in not required for MVP
   (push-to-talk model). On macOS, Chromium's capture and playback graphs share one CoreAudio
@@ -82,7 +86,9 @@ typed action** and is always signposted by a visible indicator.
 - **Overlay renderer** (one `BrowserWindow` per display): `transparent: true`, `frame: false`,
   `alwaysOnTop: 'screen-saver'`, `setIgnoreMouseEvents(true)`, `skipTaskbar`, full display bounds,
   visible on all workspaces. Draws buddy + caption + indicator. Never focusable. macOS overlays
-  stay unconditionally click-through and are hidden from Mission Control.
+  stay unconditionally click-through and are hidden from Mission Control. The macOS Buddy Live
+  Bar renders inside this same safe overlay: AppKit safe-area geometry attaches it to a physical
+  notch, with a detached capsule fallback for non-notched/external displays.
 - **Panel renderer**: ~380×520 frameless window toggled from tray click, hides on blur.
 - IPC is **typed**: all channels + payload types live in `src/shared/ipc.ts`. Renderers get a
   narrow `window.clicky` API from `preload`. No `remote`, contextIsolation on everywhere.
@@ -101,8 +107,8 @@ src/
     coords.ts        screenshot px → display DIP coord mapping (pure functions, unit-tested)
     windows/permission-controller.ts
                      reconciles macOS TCC grants with the real hook; recovery actions + UI state
-    grounding/       M9 element-snap grounding: snapper.ps1 (UIA daemon, embedded at build),
-                     snapper.ts (daemon lifecycle + timebox), scoring.ts (pure label matching)
+    grounding/       shared global-DIP accessibility contract; Windows UIA daemon + macOS AX
+                     worker provider; scoring.ts owns pure cross-platform label matching
     realtime/
       session.ts     WS session: connect, session.update, audio append/commit, image input,
                      response streaming, tool-call events, reconnect
@@ -135,35 +141,44 @@ tests/               vitest unit tests (coords, protocol framing, settings, hotk
 - All pure functions in `coords.ts` with unit tests covering: 100%/150%/200% DPI, mixed-DPI dual
   monitor, negative-origin (left-of-primary) monitors.
 
-## 6b. Layered grounding (M9 + M10)
+## 6b. Layered grounding (native accessibility + REST vision)
 
 The live evals (docs/EVAL.md §7-§8) proved the model names the right element essentially every
 time but its raw coordinates drift scene-dependently. `point_at` is therefore GROUNDED before the
-buddy flies. On Windows, `src/main/grounding/` keeps a persistent PowerShell daemon (`snapper.ps1`, embedded
-at build time, spawned lazily, restarted on crash, killed on quit) that resolves the top-level
-window under the model's point via Win32 `WindowFromPoint` (mouse hit-test semantics — skips
-Buddy's own click-through overlays; the daemon makes itself Per-Monitor-V2 DPI-aware so user32
-and UIA agree on physical px) and enumerates nearby named UIA elements (rect-pruned DFS,
-CacheRequest-batched, node/time budgets). Selection is pure TS (`scoring.ts`, unit-tested):
+buddy flies. `src/main/grounding/accessibility-grounder.ts` is the shared global-DIP contract:
+Windows uses a persistent PowerShell UIA daemon; macOS uses an in-process Node-API/Objective-C AX
+bridge on a persistent worker thread, so Buddy's existing Accessibility grant applies without a
+second helper identity and an unresponsive target app cannot block the main/UI thread. Both
+providers enumerate a bounded front-to-back scene of visible windows intersecting the search
+radius—not merely the frontmost app—so side-by-side/split-view windows and small model drift across
+a divider remain groundable. Buddy's PID is excluded.
+
+The same Objective-C bridge reads `NSScreen` safe areas for the Live Bar and
+places only the click-through overlay NSWindow at the physical screen frame,
+bypassing Electron's documented menu-bar coordinate clamp. Pointer/hover
+coordinates use that physical frame when native placement succeeds.
+
+On Windows the embedded `snapper.ps1` daemon is spawned lazily, restarted on crash, and killed on
+quit. It is Per-Monitor-V2 DPI-aware so Win32 and UIA agree on physical pixels, then the provider
+converts results back to the shared global-DIP contract. On macOS Quartz supplies visible window
+order/PIDs and AX supplies named element rectangles. Both implementations use rect-pruned tree
+walks with strict node/time budgets. Selection is pure TS (`scoring.ts`, unit-tested):
 normalize the spoken label and element Names, fuzzy token similarity with a small proximity
-tie-break, threshold 0.55. The mapped point (§6) is converted DIP→physical
-(`screen.dipToScreenPoint`), snapped to the matched element's center, converted back, and
-dispatched; on no-match / 600ms timebox / daemon trouble the raw model point is used unchanged —
-snapping is never worse than no snapping. The label chip keeps the MODEL's words. `CLICKY_NO_SNAP=1`
+and front-to-back tie-break, threshold 0.55. A match snaps to the element center and dispatches;
+on no-match / timebox / permission or provider trouble the REST layer runs, then the raw model
+point stands unchanged—snapping is never worse than no snapping. The label chip keeps the MODEL's
+words. `CLICKY_NO_SNAP=1`
 disables it (eval A/B); `POST /grounding/query` drives the snapper directly (debug server).
 Attribution (raw vs snapped point, score, name, ms) rides on `PointerCommand.snap` and
 `TurnTimings.tPointerDispatched`/`snapMs` for the eval harness.
 
-On macOS the UIA layer is intentionally skipped and the REST vision layer below runs first. macOS
-Accessibility grants are process-scoped, so a separate native enumeration helper would require a
-second, confusing permission grant; Buddy keeps the grant attached to the app process for the
-global hotkey and optional computer-use input instead.
+The implementation and language rationale are documented in `docs/NATIVE-INTEGRATIONS.md`.
 
-**M10 — REST grounding fallback: UIA snap → REST ground → raw point.** The coordinate study
+**M10 — REST grounding fallback: UIA/AX snap → REST ground → raw point.** The coordinate study
 (docs/COORD-STUDY.md §8-§9) measured that coordinate weakness is realtime-family-specific:
 `gpt-5.4-mini` at reasoning effort `low` over plain REST grounds the same screenshots at ~10px
 median / 93% in-element / ~1.3s p50 — where the realtime model does ~80-100px. So when the UIA
-snap finds no confident match (element with no UIA Name, label/name token mismatch, timeout),
+or AX snap finds no confident match (unnamed element, label/name token mismatch, timeout),
 `src/main/grounding/rest-grounder.ts` re-grounds the model's own spoken label against the SAME
 screenshot JPEG the realtime model saw (the turn's `CaptureResult` is closure-retained by the
 pointer dispatch, so this holds even after turn settle releases `turnCaptures`), replicating the
@@ -176,8 +191,8 @@ used — the REST layer is never worse than today. The API key comes from the sa
 as the realtime session (decrypted in main, never logged); one call max in flight; a superseding
 turn / barge-in drops the pending pointer via the `turnToken` check, and the tool output has
 already gone back so the model's spoken answer is never gated on grounding.
-`CLICKY_NO_REST_GROUND=1` disables the REST layer (as `CLICKY_NO_SNAP=1` disables the UIA
-layer); attribution rides on `PointerCommand.groundingSource` (`'uia' | 'rest' | 'raw'`) plus
+`CLICKY_NO_REST_GROUND=1` disables the REST layer (as `CLICKY_NO_SNAP=1` disables native
+accessibility); attribution rides on `PointerCommand.groundingSource` (`'uia' | 'ax' | 'rest' | 'raw'`) plus
 `restUsed`/`restMs`, surfaced through `DebugState.lastPointer`. Headless validation of the
 production code path: docs/EVAL.md §10.
 

@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false",
     "build": "node build/build-mac-native.mjs && npm run typecheck && electron-vite build",
     "test": "vitest run",
+    "test:uia:win": "vitest run tests/windows-uia-e2e.test.ts",
     "mock": "node tools/mock-realtime/index.js",
     "phone-audio": "node tools/phone-audio-bridge/start.mjs",
     "phone-audio:dev": "node tools/dev.mjs",
@@ -22,8 +23,9 @@
     "eval:tts": "node eval/tts.mjs",
     "icon": "node build/make-icon.mjs",
     "dist": "node tools/dist.mjs",
-    "dist:win": "npm run build && electron-builder --win",
-    "dist:mac": "node tools/dist.mjs"
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:mac": "node tools/dist.mjs",
+    "dist:release:mac": "BUDDY_RELEASE=1 node tools/dist.mjs"
   },
   "dependencies": {
     "uiohook-napi": "^1.5.5",

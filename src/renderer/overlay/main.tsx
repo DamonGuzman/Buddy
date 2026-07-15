@@ -34,6 +34,7 @@ import {
 } from './hover';
 import type { HoverEffects, HoverZone } from './hover';
 import { AgentCluster } from './AgentHelpers';
+import { BuddyIsland } from './BuddyIsland';
 import {
   CARD_HIDE_DELAY_MS,
   CARD_SHOW_DELAY_MS,
@@ -48,6 +49,7 @@ import type {
   AgentSummary,
   AssistantState,
   OverlayHoverConfig,
+  OverlayDisplaySurface,
   PointerPoint,
   Rect,
 } from '../../shared/types';
@@ -189,6 +191,12 @@ function App(): React.JSX.Element {
   const [hoverCfg, setHoverCfg] = useState<OverlayHoverConfig | null>(null);
   // M19 agent-helper state.
   const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [displaySurface, setDisplaySurface] = useState<OverlayDisplaySurface>({
+    kind: 'off',
+    notchWidth: 0,
+    notchHeight: 0,
+    menuBarHeight: 0,
+  });
   const [helperHover, setHelperHover] = useState<string | null>(null);
   const [cluster, setCluster] = useState<{ anchor: Vec; dir: 1 | -1; vdir: 1 | -1 } | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -930,6 +938,8 @@ function App(): React.JSX.Element {
         }
       })
       .catch(() => {});
+    const offDisplaySurface = clicky.onDisplaySurface(setDisplaySurface);
+    void clicky.getDisplaySurface().then(setDisplaySurface).catch(() => {});
     auxResyncRef.current = syncAux;
     // --------------------------------------- end M19 agent helpers wiring --
 
@@ -959,6 +969,7 @@ function App(): React.JSX.Element {
       if (hintFadeTimer !== null) clearTimeout(hintFadeTimer);
       // M19 agent-helper teardown.
       offAgents();
+      offDisplaySurface();
       if (helperSweepTimer !== null) clearTimeout(helperSweepTimer);
       if (helperTimer !== null) clearTimeout(helperTimer);
       auxResyncRef.current = null;
@@ -1012,6 +1023,13 @@ function App(): React.JSX.Element {
   return (
     <>
       <div className="edge-pulse" data-active={capturing ? '' : undefined} />
+      <BuddyIsland
+        surface={displaySurface}
+        assistantState={assistantState}
+        capturing={capturing}
+        agents={agents}
+        visible={buddyVisible}
+      />
       <div
         ref={rootRef}
         className="buddy-root"

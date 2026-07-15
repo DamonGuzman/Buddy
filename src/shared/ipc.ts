@@ -19,6 +19,7 @@ import type {
   CodexSignInState,
   MicDevice,
   OverlayHoverConfig,
+  OverlayDisplaySurface,
   OverlayHoverEvent,
   PlaybackCommand,
   PlaybackStatsUpdate,
@@ -51,6 +52,8 @@ export interface MainToOverlayEvents {
   'overlay:hover-config': OverlayHoverConfig;
   /** This overlay window's click-through state flipped (dwell-to-interact). */
   'overlay:interactive': { interactive: boolean };
+  /** Native notch/menu-bar geometry for this overlay's current display. */
+  'overlay:display-surface': OverlayDisplaySurface;
   // M19 addition (integration-approved): agent helpers on the overlay — the
   // same renderer-safe list the panel gets (full-list upsert, broadcast on
   // every agent state change; NEVER carries screenshot bytes). Every overlay
@@ -173,6 +176,8 @@ export interface InvokeChannels {
   // M15 addition (orchestrator-approved): overlay bootstrap for hover config
   // (belt-and-braces vs the did-finish-load push; handled in windows/overlay.ts).
   'overlay:get-hover-config': { args: []; result: OverlayHoverConfig };
+  /** Overlay bootstrap: native top-of-display geometry for this display. */
+  'overlay:get-display-surface': { args: []; result: OverlayDisplaySurface };
   // M18 additions (integration-approved): agent mode (docs/AGENT-MODE.md §6.2).
   /** Panel bootstrap: current agent list (push updates ride on 'panel:agents'). */
   'agents:list': { args: []; result: AgentSummary[] };
@@ -217,6 +222,8 @@ export interface OverlayApi {
   onHoverConfig(cb: (cfg: OverlayHoverConfig) => void): Unsubscribe;
   onInteractive(cb: (payload: { interactive: boolean }) => void): Unsubscribe;
   getHoverConfig(): Promise<OverlayHoverConfig>;
+  onDisplaySurface(cb: (surface: OverlayDisplaySurface) => void): Unsubscribe;
+  getDisplaySurface(): Promise<OverlayDisplaySurface>;
   /** Fire-and-forget hover events (dwell/exit/status). */
   sendHover(evt: OverlayHoverEvent): void;
   /** The buddy was clicked while interactive (main toggles the panel). */

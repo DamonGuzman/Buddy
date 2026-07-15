@@ -17,7 +17,18 @@ export default async function afterPack(context) {
   }
   const result = spawnSync(
     '/usr/bin/codesign',
-    ['--force', '--deep', '--sign', '-', '--timestamp=none', appPath],
+    [
+      '--force',
+      '--deep',
+      '--sign',
+      '-',
+      '--timestamp=none',
+      '--options',
+      'runtime',
+      '--entitlements',
+      join(import.meta.dirname, 'entitlements.mac.adhoc.plist'),
+      appPath,
+    ],
     { encoding: 'utf8' },
   );
   if (result.status !== 0) {

@@ -32,6 +32,7 @@ import { join } from 'node:path';
 import type { MainToOverlayChannel, MainToOverlayEvents } from '../../shared/ipc';
 import type {
   AssistantState,
+  OverlayDisplaySurface,
   OverlayHoverConfig,
   OverlayHoverEvent,
   OverlayHoverStatus,
@@ -44,6 +45,8 @@ import { openPanel } from './panel';
 import { CrashLoopGuard, lockdownNavigation, recoverOnRenderProcessGone } from './harden';
 import { listeningBlocksHover } from './hover-policy';
 import { offsetPointerForWindow } from './overlay-offset';
+import { resolveDisplaySurface } from './display-surface';
+import { coverMacDisplayWithWindow, getMacDisplaySurface } from './mac-screen-permission';
 
 /**
  * Module-level handle to the started manager so sibling main modules (e.g.
@@ -63,6 +66,8 @@ export class OverlayManager {
   private windows = new Map<number, BrowserWindow>();
   /** displayId -> screenIndex used in capture labeling. */
   private indexByDisplayId = new Map<number, number>();
+  /** AppKit successfully bypassed Electron's menu-bar y clamp for this display. */
+  private nativeFullDisplay = new Set<number>();
   private started = false;
   /** Crash recovery budget shared across ALL overlay windows. */
   private crashGuard = new CrashLoopGuard(3, 5 * 60_000, 'overlay');
@@ -152,7 +157,7 @@ export class OverlayManager {
         win.webContents.send(
           'overlay:pointer',
           index === cmd.screenIndex && display
-            ? offsetPointerForWindow(cmd, display.bounds, win.getBounds())
+            ? offsetPointerForWindow(cmd, display.bounds, this.effectiveBounds(displayId, win))
             : ({ type: 'hide' } satisfies PointerCommand),
         );
       }
@@ -191,11 +196,13 @@ export class OverlayManager {
     ipcMain.removeAllListeners('overlay:buddy-click');
     ipcMain.removeAllListeners('overlay:buddy-move');
     ipcMain.removeHandler('overlay:get-hover-config');
+    ipcMain.removeHandler('overlay:get-display-surface');
     for (const win of this.windows.values()) {
       if (!win.isDestroyed()) win.destroy();
     }
     this.windows.clear();
     this.indexByDisplayId.clear();
+    this.nativeFullDisplay.clear();
     this.hoverStatusByDisplay.clear();
   }
 
@@ -212,6 +219,7 @@ export class OverlayManager {
         if (this.interactiveDisplayId === displayId) this.restoreClickThrough();
         if (!win.isDestroyed()) win.destroy();
         this.windows.delete(displayId);
+        this.nativeFullDisplay.delete(displayId);
         this.hoverStatusByDisplay.delete(displayId);
       }
     }
@@ -222,11 +230,12 @@ export class OverlayManager {
       this.indexByDisplayId.set(display.id, index);
       const existing = this.windows.get(display.id);
       if (existing && !existing.isDestroyed()) {
-        existing.setBounds(display.bounds);
+        this.fitWindowToDisplay(existing, display);
       } else {
         this.windows.set(display.id, this.createWindow(display, index));
       }
     });
+    this.pushDisplaySurfaces();
     // M15: re-assert forwarding after hotplug (indices may have shifted).
     this.updateMouseForwarding();
   }
@@ -234,10 +243,9 @@ export class OverlayManager {
   private createWindow(display: Display, screenIndex: number): BrowserWindow {
     const isPrimary = screen.getPrimaryDisplay().id === display.id;
     const win = new BrowserWindow({
-      // NSPanel is allowed to cover the full display (including beneath the
-      // menu bar) without becoming a normal activating app window. A plain
-      // frameless NSWindow is clamped to workArea.y on macOS, shifting every
-      // pointer by the menu-bar height.
+      // A nonactivating NSPanel can float over fullscreen apps without taking
+      // focus. Electron still clamps its y coordinate below the menu bar; the
+      // native placement seam below selectively removes that frame constraint.
       ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
       x: display.bounds.x,
       y: display.bounds.y,
@@ -300,7 +308,7 @@ export class OverlayManager {
       win.setWindowButtonVisibility(false);
     }
     // Belt-and-braces: bounds again after frameless quirks on scaled displays.
-    win.setBounds(display.bounds);
+    this.fitWindowToDisplay(win, display);
 
     // Known limitation: ?screenIndex/?primary are creation-time snapshots and
     // go stale if displays are re-ordered while the window lives. Harmless
@@ -335,10 +343,15 @@ export class OverlayManager {
       if (index !== undefined) {
         win.webContents.send('overlay:hover-config', this.hoverConfigFor(index));
       }
+      win.webContents.send('overlay:display-surface', this.displaySurfaceFor(display.id));
       this.updateMouseForwarding();
     });
 
-    win.once('ready-to-show', () => win.showInactive());
+    win.once('ready-to-show', () => {
+      win.showInactive();
+      // Showing can cause AppKit/Electron to reconcile the frame once more.
+      this.fitWindowToDisplay(win, display);
+    });
     return win;
   }
 
@@ -413,6 +426,28 @@ export class OverlayManager {
       const index = displayId === null ? undefined : this.indexByDisplayId.get(displayId);
       return this.hoverConfigFor(index ?? 0);
     });
+    ipcMain.handle('overlay:get-display-surface', (event) => {
+      const displayId = this.displayIdFor(event.sender);
+      return displayId === null
+        ? ({ kind: 'off', notchWidth: 0, notchHeight: 0, menuBarHeight: 0 } satisfies OverlayDisplaySurface)
+        : this.displaySurfaceFor(displayId);
+    });
+  }
+
+  private displaySurfaceFor(displayId: number): OverlayDisplaySurface {
+    const display = screen.getAllDisplays().find((candidate) => candidate.id === displayId);
+    if (!display) {
+      return { kind: 'off', notchWidth: 0, notchHeight: 0, menuBarHeight: 0 };
+    }
+    return resolveDisplaySurface(process.platform, display, getMacDisplaySurface(displayId));
+  }
+
+  private pushDisplaySurfaces(): void {
+    for (const [displayId, win] of this.windows) {
+      if (!win.isDestroyed() && !win.webContents.isLoadingMainFrame()) {
+        win.webContents.send('overlay:display-surface', this.displaySurfaceFor(displayId));
+      }
+    }
   }
 
   private displayIdFor(sender: WebContents): number | null {
@@ -482,7 +517,7 @@ export class OverlayManager {
         return;
       }
       const cursor = screen.getCursorScreenPoint(); // global DIP
-      const bounds = w.getBounds(); // global DIP
+      const bounds = this.effectiveBounds(displayId, w); // global DIP
       const r = this.interactiveRegion; // window-local DIP
       const inside =
         cursor.x >= bounds.x + r.x &&
@@ -536,7 +571,11 @@ export class OverlayManager {
       const win = this.windows.get(displayId);
       const status = this.hoverStatusByDisplay.get(displayId);
       if (!win || win.isDestroyed() || !status || status.dragging) return false;
-      if (!isBuddyClick(screen.getCursorScreenPoint(), win.getBounds(), status.buddy)) return false;
+      if (!isBuddyClick(
+        screen.getCursorScreenPoint(),
+        this.effectiveBounds(displayId, win),
+        status.buddy,
+      )) return false;
       openPanel();
       return true;
     }
@@ -576,8 +615,10 @@ export class OverlayManager {
         return {
           displayId,
           screenIndex: index,
-          bounds: win.isDestroyed() ? null : win.getBounds(),
+          bounds: win.isDestroyed() ? null : this.effectiveBounds(displayId, win),
           scaleFactor: display?.scaleFactor ?? null,
+          surface: this.displaySurfaceFor(displayId),
+          nativeFullDisplay: this.nativeFullDisplay.has(displayId),
           forwarding: index === this.buddyHostIndex && displayId !== this.interactiveDisplayId,
           interactive: displayId === this.interactiveDisplayId,
           rendererPid: win.isDestroyed() ? null : win.webContents.getOSProcessId(),
@@ -585,6 +626,26 @@ export class OverlayManager {
         };
       }),
     };
+  }
+
+  private fitWindowToDisplay(win: BrowserWindow, display: Display): void {
+    win.setBounds(display.bounds);
+    if (
+      process.platform === 'darwin' &&
+      coverMacDisplayWithWindow(win.getNativeWindowHandle(), display.id)
+    ) {
+      this.nativeFullDisplay.add(display.id);
+    } else {
+      this.nativeFullDisplay.delete(display.id);
+    }
+  }
+
+  private effectiveBounds(displayId: number, win: BrowserWindow): Electron.Rectangle {
+    if (this.nativeFullDisplay.has(displayId)) {
+      return screen.getAllDisplays().find((display) => display.id === displayId)?.bounds
+        ?? win.getBounds();
+    }
+    return win.getBounds();
   }
 }
 

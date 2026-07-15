@@ -31,6 +31,29 @@ export default async function afterSign(context) {
   const detail = [inspection.stdout, inspection.stderr].filter(Boolean).join('\n');
   const adHoc = /^Signature=adhoc$/m.test(detail) || /^# designated => cdhash /m.test(detail);
   if (!adHoc) {
+    if (!/^flags=.*\bruntime\b/m.test(detail)) {
+      throw new Error(`the hardened runtime is not enabled for ${appPath}`);
+    }
+    const entitlements = spawnSync(
+      '/usr/bin/codesign',
+      ['--display', '--entitlements', ':-', appPath],
+      { encoding: 'utf8' },
+    );
+    if (entitlements.status !== 0) {
+      throw new Error(formatFailure(`could not inspect entitlements for ${appPath}`, entitlements));
+    }
+    const entitlementDetail = [entitlements.stdout, entitlements.stderr]
+      .filter(Boolean)
+      .join('\n');
+    for (const required of [
+      'com.apple.security.cs.allow-jit',
+      'com.apple.security.cs.allow-unsigned-executable-memory',
+      'com.apple.security.device.audio-input',
+    ]) {
+      if (!entitlementDetail.includes(`<key>${required}</key>`)) {
+        throw new Error(`required entitlement ${required} is missing from ${appPath}`);
+      }
+    }
     const authority = detail.match(/^Authority=(.+)$/m)?.[1] ?? 'stable identity';
     console.log(`[after-sign] verified stable macOS identity: ${authority}`);
     return;

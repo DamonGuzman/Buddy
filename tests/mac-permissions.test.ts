@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const electron = vi.hoisted(() => ({
   openExternal: vi.fn<() => Promise<void>>(),
@@ -62,6 +62,16 @@ const granted: MacPermissionSnapshot = {
 };
 
 describe('macOS permission routing', () => {
+  const hostPlatform = process.platform;
+
+  beforeAll(() => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' });
+  });
+
+  afterAll(() => {
+    Object.defineProperty(process, 'platform', { configurable: true, value: hostPlatform });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     electron.openExternal.mockResolvedValue(undefined);

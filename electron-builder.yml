@@ -27,6 +27,13 @@ mac:
   icon: build/icon.icns
   category: public.app-category.utilities
   minimumSystemVersion: '12.0'
+  # Direct distribution uses the hardened runtime. electron-builder only
+  # submits to Apple's notary service when a complete supported credential
+  # set is present; `npm run dist:release:mac` enforces that precondition.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  notarize: true
   artifactName: '${productName}-${version}-${arch}.${ext}'
   extendInfo:
     LSUIElement: true

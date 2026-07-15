@@ -71,6 +71,19 @@ vi.mock('../src/main/grounding/snapper', () => ({
   },
 }));
 
+vi.mock('../src/main/grounding/accessibility-grounder', () => ({
+  createElementGrounder: () => ({
+    provider: 'uia',
+    warmUp(): void {},
+    dispose(): void {},
+    async snap(q: unknown): Promise<unknown> {
+      ctl.snapQueries.push(q);
+      const outcome = (await ctl.snap(q)) as Record<string, unknown>;
+      return { provider: 'uia', nativeMs: outcome['daemonMs'] ?? null, ...outcome };
+    },
+  }),
+}));
+
 // The REST grounder must NEVER be called on the text-accurate path.
 vi.mock('../src/main/grounding/rest-grounder', () => ({
   RestGrounder: class {

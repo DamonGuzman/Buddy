@@ -5,11 +5,25 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { validateMacReleaseReadiness } from '../build/mac-release-readiness.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const productionMacRelease = process.env.BUDDY_RELEASE === '1';
 
-run(npm, ['run', 'build']);
+if (productionMacRelease && process.platform !== 'darwin') {
+  throw new Error('BUDDY_RELEASE=1 is supported only for a macOS distribution build');
+}
+if (productionMacRelease) {
+  const identities = spawnSync('/usr/bin/security', ['find-identity', '-v', '-p', 'codesigning'], {
+    encoding: 'utf8',
+  });
+  validateMacReleaseReadiness(
+    process.env,
+    [identities.stdout, identities.stderr].filter(Boolean).join('\n'),
+  );
+}
+
+runNpm(['run', 'build']);
 run(process.execPath, [path.join(ROOT, 'build', 'make-icon.mjs')]);
 
 if (process.platform === 'darwin') {
@@ -19,13 +33,17 @@ if (process.platform === 'darwin') {
   // finished DMG/ZIP back into the repository's ignored dist directory.
   const staging = mkdtempSync(path.join(tmpdir(), 'buddy-dist-'));
   try {
-    run(npm, [
+    const builderArgs = [
       'exec',
       '--',
       'electron-builder',
       '--mac',
+      '--publish',
+      'never',
       `--config.directories.output=${staging}`,
-    ]);
+    ];
+    if (productionMacRelease) builderArgs.push('--config.forceCodeSigning=true');
+    runNpm(builderArgs);
     const destination = path.join(ROOT, 'dist');
     mkdirSync(destination, { recursive: true });
     for (const name of readdirSync(staging)) {
@@ -37,12 +55,22 @@ if (process.platform === 'darwin') {
     rmSync(staging, { recursive: true, force: true });
   }
 } else if (process.platform === 'win32') {
-  run(npm, ['exec', '--', 'electron-builder', '--win']);
+  runNpm(['exec', '--', 'electron-builder', '--win', '--publish', 'never']);
 } else {
   throw new Error('Buddy distribution packaging is supported on macOS and Windows');
 }
 
+function runNpm(args) {
+  const npmCli = process.env.npm_execpath;
+  if (npmCli) {
+    run(process.execPath, [npmCli, ...args]);
+    return;
+  }
+  run(process.platform === 'win32' ? 'npm.cmd' : 'npm', args);
+}
+
 function run(command, args) {
   const result = spawnSync(command, args, { cwd: ROOT, stdio: 'inherit' });
+  if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
 }

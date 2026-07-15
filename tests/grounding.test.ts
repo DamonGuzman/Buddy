@@ -150,6 +150,13 @@ describe('grounding scoring: selectCandidate', () => {
     expect(best?.candidate.x).toBe(520);
   });
 
+  it('front-to-back window rank breaks an otherwise exact tie', () => {
+    const behind = { ...cand('Save', 520, 300), windowRank: 3 };
+    const front = { ...cand('Save', 520, 300), windowRank: 0 };
+    const best = selectCandidate('save', point, [behind, front], 350);
+    expect(best?.candidate.windowRank).toBe(0);
+  });
+
   it('returns null when nothing clears the threshold (raw-point fallback)', () => {
     const best = selectCandidate(
       'the save button',
@@ -167,6 +174,11 @@ describe('grounding scoring: selectCandidate', () => {
       [cand('Save', 480, 290, 0, 0), cand('', 480, 290)],
       350,
     );
+    expect(best).toBeNull();
+  });
+
+  it('ignores stale 1px accessibility slivers', () => {
+    const best = selectCandidate('save', point, [cand('Save', 480, 290, 120, 1)], 350);
     expect(best).toBeNull();
   });
 

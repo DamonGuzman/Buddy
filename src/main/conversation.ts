@@ -34,11 +34,10 @@ import { captureAllDisplays } from './capture';
 import type { CaptureResult } from './capture';
 import { clampToDisplay, mapModelPoint } from './coords';
 import type { MappedPoint } from './coords';
-import { GroundingService } from './grounding/snapper';
+import { createElementGrounder } from './grounding/accessibility-grounder';
+import type { ElementGrounder } from './grounding/accessibility-grounder';
 import { RestGrounder } from './grounding/rest-grounder';
 import type { CodexUsedPercent, GroundSource } from './grounding/rest-grounder';
-import { dipToPhysicalViaMeta, physicalToDipViaMeta } from './grounding/convert';
-import type { Pt } from './grounding/convert';
 import { getCodexAuthProvider } from './auth/codex-auth';
 import { resolveGroundingAuth } from './auth/auth-source';
 import type { CodexProvider, ChatGptCodexAuthSource } from './auth/auth-source';
@@ -228,10 +227,10 @@ export class Conversation {
   } | null = null;
 
   // M9: element-snap grounding (docs/EVAL.md §9).
-  private grounding: GroundingService | null = null;
+  private grounding: ElementGrounder | null = null;
   /** CLICKY_NO_SNAP=1 disables snapping (eval A/B attribution). */
   private readonly snapDisabled = process.env['CLICKY_NO_SNAP'] === '1';
-  // M10: REST grounding fallback behind the UIA snap (docs/COORD-STUDY.md §9).
+  // M10: REST fallback behind native accessibility (UIA/AX).
   private restGrounder: RestGrounder | null = null;
   /** CLICKY_NO_REST_GROUND=1 disables the REST fallback (eval A/B attribution). */
   private readonly restGroundDisabled = process.env['CLICKY_NO_REST_GROUND'] === '1';
@@ -366,10 +365,10 @@ export class Conversation {
     if (!this.snapDisabled) this.getGrounding().warmUp();
   }
 
-  /** M9: lazy grounding service (spawned once, killed in close()). */
-  private getGrounding(): GroundingService {
+  /** Lazy cross-platform accessibility provider (UIA on Windows, AX on macOS). */
+  private getGrounding(): ElementGrounder {
     if (this.grounding === null) {
-      this.grounding = new GroundingService({
+      this.grounding = createElementGrounder({
         scriptDir: app.getPath('userData'),
         excludePid: process.pid, // never scope into our own overlay windows
       });
@@ -2060,7 +2059,7 @@ export class Conversation {
    * M9/M10 layered grounding: ground the model's (already §6-mapped) point,
    * then fly the buddy. Layers, in order (docs/ARCHITECTURE.md §6b):
    *
-   *   1. UIA element snap (M9, 600ms timebox) — exact when the label matches
+   *   1. UIA/AX element snap — exact when the label matches
    *      a named element;
    *   2. REST grounding fallback (M10, gpt-5.4-mini, 2.5s timeout) — the
    *      model's own label re-grounded against the SAME screenshot JPEG the
@@ -2076,7 +2075,7 @@ export class Conversation {
    * SHARED by the voice tool-call path AND the M18 text path. When
    * `primaryModelIsAccurate` is set (text mode: the point comes straight from
    * gpt-5.6-sol, which is 1px-median / 100% in-element per COORD-STUDY §11),
-   * the redundant REST grounding call is SKIPPED — the UIA element-snap still
+   * the redundant REST grounding call is SKIPPED — native element-snap still
    * runs (it snaps to the true element center), otherwise the model's own
    * already-accurate point stands. Voice keeps the full layered pipeline
    * because its raw coordinates need it.
@@ -2093,17 +2092,22 @@ export class Conversation {
     const textAccurate = opts.primaryModelIsAccurate === true;
     let local = mapped.local;
     let snap: PointerSnapInfo | undefined;
-    let groundingSource: 'uia' | 'rest' | 'raw' = 'raw';
+    let groundingSource: 'uia' | 'ax' | 'rest' | 'raw' = 'raw';
     if (!this.snapDisabled && args.label !== undefined && args.label.length > 0) {
       const t0 = Date.now();
       const rawPoint = { x: Math.round(mapped.global.x), y: Math.round(mapped.global.y) };
       try {
-        const phys = this.dipToPhysical(mapped.global, meta);
-        const outcome = await this.getGrounding().snap({ x: phys.x, y: phys.y, label: args.label });
+        const outcome = await this.getGrounding().snap({
+          point: mapped.global,
+          label: args.label,
+          display: meta,
+        });
         if (outcome.matched && outcome.point !== null) {
-          const dip = this.physicalToDip(outcome.point, meta);
           local = clampToDisplay(
-            { x: dip.x - meta.displayBounds.x, y: dip.y - meta.displayBounds.y },
+            {
+              x: outcome.point.x - meta.displayBounds.x,
+              y: outcome.point.y - meta.displayBounds.y,
+            },
             meta,
           );
           snap = {
@@ -2117,7 +2121,7 @@ export class Conversation {
             snapMs: Date.now() - t0,
             candidates: outcome.candidates,
           };
-          groundingSource = 'uia';
+          groundingSource = outcome.provider;
         } else {
           if (outcome.timedOut) {
             console.warn('[grounding] snap timed out — using the raw model point');
@@ -2142,7 +2146,7 @@ export class Conversation {
         };
       }
     }
-    // M10: UIA snap found nothing (or was disabled) — REST grounding
+    // M10: native accessibility found nothing (or was disabled) — REST grounding
     // fallback. The grounder re-locates the model's own label in the SAME
     // screenshot the model saw (capture is closure-retained here even after
     // the turn settles and releases turnCaptures), and its answer is a point
@@ -2163,6 +2167,7 @@ export class Conversation {
       usedPercent = this.codexTextUsedPercent;
     } else if (
       groundingSource !== 'uia' &&
+      groundingSource !== 'ax' &&
       !this.restGroundDisabled &&
       args.label !== undefined &&
       args.label.length > 0
@@ -2258,36 +2263,6 @@ export class Conversation {
   }
 
   /**
-   * M9: global DIP -> global physical px. Electron's screen module knows the
-   * true physical layout (mixed-DPI multi-monitor); the meta-derived math is
-   * the fallback (exact on single/origin displays).
-   */
-  private dipToPhysical(p: Pt, meta: CaptureMeta): Pt {
-    try {
-      const converted = screen.dipToScreenPoint({ x: Math.round(p.x), y: Math.round(p.y) });
-      if (converted && Number.isFinite(converted.x) && Number.isFinite(converted.y)) {
-        return converted;
-      }
-    } catch {
-      /* non-Windows or API unavailable */
-    }
-    return dipToPhysicalViaMeta(p, meta);
-  }
-
-  /** M9: global physical px -> global DIP (see dipToPhysical). */
-  private physicalToDip(p: Pt, meta: CaptureMeta): Pt {
-    try {
-      const converted = screen.screenToDipPoint({ x: Math.round(p.x), y: Math.round(p.y) });
-      if (converted && Number.isFinite(converted.x) && Number.isFinite(converted.y)) {
-        return converted;
-      }
-    } catch {
-      /* non-Windows or API unavailable */
-    }
-    return physicalToDipViaMeta(p, meta);
-  }
-
-  /**
    * M9 debug surface (POST /grounding/query): drive the snapper directly
    * against whatever is on screen — no model, no cost. Coordinates in/out
    * are GLOBAL DIP (converted here); the full scored candidate list is
@@ -2299,48 +2274,27 @@ export class Conversation {
     label: string;
     radiusPx?: number;
   }): Promise<unknown> {
-    if (process.platform === 'darwin') {
-      return {
-        query: q,
-        matched: false,
-        reason: 'macOS uses vision grounding during explicit Buddy turns',
-      };
-    }
     const display = screen.getDisplayNearestPoint({ x: Math.round(q.x), y: Math.round(q.y) });
-    const geom = { displayBounds: display.bounds, scaleFactor: display.scaleFactor };
-    const phys = (() => {
-      try {
-        const p = screen.dipToScreenPoint({ x: Math.round(q.x), y: Math.round(q.y) });
-        if (p && Number.isFinite(p.x)) return p;
-      } catch {
-        /* fall through */
-      }
-      return dipToPhysicalViaMeta({ x: q.x, y: q.y }, geom);
-    })();
     const outcome = await this.getGrounding().snap(
-      { x: phys.x, y: phys.y, label: q.label, ...(q.radiusPx !== undefined ? { radiusPx: q.radiusPx } : {}) },
+      {
+        point: { x: q.x, y: q.y },
+        label: q.label,
+        display: { displayBounds: display.bounds, scaleFactor: display.scaleFactor },
+        ...(q.radiusPx !== undefined ? { radiusDip: q.radiusPx } : {}),
+      },
       { debug: true, timeboxMs: 2_500 },
     );
-    let snappedDip: Pt | null = null;
-    if (outcome.matched && outcome.point !== null) {
-      try {
-        snappedDip = screen.screenToDipPoint({
-          x: Math.round(outcome.point.x),
-          y: Math.round(outcome.point.y),
-        });
-      } catch {
-        snappedDip = physicalToDipViaMeta(outcome.point, geom);
-      }
-    }
     return {
-      query: { ...q, physical: phys },
+      query: q,
+      provider: outcome.provider,
       matched: outcome.matched,
-      snappedDip,
+      snappedDip: outcome.point,
       name: outcome.name,
       score: outcome.score,
       elapsedMs: outcome.elapsedMs,
-      daemonMs: outcome.daemonMs,
+      nativeMs: outcome.nativeMs,
       timedOut: outcome.timedOut,
+      error: outcome.error ?? null,
       candidates: outcome.debug ?? [],
     };
   }

@@ -130,6 +130,22 @@ const SCENARIOS = [
     },
   },
   {
+    name: 'native-grounding-qa',
+    description: 'user text contains "buddy project": point near the Buddy sidebar row with its name',
+    matches: (turn) => /\bbuddy project\b/.test(userTextOf(turn)),
+    async run(io, turn) {
+      const size = turn.screen0 || { w: 1000, h: 800 };
+      await io.speak('the Buddy project is right over here.');
+      await io.functionCall('point_at', {
+        x: Math.round(size.w * 0.086),
+        y: Math.round(size.h * 0.363),
+        label: 'the Buddy project',
+        screen: 0,
+      });
+      await io.done('completed');
+    },
+  },
+  {
     name: 'point',
     description: 'user text contains "point" or "button": answer + one point_at call',
     matches: (turn) => /\bpoint\b|\bbutton\b/.test(userTextOf(turn)),

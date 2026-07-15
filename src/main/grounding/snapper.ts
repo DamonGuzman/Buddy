@@ -1,8 +1,7 @@
 /**
- * GroundingService (M9): owns the persistent Windows UIA snapper daemon and
- * does label->element selection in TypeScript. macOS uses the vision
- * grounding layer directly because Accessibility permission is process-bound
- * and must not be delegated to an opaque helper executable.
+ * GroundingService (M9): Windows UIA provider internals. The cross-platform
+ * global-DIP facade lives in accessibility-grounder.ts; this class owns only
+ * the persistent PowerShell daemon and native-physical scoring contract.
  *
  * Contract with the conversation layer:
  * - `snap()` takes the model's point in GLOBAL PHYSICAL px + its spoken
@@ -58,6 +57,7 @@ export interface SnapDebugCandidate {
   ct?: string | undefined;
   rect: { x: number; y: number; w: number; h: number };
   textScore: number;
+  windowRank?: number;
 }
 
 export interface SnapOutcome {
@@ -112,6 +112,7 @@ function normalizeCandidates(raw: unknown): SnapCandidate[] {
         w: c['w'],
         h: c['h'],
         ...(typeof c['ct'] === 'string' ? { ct: c['ct'] } : {}),
+        ...(typeof c['windowRank'] === 'number' ? { windowRank: c['windowRank'] } : {}),
       });
     }
   }
@@ -135,11 +136,6 @@ export class GroundingService {
 
   /** Spawn the daemon ahead of the first snap (assembly load takes ~1s). */
   warmUp(): void {
-    // Production macOS grounding goes straight to the vision layer. A child
-    // Accessibility helper would need its own TCC grant, separate from Buddy.
-    // Keep command overrides working so the cross-platform protocol tests can
-    // still exercise this service with their fake daemon.
-    if (process.platform === 'darwin' && this.options.command === undefined) return;
     try {
       this.ensureChild();
     } catch (err) {
@@ -174,8 +170,6 @@ export class GroundingService {
       timedOut,
     });
     if (this.disposed) return none(false);
-    if (process.platform === 'darwin' && this.options.command === undefined) return none(false);
-
     let lastCount = 0;
     let lastDaemonMs: number | null = null;
     let debugList: SnapDebugCandidate[] | undefined;
@@ -203,6 +197,7 @@ export class GroundingService {
           ct: c.ct,
           rect: { x: c.x, y: c.y, w: c.w, h: c.h },
           textScore: Math.round(textSimilarity(query.label, c.name) * 100) / 100,
+          ...(c.windowRank !== undefined ? { windowRank: c.windowRank } : {}),
         }));
       }
       const best = selectCandidate(query.label, { x: query.x, y: query.y }, candidates, radius);
