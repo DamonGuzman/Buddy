@@ -21,6 +21,12 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { PANEL_HEIGHT, PANEL_WIDTH } from '../../shared/constants';
 import type { MainToPanelChannel, MainToPanelEvents } from '../../shared/ipc';
+import type {
+  ActionableErrorKind,
+  ActionableErrorIdentity,
+  ActionableErrorNotice,
+  ActionableErrorState,
+} from '../../shared/types';
 import {
   createHardenedWindow,
   hardenedWebPreferences,
@@ -63,8 +69,27 @@ let activePanel: PanelManager | null = null;
  * or 'first-run'). Delegates to the live PanelManager (which owns the M11
  * per-reason budget).
  */
-export function showPanelOnce(reason = 'first-run'): void {
+export type PanelShowReason = 'first-run' | ActionableErrorKind;
+
+export function showPanelOnce(reason: PanelShowReason = 'first-run'): void {
   activePanel?.showOnce(reason);
+}
+
+/** Retain and push the newest user-repairable failure into Settings. */
+export function presentPanelActionableError(notice: ActionableErrorNotice): void {
+  activePanel?.presentActionableError(notice);
+}
+
+/** Snapshot one exact current notice before starting asynchronous repair work. */
+export function currentPanelActionableError(
+  kinds: readonly ActionableErrorKind[],
+): ActionableErrorIdentity | null {
+  return activePanel?.currentActionableError(kinds) ?? null;
+}
+
+/** Clear one exact notice after the corresponding repair succeeds. */
+export function resolvePanelActionableError(expected: ActionableErrorIdentity | null): void {
+  if (expected !== null) activePanel?.resolveActionableError(expected);
 }
 
 /**
@@ -98,7 +123,9 @@ export class PanelManager {
    * consumes the error budget, and each error kind can surface the panel once
    * per run.
    */
-  private readonly shownForReason = new Set<string>();
+  private readonly shownForReason = new Set<PanelShowReason>();
+  /** Monotonic persistent repair state, replayed after panel renderer reloads. */
+  private actionableErrorValue: ActionableErrorState = { revision: 0, notice: null };
 
   constructor(private readonly options: PanelManagerOptions = {}) {
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- module-level singleton handle (see showPanelOnce/togglePanel)
@@ -193,15 +220,85 @@ export class PanelManager {
    * would otherwise demote the window (drop topmost + bury it at the bottom
    * of the z-order).
    */
-  showOnce(reason = 'first-run'): void {
+  showOnce(reason: PanelShowReason = 'first-run'): void {
     if (this.shownForReason.has(reason)) return;
     this.shownForReason.add(reason);
     this.showInactive();
   }
 
+  actionableErrorState(): ActionableErrorState {
+    return {
+      revision: this.actionableErrorValue.revision,
+      notice: this.actionableErrorValue.notice ? { ...this.actionableErrorValue.notice } : null,
+    };
+  }
+
+  presentActionableError(notice: ActionableErrorNotice): void {
+    this.actionableErrorValue = {
+      revision: this.actionableErrorValue.revision + 1,
+      notice: { ...notice },
+    };
+    this.send('panel:actionable-error', this.actionableErrorState());
+  }
+
+  currentActionableError(kinds: readonly ActionableErrorKind[]): ActionableErrorIdentity | null {
+    const notice = this.actionableErrorValue.notice;
+    if (notice === null || !kinds.includes(notice.kind)) return null;
+    return { revision: this.actionableErrorValue.revision, kind: notice.kind };
+  }
+
+  resolveActionableError(expected: ActionableErrorIdentity): boolean {
+    if (!this.matchesActionableError(expected)) return false;
+    this.actionableErrorValue = {
+      revision: this.actionableErrorValue.revision + 1,
+      notice: null,
+    };
+    this.send('panel:actionable-error', this.actionableErrorState());
+    return true;
+  }
+
+  /**
+   * Main-owned recovery signals are synchronous with this state owner, so
+   * they can safely snapshot and clear the current matching kind in one call.
+   */
+  resolveCurrentActionableError(kinds: readonly ActionableErrorKind[]): boolean {
+    const expected = this.currentActionableError(kinds);
+    return expected !== null && this.resolveActionableError(expected);
+  }
+
+  /** User acknowledgement is deliberately distinct from successful repair. */
+  dismissActionableError(expected: ActionableErrorIdentity): boolean {
+    return this.resolveActionableError(expected);
+  }
+
+  private matchesActionableError(expected: ActionableErrorIdentity): boolean {
+    return (
+      expected !== null &&
+      typeof expected === 'object' &&
+      Number.isSafeInteger(expected.revision) &&
+      typeof expected.kind === 'string' &&
+      this.actionableErrorValue.revision === expected.revision &&
+      this.actionableErrorValue.notice?.kind === expected.kind
+    );
+  }
+
   hide(): void {
     this.pendingInactiveShow = false;
     if (this.win && !this.win.isDestroyed()) this.win.hide();
+  }
+
+  /**
+   * Live-desktop approval is clicked inside this focusable window. Remove it
+   * before the action gate's fresh receiver inspection, then give the OS one
+   * compositor beat to restore the underlying application. A window that
+   * remains visible fails closed instead of receiving Buddy's own input.
+   */
+  async prepareForLiveActionDispatch(): Promise<void> {
+    this.hide();
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    if (this.win && !this.win.isDestroyed() && this.win.isVisible()) {
+      throw new Error('approval panel could not be hidden before desktop input');
+    }
   }
 
   /** Send a typed event to the panel (no-op if never opened). */
@@ -300,6 +397,7 @@ export class PanelManager {
     win.webContents.on('did-finish-load', () => {
       if (this.win !== win) return;
       this.panelLoaded = true;
+      this.send('panel:actionable-error', this.actionableErrorState());
       this.rendererReadyCb?.();
       if (this.pendingInactiveShow) {
         this.pendingInactiveShow = false;

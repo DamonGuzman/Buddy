@@ -15,6 +15,7 @@
 import { createRequire } from 'node:module';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ConversationDeps } from '../src/main/conversation';
+import { DEFAULT_SETTINGS } from '../src/shared/types';
 import type * as MockRealtime from '../tools/mock-realtime/server';
 
 const showPanelCalls = vi.hoisted(() => [] as string[]);
@@ -41,6 +42,9 @@ vi.mock('../src/main/windows/panel', () => ({
   showPanelOnce: (reason?: string) => {
     showPanelCalls.push(reason ?? 'first-run');
   },
+  presentPanelActionableError: () => {},
+  currentPanelActionableError: () => null,
+  resolvePanelActionableError: () => {},
 }));
 
 vi.mock('../src/main/windows/overlay', () => ({}));
@@ -65,11 +69,21 @@ type MockServer = Awaited<ReturnType<typeof mock.createMockServer>>;
 interface FakeDeps {
   deps: ConversationDeps;
   captions: { itemId: string; text: string; done: boolean }[];
-  flags: { apiKeyUnreadable: boolean; settingsWereReset: boolean; captionsEnabled: boolean };
+  flags: {
+    apiKey: string | null;
+    apiKeyUnreadable: boolean;
+    settingsWereReset: boolean;
+    captionsEnabled: boolean;
+  };
 }
 
-function fakeDeps(): FakeDeps {
-  const flags = { apiKeyUnreadable: false, settingsWereReset: false, captionsEnabled: false };
+function fakeDeps(apiKey: string | null = null): FakeDeps {
+  const flags = {
+    apiKey,
+    apiKeyUnreadable: false,
+    settingsWereReset: false,
+    captionsEnabled: false,
+  };
   const captions: FakeDeps['captions'] = [];
   return {
     deps: {
@@ -84,7 +98,7 @@ function fakeDeps(): FakeDeps {
           computerUseEnabled: false,
           preferApiKeyGrounding: false,
         }),
-        getApiKey: () => null,
+        getApiKey: () => flags.apiKey,
         settingsWereReset: () => flags.settingsWereReset,
       },
       overlays: {
@@ -140,10 +154,13 @@ describe('conversation error catalog (M11)', () => {
     delete process.env['CLICKY_MOCK_URL'];
   });
 
-  function makeConversation(url?: string): { c: InstanceType<typeof Conversation> } & FakeDeps {
+  function makeConversation(
+    url?: string,
+    apiKey: string | null = null,
+  ): { c: InstanceType<typeof Conversation> } & FakeDeps {
     if (url !== undefined) process.env['CLICKY_MOCK_URL'] = url;
     else delete process.env['CLICKY_MOCK_URL'];
-    const f = fakeDeps();
+    const f = fakeDeps(apiKey);
     const c = new Conversation(f.deps);
     conversations.push(c);
     return { c, ...f };
@@ -163,9 +180,11 @@ describe('conversation error catalog (M11)', () => {
   // -------------------------------------------------------------------------
 
   it('no_api_key: exact copy + auto-show for that kind', async () => {
-    const { c } = makeConversation(); // real endpoint, no key -> rejected pre-socket
+    const { c, captions } = makeConversation(); // real endpoint, no key -> rejected pre-socket
     await c.askText('hello');
-    expect(sysTexts(c)).toContain(describeKind('no_api_key').message);
+    const copy = describeKind('no_api_key').message;
+    expect(sysTexts(c)).toContain(copy);
+    expect(captions.some((caption) => caption.text === copy)).toBe(true);
     expect(c.assistantState()).toBe('error');
     expect(showPanelCalls).toContain('no_api_key');
   });
@@ -186,12 +205,11 @@ describe('conversation error catalog (M11)', () => {
     expect(showPanelCalls).toContain('api_key_rejected');
   });
 
-  it('model_unavailable: HTTP 403 upgrade rejection (with the model name)', async () => {
+  it('api_access_forbidden: generic HTTP 403 gives project/key permission guidance', async () => {
     const { c } = await makeRejectConversation({ status: 403 });
     await c.askText('hello');
-    expect(sysTexts(c)).toContain(
-      describeKind('model_unavailable', { model: 'gpt-realtime-2.1-mini' }).message,
-    );
+    expect(sysTexts(c)).toContain(describeKind('api_access_forbidden').message);
+    expect(showPanelCalls).toContain('api_access_forbidden');
   });
 
   it('model_unavailable: HTTP 404 upgrade rejection', async () => {
@@ -216,7 +234,7 @@ describe('conversation error catalog (M11)', () => {
     expect(sysTexts(c)).toContain(describeKind('server_error').message);
   });
 
-  it('insufficient_quota: pre-settle error event keeps the verbatim copy', async () => {
+  it('insufficient_quota: pre-settle error event gives concrete billing guidance', async () => {
     const { c } = await makeRejectConversation({
       preSettleError: {
         code: 'insufficient_quota',
@@ -224,16 +242,72 @@ describe('conversation error catalog (M11)', () => {
       },
     });
     await c.askText('hello');
-    expect(sysTexts(c)).toContain(
-      'openai says your account is out of credit — add credits at platform.openai.com/billing',
-    );
+    expect(sysTexts(c)).toContain(describeKind('insufficient_quota').message);
     expect(showPanelCalls).toContain('insufficient_quota');
   });
 
   it('network_unreachable: nothing listening on the endpoint', async () => {
-    const { c } = makeConversation('ws://127.0.0.1:1');
+    const { c, captions } = makeConversation('ws://127.0.0.1:1');
     await c.askText('hello');
-    expect(sysTexts(c)).toContain(describeKind('network_unreachable').message);
+    const copy = describeKind('network_unreachable').message;
+    expect(sysTexts(c)).toContain(copy);
+    // The capture_failed preflight may caption because this test stubs capture
+    // to empty; the transient network error itself must remain non-intrusive.
+    expect(captions.some((caption) => caption.text === copy)).toBe(false);
+    expect(showPanelCalls).not.toContain('network_unreachable');
+  });
+
+  it('rebuilds an authenticated session when the stored key is replaced', async () => {
+    const { c, flags } = makeConversation(server.url, 'sk-original-credential-1234567890');
+    await c.askText('hello');
+    await vi.waitFor(() => expect(c.sessionStatus().state).toBe('ready'));
+
+    flags.apiKey = 'sk-replacement-credential-1234567890';
+    c.onSettingsChanged({
+      ...DEFAULT_SETTINGS,
+      apiKeyPresent: true,
+      model: 'gpt-realtime-2.1-mini',
+    });
+
+    expect(c.sessionStatus().state).toBe('disconnected');
+  });
+
+  it('an unrelated settings update preserves a typed-turn session after its first key read', async () => {
+    const { c } = makeConversation(); // real endpoint: reads the key, then fails locally
+    await c.askText('hello');
+    expect(c.sessionStatus().state).toBe('error');
+
+    c.onSettingsChanged({
+      ...DEFAULT_SETTINGS,
+      captionsEnabled: true,
+      model: 'gpt-realtime-2.1-mini',
+    });
+
+    // A rebuild changes the fresh session to disconnected. Keeping the error
+    // status proves this unrelated setting did not tear the session down.
+    expect(c.sessionStatus().state).toBe('error');
+  });
+
+  it('an unrelated settings update preserves a full-realtime session after its first key read', async () => {
+    const f = fakeDeps();
+    f.deps.settings.get = () => ({
+      ...DEFAULT_SETTINGS,
+      fullRealtimeMode: true,
+      apiKeyUnreadable: false,
+    });
+    const c = new Conversation(f.deps);
+    conversations.push(c);
+
+    await c.toggleFullRealtime(); // real endpoint: reads the key, then fails locally
+    expect(c.sessionStatus().state).toBe('error');
+
+    c.onSettingsChanged({
+      ...DEFAULT_SETTINGS,
+      captionsEnabled: true,
+      fullRealtimeMode: true,
+    });
+
+    expect(c.sessionStatus().state).toBe('error');
   });
 
   it('mid-hold connect failures stay quiet; the commit resolves the turn', async () => {
@@ -337,7 +411,9 @@ describe('conversation error catalog (M11)', () => {
     c.holdStart();
     nowOffset = 400; // past MIN_HOLD_MS — a real hold, not a tap
     c.holdEnd();
-    expect(sysTexts(c)).toContain(describeKind('mic_unavailable').message);
+    await vi.waitFor(() => expect(sysTexts(c)).toContain(describeKind('mic_unavailable').message), {
+      timeout: 5_000,
+    });
     expect(c.assistantState()).toBe('error'); // overlay flash
     expect(showPanelCalls).toContain('mic_unavailable');
     expect(c.turnTimingsHistory()).toHaveLength(0); // still no turn record
@@ -353,9 +429,70 @@ describe('conversation error catalog (M11)', () => {
     });
     nowOffset = 400;
     c.holdEnd();
-    expect(sysTexts(c)).toContain(
-      describeKind('mic_unavailable', { micErrorName: 'NotAllowedError' }).message,
+    await vi.waitFor(
+      () =>
+        expect(sysTexts(c)).toContain(
+          describeKind('mic_unavailable', { micErrorName: 'NotAllowedError' }).message,
+        ),
+      { timeout: 5_000 },
     );
+  });
+
+  it('a zero-audio release surfaces a racing API-key rejection, not mic_unavailable', async () => {
+    const { c } = await makeRejectConversation({
+      preSettleError: {
+        code: 'invalid_api_key',
+        message: 'Incorrect API key provided: sk-secret-value-that-must-not-leak',
+      },
+    });
+    c.holdStart();
+    nowOffset = 400;
+    c.holdEnd();
+
+    await vi.waitFor(
+      () => expect(sysTexts(c)).toContain(describeKind('api_key_rejected').message),
+      { timeout: 5_000 },
+    );
+    expect(sysTexts(c)).not.toContain(describeKind('mic_unavailable').message);
+    expect(JSON.stringify(c.debugInfo())).not.toContain('sk-secret-value-that-must-not-leak');
+  });
+
+  it('a settings rebuild invalidates a released hold awaiting its old connection', async () => {
+    const reject = await rejectMod.createRejectServer(); // accepts, then deliberately stays silent
+    cleanups.push(() => reject.close());
+    const { c, flags } = makeConversation(reject.url, 'sk-original-credential-1234567890');
+
+    c.holdStart();
+    nowOffset = 400;
+    c.holdEnd();
+
+    flags.apiKey = 'sk-replacement-credential-1234567890';
+    c.onSettingsChanged({
+      ...DEFAULT_SETTINGS,
+      apiKeyPresent: true,
+      model: 'gpt-realtime-2.1-mini',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(c.sessionStatus().state).toBe('disconnected');
+    expect(sysTexts(c)).toHaveLength(0);
+  });
+
+  it('mic_unavailable NotFoundError tells the user to choose an input device', async () => {
+    const { c, captions } = makeConversation(server.url);
+    c.holdStart();
+    c.handleAudioDeviceError({
+      source: 'mic',
+      name: 'NotFoundError',
+      message: 'Requested device not found',
+    });
+    nowOffset = 400;
+    c.holdEnd();
+    const copy = describeKind('mic_unavailable', { micErrorName: 'NotFoundError' }).message;
+    await vi.waitFor(() => expect(sysTexts(c)).toContain(copy), { timeout: 5_000 });
+    await vi.waitFor(() => expect(captions.some((caption) => caption.text === copy)).toBe(true), {
+      timeout: 5_000,
+    });
   });
 
   it('a short tap stays silent (no mic error, no turn)', async () => {
@@ -389,7 +526,10 @@ describe('conversation error catalog (M11)', () => {
       c.handleAudioDeviceError({ source: 'playback', name: 'Error', message: 'no output device' });
     report();
     report(); // same episode: no duplicate
-    const copy = describeKind('audio_output_failed').message;
+    const copy = describeKind('audio_output_failed', {
+      audioOutputErrorName: 'Error',
+      audioOutputErrorMessage: 'no output device',
+    }).message;
     expect(sysTexts(c).filter((t) => t === copy)).toHaveLength(1);
     expect(showPanelCalls).toContain('audio_output_failed');
     // Sound came back (samples actually played) -> re-armed.

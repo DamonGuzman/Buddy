@@ -135,7 +135,12 @@ vi.mock('../src/main/capture', () => ({
     ]),
 }));
 
-vi.mock('../src/main/windows/panel', () => ({ showPanelOnce: () => {} }));
+vi.mock('../src/main/windows/panel', () => ({
+  showPanelOnce: () => {},
+  presentPanelActionableError: () => {},
+  currentPanelActionableError: () => null,
+  resolvePanelActionableError: () => {},
+}));
 vi.mock('../src/main/windows/overlay', () => ({}));
 
 const { Conversation } = await import('../src/main/conversation');

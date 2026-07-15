@@ -26,37 +26,30 @@
  * - 'tray'       — tray tooltip/balloon (for failures where the panel itself
  *                  may be unavailable).
  *
- * autoShowPanel: the panel surfaces itself AT MOST ONCE PER KIND per app run
- * (windows/panel.ts showPanelOnce), and only for kinds the user can act on.
- * Per the M11 audit, that set is: no_api_key, api_key_rejected,
- * api_key_unreadable, insufficient_quota, model_unavailable, mic_unavailable,
- * audio_output_failed — plus hotkey_dead and settings_reset, whose fix items
- * explicitly call for a one-time auto-show (both are actionable: switch to
- * typing / re-paste the key).
+ * autoShowPanel: the settings window surfaces itself AT MOST ONCE PER KIND per
+ * app run (windows/panel.ts showPanelOnce), and only for kinds the user can
+ * act on. Actionable failures also use an overlay caption: the old transcript
+ * panel no longer exists, so opening Settings must never hide the reason it
+ * opened. Transient OpenAI/network failures deliberately remain transcript +
+ * pill only and never open Settings or interrupt the user with a caption.
  */
 
+import type {
+  ActionableErrorKind,
+  ActionableErrorNotice,
+  ActionableErrorTarget,
+} from '../shared/types';
+
 export type ErrorKind =
-  | 'no_api_key'
-  | 'api_key_rejected'
-  | 'api_key_unreadable'
-  | 'insufficient_quota'
+  | ActionableErrorKind
   | 'rate_limited'
-  | 'model_unavailable'
   | 'network_unreachable'
   | 'response_interrupted'
   | 'response_incomplete'
   | 'server_error'
-  | 'mic_unavailable'
-  | 'audio_output_failed'
-  | 'capture_failed'
-  | 'codex_plan_limit'
-  | 'hotkey_dead'
   | 'hold_too_long'
-  | 'settings_reset'
   | 'renderer_dead'
   // M18 additions (integration-approved): agent mode (docs/AGENT-MODE.md §7).
-  | 'agent_not_signed_in'
-  | 'agent_quota'
   | 'agent_backend_down'
   | 'agent_timed_out'
   | 'agent_tool_failed';
@@ -71,6 +64,8 @@ export interface ErrorPresentation {
   surfaces: readonly ErrorSurface[];
   /** Show the panel (once per kind per run) so the copy is actually seen. */
   autoShowPanel: boolean;
+  /** Persistent Settings destination for user-repairable failures. */
+  target?: ActionableErrorTarget;
 }
 
 /** Optional context for copy interpolation / variant selection. */
@@ -79,8 +74,26 @@ export interface ErrorParams {
   model?: string;
   /** DOMException name from the renderer mic report (NotAllowedError, ...). */
   micErrorName?: string;
+  /** DOMException name/message from the renderer playback report. */
+  audioOutputErrorName?: string;
+  audioOutputErrorMessage?: string;
   /** Selects macOS-specific repair steps for the global hotkey. */
   macHotkeyPermissions?: boolean;
+}
+
+/**
+ * Defensive scrub for server/library error text before it reaches logs or a
+ * renderer. OpenAI may echo part of a rejected credential in its error copy;
+ * classification still uses the original Error, but presentation never does.
+ */
+export function redactSensitiveErrorText(text: string): string {
+  return text
+    .replace(
+      /((?:incorrect|invalid) api key(?: provided)?:\s*)[\s\S]*?(?=\s*you can find your api key\b|$)/gi,
+      '$1[redacted].',
+    )
+    .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/\bsk-[A-Za-z0-9_-]{4,}\b/g, 'sk-[redacted]');
 }
 
 interface CatalogEntry {
@@ -91,34 +104,130 @@ interface CatalogEntry {
   presentCopy?(copy: string, params: ErrorParams | undefined): string;
 }
 
-const MIC_BLOCKED_COPY =
-  'your system is blocking buddy from using the microphone — allow buddy in system ' +
-  "privacy settings and i'll hear you. typing works meanwhile.";
+const ACTIONABLE_SURFACES = ['transcript', 'pill', 'caption'] as const;
+
+/** One exhaustive routing table from catalog kind to its repair destination. */
+const ACTIONABLE_TARGET: Record<ActionableErrorKind, ActionableErrorTarget> = {
+  no_api_key: 'openai',
+  api_key_rejected: 'openai',
+  api_key_unreadable: 'openai',
+  insufficient_quota: 'openai',
+  model_unavailable: 'openai',
+  api_access_forbidden: 'openai',
+  mic_unavailable: 'microphone',
+  audio_output_failed: 'voice',
+  capture_failed: 'permissions',
+  codex_plan_limit: 'chatgpt',
+  hotkey_dead: 'permissions',
+  settings_reset: 'openai',
+  settings_save_failed: 'settings',
+  agent_not_signed_in: 'chatgpt',
+  agent_quota: 'chatgpt',
+};
+
+/** Convert a catalog presentation into persistent Settings repair state. */
+export function actionableErrorNotice(
+  presentation: ErrorPresentation,
+  occurredAt: number,
+): ActionableErrorNotice | null {
+  if (presentation.kind === 'unknown' || !presentation.autoShowPanel) return null;
+  if (!Object.hasOwn(ACTIONABLE_TARGET, presentation.kind) || presentation.target === undefined) {
+    throw new Error(`actionable error kind has no settings target: ${presentation.kind}`);
+  }
+  const kind = presentation.kind as ActionableErrorKind;
+  return {
+    kind,
+    message: presentation.message,
+    target: presentation.target,
+    occurredAt,
+  };
+}
+
+const MIC_PERMISSION_COPY =
+  'microphone access is off — allow buddy under system privacy settings, then try the hotkey ' +
+  'again. you can type meanwhile.';
+
+const MIC_MISSING_COPY =
+  "buddy can't find a microphone — connect or enable one, then choose it under settings → " +
+  'microphone. you can type meanwhile.';
+
+const MIC_BUSY_COPY =
+  'your microphone is unavailable — close any app using it, or reconnect it, then try again. ' +
+  'you can type meanwhile.';
+
+const MIC_SELECTION_COPY =
+  "the selected microphone isn't available — choose system default under settings → " +
+  'microphone, then try again.';
+
+function presentMicCopy(copy: string, params: ErrorParams | undefined): string {
+  switch (params?.micErrorName?.toLowerCase()) {
+    case 'notallowederror':
+    case 'permissiondeniederror':
+    case 'securityerror':
+      return MIC_PERMISSION_COPY;
+    case 'notfounderror':
+    case 'devicesnotfounderror':
+      return MIC_MISSING_COPY;
+    case 'notreadableerror':
+    case 'trackstarterror':
+    case 'aborterror':
+      return MIC_BUSY_COPY;
+    case 'overconstrainederror':
+    case 'constraintnotsatisfiederror':
+      return MIC_SELECTION_COPY;
+    default:
+      return copy;
+  }
+}
+
+function presentAudioOutputCopy(copy: string, params: ErrorParams | undefined): string {
+  const detail = `${params?.audioOutputErrorName ?? ''} ${
+    params?.audioOutputErrorMessage ?? ''
+  }`.toLowerCase();
+  if (
+    /notfound|device.?not.?found|no (audio |output )?device|no speakers?|disconnected/.test(detail)
+  ) {
+    return (
+      "buddy can't find an audio output — connect or select speakers in system sound settings. " +
+      'answers will appear on screen as captions meanwhile.'
+    );
+  }
+  if (/notallowed|permission|blocked|denied/.test(detail)) {
+    return (
+      'audio playback could not start — restart buddy and check system output and volume. ' +
+      'answers will appear on screen as captions meanwhile.'
+    );
+  }
+  return copy;
+}
 
 const CATALOG: Record<ErrorKind, CatalogEntry> = {
   no_api_key: {
-    copy: "i don't have an openai api key yet — add one in settings and i'm all ears.",
-    surfaces: ['transcript', 'pill'],
+    copy:
+      'buddy needs an openai api key to answer voice or typed questions — paste one under ' +
+      'settings → openai, save it, then try again.',
+    surfaces: ACTIONABLE_SURFACES,
     autoShowPanel: true,
   },
   api_key_rejected: {
     copy:
-      "openai didn't accept your api key — double-check it in settings, or make a fresh " +
-      'one at platform.openai.com.',
-    surfaces: ['transcript', 'pill'],
+      'openai rejected the saved api key — replace it under settings → openai, or create a new ' +
+      'key at platform.openai.com/api-keys.',
+    surfaces: ACTIONABLE_SURFACES,
     autoShowPanel: true,
   },
   api_key_unreadable: {
     copy:
-      "your system keychain changed and buddy can't unlock your saved api key anymore — " +
-      "paste it again in settings and you're set.",
-    surfaces: ['transcript', 'pill'],
+      "buddy can't unlock the saved api key on this computer — paste it again under settings → " +
+      'openai, save it, then try again.',
+    surfaces: ACTIONABLE_SURFACES,
     autoShowPanel: true,
   },
   insufficient_quota: {
-    // Verbatim from the earlier quota hotfix — do not reword.
-    copy: 'openai says your account is out of credit — add credits at platform.openai.com/billing',
-    surfaces: ['transcript', 'pill'],
+    copy:
+      'openai says an api billing or usage limit was reached — check billing credit and ' +
+      'organization or project limits in the openai platform, then try again.',
+    surfaces: ACTIONABLE_SURFACES,
     autoShowPanel: true,
   },
   rate_limited: {
@@ -128,11 +237,18 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
   },
   model_unavailable: {
     copy:
-      "your openai account can't use <model> yet — try switching models in settings, " +
-      'or check your account tier.',
-    surfaces: ['transcript', 'pill'],
+      "your openai project can't use <model> — choose another model under settings → openai, " +
+      'or grant that project access in the openai platform.',
+    surfaces: ACTIONABLE_SURFACES,
     autoShowPanel: true,
     presentCopy: (copy, params) => copy.replace('<model>', params?.model ?? 'this model'),
+  },
+  api_access_forbidden: {
+    copy:
+      'openai blocked this api request — check the saved key and its project, endpoint, and ip ' +
+      'permissions in the openai platform, then try again.',
+    surfaces: ACTIONABLE_SURFACES,
+    autoShowPanel: true,
   },
   network_unreachable: {
     copy:
@@ -159,20 +275,19 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
   },
   mic_unavailable: {
     copy:
-      "i couldn't hear your mic. check it's connected — and that buddy is allowed to use " +
-      'the microphone in system privacy settings. typing works meanwhile.',
-    surfaces: ['transcript', 'pill'],
+      "buddy didn't receive microphone audio — check the input under settings → microphone and " +
+      'allow buddy in system privacy settings. you can type meanwhile.',
+    surfaces: ACTIONABLE_SURFACES,
     autoShowPanel: true,
-    // Permission denial: lead with the windows privacy toggle.
-    presentCopy: (copy, params) =>
-      params?.micErrorName === 'NotAllowedError' ? MIC_BLOCKED_COPY : copy,
+    presentCopy: presentMicCopy,
   },
   audio_output_failed: {
     copy:
-      "i can't reach your speakers right now — my answers are all here in the panel " +
-      'until sound comes back.',
+      "buddy couldn't start voice playback — restart buddy, then check the selected output in " +
+      'system sound settings. answers will appear on screen as captions meanwhile.',
     surfaces: ['transcript', 'caption'],
     autoShowPanel: true,
+    presentCopy: presentAudioOutputCopy,
   },
   capture_failed: {
     copy:
@@ -195,9 +310,9 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
   },
   hotkey_dead: {
     copy:
-      "buddy couldn't grab the push-to-talk keys (system accessibility access is blocked). " +
-      'allow buddy in system privacy settings; typing down below still works meanwhile.',
-    surfaces: ['transcript', 'tray'],
+      "buddy couldn't register push-to-talk — restart buddy; if it stays offline, close keyboard " +
+      'remapping or shortcut apps and try again. you can type meanwhile.',
+    surfaces: ['transcript', 'caption', 'tray'],
     autoShowPanel: true,
   },
   hold_too_long: {
@@ -208,10 +323,15 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
     autoShowPanel: false,
   },
   settings_reset: {
+    copy: 'buddy reset a damaged settings file — review settings and paste your openai api key again.',
+    surfaces: ['transcript', 'caption'],
+    autoShowPanel: true,
+  },
+  settings_save_failed: {
     copy:
-      "your settings file was scrambled, so i started fresh — you'll need to paste your " +
-      'api key again.',
-    surfaces: ['transcript'],
+      "buddy couldn't save that setting — the previous saved value is unchanged. try again, " +
+      'or restart buddy if it keeps happening.',
+    surfaces: ['transcript', 'caption'],
     autoShowPanel: true,
   },
   renderer_dead: {
@@ -265,11 +385,26 @@ export function describeKind(kind: ErrorKind, params?: ErrorParams): ErrorPresen
   let message = entry.presentCopy ? entry.presentCopy(entry.copy, params) : entry.copy;
   if (kind === 'hotkey_dead' && params?.macHotkeyPermissions) {
     message =
-      "buddy couldn't grab the push-to-talk keys. open buddy settings → permissions and use fix; " +
-      'i’ll recheck automatically. if macos already shows buddy as allowed, use “reset stale ' +
-      'grants” there for a guided clean start. typing still works meanwhile.';
+      'push-to-talk is blocked — under settings → permissions, choose fix for accessibility and ' +
+      'input monitoring. buddy will recheck automatically. if macos already allows both, use ' +
+      'reset stale grants. you can type meanwhile.';
   }
-  return { kind, message, surfaces: entry.surfaces, autoShowPanel: entry.autoShowPanel };
+  let target = ACTIONABLE_TARGET[kind as ActionableErrorKind];
+  if (
+    kind === 'mic_unavailable' &&
+    ['notallowederror', 'permissiondeniederror', 'securityerror'].includes(
+      params?.micErrorName?.toLowerCase() ?? '',
+    )
+  ) {
+    target = 'permissions';
+  }
+  return {
+    kind,
+    message,
+    surfaces: entry.surfaces,
+    autoShowPanel: entry.autoShowPanel,
+    ...(target !== undefined ? { target } : {}),
+  };
 }
 
 /** What the classifier matchers see: derived once per classifyError call. */
@@ -290,7 +425,11 @@ interface ClassifierInput {
 const CLASSIFIERS: ReadonlyArray<{ kind: ErrorKind; matches(input: ClassifierInput): boolean }> = [
   {
     kind: 'insufficient_quota',
-    matches: ({ msg, code }) => code === 'insufficient_quota' || msg.includes('insufficient_quota'),
+    matches: ({ msg, code }) =>
+      ['insufficient_quota', 'billing_hard_limit_reached', 'usage_limit_reached'].includes(code) ||
+      /insufficient_quota|billing hard limit|exceeded your current quota|out of (credit|quota)/.test(
+        msg,
+      ),
   },
   {
     kind: 'no_api_key',
@@ -299,7 +438,7 @@ const CLASSIFIERS: ReadonlyArray<{ kind: ErrorKind; matches(input: ClassifierInp
   {
     kind: 'api_key_rejected',
     matches: ({ msg, code, httpStatus }) =>
-      code === 'invalid_api_key' ||
+      ['invalid_api_key', 'authentication_error'].includes(code) ||
       msg.includes('invalid_api_key') ||
       msg.includes('incorrect api key') ||
       httpStatus === 401,
@@ -307,23 +446,35 @@ const CLASSIFIERS: ReadonlyArray<{ kind: ErrorKind; matches(input: ClassifierInp
   {
     kind: 'model_unavailable',
     matches: ({ msg, code, httpStatus }) =>
-      code === 'model_not_found' ||
+      ['model_not_found', 'model_not_available'].includes(code) ||
       msg.includes('model_not_found') ||
       msg.includes('does not have access to model') ||
-      httpStatus === 403 ||
       httpStatus === 404,
+  },
+  {
+    kind: 'api_access_forbidden',
+    matches: ({ msg, code, httpStatus }) =>
+      ['permission_denied', 'access_denied'].includes(code) ||
+      msg.includes('permission denied') ||
+      httpStatus === 403,
   },
   {
     kind: 'rate_limited',
     matches: ({ msg, code, httpStatus }) =>
-      code === 'rate_limit_exceeded' || /rate.?limit/.test(msg) || httpStatus === 429,
+      ['rate_limit_exceeded', 'rate_limit_error'].includes(code) ||
+      /rate.?limit/.test(msg) ||
+      httpStatus === 429,
   },
   {
     kind: 'network_unreachable',
     matches: ({ msg }) =>
       /\b(enotfound|eai_again|econnrefused|etimedout|econnreset|ehostunreach|enetunreach)\b/.test(
         msg,
-      ) || msg.includes('handshake timed out'),
+      ) ||
+      msg.includes('handshake timed out') ||
+      msg.includes('socket hang up') ||
+      msg.includes('failed to fetch') ||
+      msg.includes('network error'),
   },
   {
     kind: 'response_interrupted',
@@ -332,7 +483,9 @@ const CLASSIFIERS: ReadonlyArray<{ kind: ErrorKind; matches(input: ClassifierInp
   {
     kind: 'server_error',
     matches: ({ msg, code, httpStatus }) =>
-      code === 'server_error' || msg.includes('server_error') || httpStatus >= 500,
+      ['server_error', 'internal_server_error'].includes(code) ||
+      msg.includes('server_error') ||
+      httpStatus >= 500,
   },
 ];
 
@@ -349,7 +502,7 @@ export function classifyError(err: unknown, params?: ErrorParams): ErrorPresenta
   const msg = message.toLowerCase();
   const code =
     typeof err === 'object' && err !== null && typeof (err as { code?: unknown }).code === 'string'
-      ? (err as { code: string }).code
+      ? (err as { code: string }).code.trim().toLowerCase()
       : '';
   // ws rejected-upgrade errors look like "Unexpected server response: 401".
   const statusMatch = /unexpected server response: (\d{3})/.exec(msg);
@@ -360,7 +513,7 @@ export function classifyError(err: unknown, params?: ErrorParams): ErrorPresenta
   if (match !== undefined) return describeKind(match.kind, params);
   return {
     kind: 'unknown',
-    message: `something went wrong: ${singleLine(message)}`,
+    message: `something went wrong: ${singleLine(redactSensitiveErrorText(message))}`,
     surfaces: ['transcript', 'pill'],
     autoShowPanel: false,
   };

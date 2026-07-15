@@ -30,6 +30,15 @@ export interface PhoneAudioBridgeSupervisorOptions {
   startupGraceMs?: number;
   restartMinMs?: number;
   restartMaxMs?: number;
+  /** Injectable for deterministic platform-guard tests. */
+  platform?: NodeJS.Platform;
+}
+
+export function unsupportedPhoneAudioBridgePlatformError(platform: NodeJS.Platform): Error {
+  return new Error(
+    `the bundled phone-audio QA bridge supports Windows only (current platform: ${platform}); ` +
+      'use CLICKY_PHONE_AUDIO_URL for an externally managed bridge',
+  );
 }
 
 /** Option defaults, resolved once into the supervisor's readonly config. */
@@ -69,6 +78,8 @@ export class PhoneAudioBridgeSupervisor {
   private logDirReady = false;
 
   constructor(private readonly options: PhoneAudioBridgeSupervisorOptions) {
+    const platform = options.platform ?? process.platform;
+    if (platform !== 'win32') throw unsupportedPhoneAudioBridgePlatformError(platform);
     this.config = {
       healthUrl: options.healthUrl ?? DEFAULT_PHONE_AUDIO_HEALTH_URL,
       monitorMs: options.monitorMs ?? MONITOR_MS,

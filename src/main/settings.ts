@@ -12,8 +12,9 @@
  */
 
 import { app, safeStorage } from 'electron';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { normalizeOpenAiApiKey } from '../shared/api-key';
 import { MODEL_IDS } from '../shared/constants';
 import { DEFAULT_SETTINGS, applySettingsPatch } from '../shared/types';
 import type { BuddyRest, CodexSignInState, Settings, SettingsPatch } from '../shared/types';
@@ -108,6 +109,22 @@ interface SettingsFile extends Prefs {
 
 const FILE_NAME = 'settings.json';
 
+/** Safe, actionable copy; deliberately never interpolates the submitted secret. */
+export const INVALID_API_KEY_MESSAGE =
+  'that does not look like a complete OpenAI API key — paste the full key beginning with sk-.';
+
+/**
+ * Reject only credentials that are unambiguously not OpenAI API keys. The
+ * server remains authoritative for credential validity, while this prevents
+ * prose, truncated placeholders, and whitespace-corrupted values from ever
+ * reaching encrypted storage.
+ */
+function requireOpenAiApiKey(value: string): string {
+  const normalized = normalizeOpenAiApiKey(value);
+  if (normalized === null) throw new Error(INVALID_API_KEY_MESSAGE);
+  return normalized;
+}
+
 /**
  * M15 addition (orchestrator-approved): module-level handle to the started
  * store so sibling main modules (windows/overlay.ts buddy-hover feature) can
@@ -199,16 +216,23 @@ export class SettingsStore {
 
   /** Apply a patch (encrypting apiKey if present), persist, notify, return snapshot. */
   set(patch: SettingsPatch): Settings {
+    const next: SettingsFile = { ...this.file };
+    let normalizedPatch = patch;
     if (patch.apiKey !== undefined) {
-      this.file.apiKeyEncrypted =
-        patch.apiKey === null || patch.apiKey === '' ? null : this.encrypt(patch.apiKey);
+      const trimmed = patch.apiKey?.trim() ?? '';
+      const apiKey = trimmed === '' ? null : requireOpenAiApiKey(trimmed);
+      next.apiKeyEncrypted = apiKey === null ? null : this.encrypt(apiKey);
       // M11: a freshly stored (or cleared) key resolves an unreadable blob.
-      // Assigned silently — set() persists + notifies once, below.
-      this.file.keyUnreadable = false;
+      next.keyUnreadable = false;
+      normalizedPatch = { ...patch, apiKey };
     }
-    const merged = applySettingsPatch(this.get(), patch);
-    for (const key of PREF_KEYS) setPref(this.file, key, merged[key]);
-    this.persist();
+    const merged = applySettingsPatch(this.get(), normalizedPatch);
+    for (const key of PREF_KEYS) setPref(next, key, merged[key]);
+
+    // Commit disk first. If encryption or persistence fails, the in-memory
+    // state and previous credential remain untouched and IPC rejects.
+    this.persist(next);
+    this.file = next;
     this.notify();
     return this.get();
   }
@@ -238,8 +262,15 @@ export class SettingsStore {
    */
   private setKeyUnreadable(flag: boolean): void {
     if ((this.file.keyUnreadable === true) === flag) return;
-    this.file.keyUnreadable = flag;
-    this.persist();
+    const next = { ...this.file, keyUnreadable: flag };
+    try {
+      this.persist(next);
+    } catch {
+      // Readability is diagnostic state discovered while reading a credential.
+      // A read must still return the decrypted key/null when the settings path
+      // is temporarily unwritable; only explicit user saves fail loudly.
+    }
+    this.file = next;
     this.notify();
   }
 
@@ -258,9 +289,7 @@ export class SettingsStore {
   /** Import the dev launcher's local key after Electron app.ready. */
   importApiKeyFromEnvironment(): boolean {
     try {
-      const imported = this.prepareApiKeyFromEnvironment();
-      if (imported) this.persist();
-      return imported;
+      return this.prepareApiKeyFromEnvironment();
     } catch (err) {
       console.error(
         '[settings] failed to import OPENAI_API_KEY:',
@@ -273,9 +302,24 @@ export class SettingsStore {
   private encrypt(plain: string): string {
     if (!safeStorage.isEncryptionAvailable()) {
       // Extremely rare on Windows (DPAPI); refuse to store plaintext.
-      throw new Error('safeStorage encryption unavailable; cannot store API key');
+      throw new Error(
+        'the API key could not be stored securely because encryption is unavailable.',
+      );
     }
-    return safeStorage.encryptString(plain).toString('base64');
+    try {
+      return safeStorage.encryptString(plain).toString('base64');
+    } catch (err) {
+      console.error(
+        '[settings] API key encryption failed:',
+        err instanceof Error ? err.name : 'unknown error',
+      );
+      throw new Error(
+        'the API key could not be stored securely — your previous key is unchanged.',
+        {
+          cause: err,
+        },
+      );
+    }
   }
 
   /**
@@ -287,10 +331,12 @@ export class SettingsStore {
    */
   private prepareApiKeyFromEnvironment(): boolean {
     if (!shouldImportApiKeyFromEnv()) return false;
-    const apiKey = process.env['OPENAI_API_KEY']?.trim() ?? '';
-    if (apiKey === '') return false;
-
     try {
+      const raw = process.env['OPENAI_API_KEY'] ?? '';
+      if (raw.trim() === '') return false;
+      const apiKey = requireOpenAiApiKey(raw);
+      const next: SettingsFile = { ...this.file };
+
       if (this.file.apiKeyEncrypted !== null) {
         try {
           const current = safeStorage.decryptString(
@@ -298,7 +344,11 @@ export class SettingsStore {
           );
           if (current === apiKey) {
             const needsPersist = this.file.keyUnreadable === true;
-            this.file.keyUnreadable = false;
+            if (needsPersist) {
+              next.keyUnreadable = false;
+              this.persist(next);
+              this.file = next;
+            }
             return needsPersist;
           }
         } catch {
@@ -311,8 +361,10 @@ export class SettingsStore {
       if (roundTrip !== apiKey) {
         throw new Error('safeStorage API key round-trip verification failed');
       }
-      this.file.apiKeyEncrypted = encrypted;
-      this.file.keyUnreadable = false;
+      next.apiKeyEncrypted = encrypted;
+      next.keyUnreadable = false;
+      this.persist(next);
+      this.file = next;
       console.log('[settings] imported OPENAI_API_KEY into encrypted local settings');
       return true;
     } finally {
@@ -346,12 +398,24 @@ export class SettingsStore {
     }
   }
 
-  private persist(): void {
+  private persist(file: SettingsFile = this.file): void {
+    const temporaryPath = `${this.path}.tmp-${process.pid}`;
     try {
       mkdirSync(dirname(this.path), { recursive: true });
-      writeFileSync(this.path, JSON.stringify(this.file, null, 2), 'utf8');
+      writeFileSync(temporaryPath, JSON.stringify(file, null, 2), {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      renameSync(temporaryPath, this.path);
     } catch (err) {
-      console.error('[settings] failed to persist:', err);
+      rmSync(temporaryPath, { force: true });
+      console.error(
+        '[settings] failed to persist:',
+        err instanceof Error ? err.name : 'unknown error',
+      );
+      throw new Error('settings could not be saved — your previous API key is unchanged.', {
+        cause: err,
+      });
     }
   }
 }

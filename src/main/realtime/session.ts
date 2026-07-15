@@ -34,6 +34,7 @@
 
 import { EventEmitter } from 'node:events';
 import WebSocket from 'ws';
+import { normalizeOpenAiApiKey } from '../../shared/api-key';
 import type { CaptureMeta, SessionStatus } from '../../shared/types';
 import type {
   ClientEvent,
@@ -50,7 +51,7 @@ import { connectRealtimeSocket } from './connect';
 import { buildScreenshotFraming } from './framing';
 import { ResponseTracker } from './response-tracker';
 import { SendQueue } from './send-queue';
-import { withErrorCode } from '../errors';
+import { redactSensitiveErrorText, withErrorCode } from '../errors';
 
 // ---------------------------------------------------------------------------
 // Public event + option surfaces
@@ -462,7 +463,18 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
         this.setStatus({ state: 'error', error: err.message });
         return Promise.reject(err);
       }
-      headers['Authorization'] = `Bearer ${key}`;
+      const normalizedKey = normalizeOpenAiApiKey(key);
+      if (normalizedKey === null) {
+        const err = withErrorCode(
+          new Error('the stored OpenAI API key is malformed (invalid_api_key)'),
+          'invalid_api_key',
+        );
+        this.lastConnectFailAt = Date.now();
+        this.sendQueue.dropAudioAppends();
+        this.setStatus({ state: 'error', error: err.message });
+        return Promise.reject(err);
+      }
+      headers['Authorization'] = `Bearer ${normalizedKey}`;
     }
 
     return new Promise<void>((resolvePromise, rejectPromise) => {
@@ -850,13 +862,12 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
         if (commitRejected) {
           this.failActiveResponse(`audio commit rejected: ${evt.error.message}`);
         }
-        this.setStatus({ state: 'error', error: evt.error.message });
+        const safeMessage = redactSensitiveErrorText(evt.error.message);
+        this.setStatus({ state: 'error', error: safeMessage });
         // M11: the server error code (falling back to the coarse error type,
         // e.g. 'server_error') rides on the Error so the catalog classifier
         // can turn a mid-session error event into friendly transcript copy.
-        this.emitError(
-          withErrorCode(new Error(evt.error.message), evt.error.code ?? evt.error.type),
-        );
+        this.emitError(withErrorCode(new Error(safeMessage), evt.error.code ?? evt.error.type));
         break;
       }
     }

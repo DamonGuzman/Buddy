@@ -43,7 +43,13 @@ import type {
 import { bobIdleMsOverride } from '../env';
 import type { SettingsStore } from '../settings';
 import { toggleWhisper } from './whisper';
-import { showPanelNearBuddy } from './panel';
+import {
+  currentPanelActionableError,
+  presentPanelActionableError,
+  resolvePanelActionableError,
+  showPanelNearBuddy,
+  showPanelOnce,
+} from './panel';
 import {
   createHardenedWindow,
   hardenedWebPreferences,
@@ -64,6 +70,7 @@ import { BUDDY_CLICK_RADIUS, isBuddyClick } from './buddy-click';
 import { resolveDisplaySurface } from './display-surface';
 import { coverMacDisplayWithWindow, getMacDisplaySurface } from './mac-screen-permission';
 import { offsetPointerForWindow } from './overlay-offset';
+import { persistBuddyRest, settingsSaveFailureNotice } from './overlay-settings';
 
 /**
  * Module-level handle to the started manager so sibling main modules (e.g.
@@ -250,6 +257,14 @@ export class OverlayManager {
     return true;
   }
 
+  /** Open Settings for a global context-click that landed on click-through Buddy. */
+  openSettingsIfBuddyClicked(): boolean {
+    const anchor = this.buddyAnchorIfClicked();
+    if (anchor === null) return false;
+    showPanelNearBuddy(anchor);
+    return true;
+  }
+
   /**
    * Return Buddy's global-DIP footprint only when the current pointer click
    * is eligible for a Buddy action. Shared by the macOS pre-dwell primary
@@ -377,6 +392,7 @@ export class OverlayManager {
     this.unsubscribeSettings = null;
     ipcMain.removeAllListeners('overlay:hover');
     ipcMain.removeAllListeners('overlay:buddy-click');
+    ipcMain.removeAllListeners('overlay:buddy-settings');
     ipcMain.removeAllListeners('overlay:buddy-move');
     ipcMain.removeHandler('overlay:get-hover-config');
     ipcMain.removeHandler('overlay:get-display-surface');
@@ -719,13 +735,36 @@ export class OverlayManager {
     if (screenIndex === undefined) return;
     const clamp01 = (v: number): number =>
       typeof v === 'number' && Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 0;
-    this.settings.set({
-      buddyRest: { screenIndex, xFrac: clamp01(rest.xFrac), yFrac: clamp01(rest.yFrac) },
-    });
-    // settings.onChange -> pushHoverConfig handles the config broadcast; the
-    // buddy is already resting on this display, so residency is consistent.
+    const buddyRest = {
+      screenIndex,
+      xFrac: clamp01(rest.xFrac),
+      yFrac: clamp01(rest.yFrac),
+    };
+    const priorSaveFailure = currentPanelActionableError(['settings_save_failed']);
+    if (persistBuddyRest(this.settings, buddyRest)) {
+      resolvePanelActionableError(priorSaveFailure);
+    } else {
+      console.error('[overlay] failed to persist buddy position');
+      this.surfaceSettingsSaveFailure();
+    }
+    // On success, settings.onChange -> pushHoverConfig handles the config
+    // broadcast. Either way, the buddy is already visibly resting on this
+    // display, so keep this run's residency aligned with the renderer.
     this.buddyHostIndex = screenIndex;
     this.updateMouseForwarding();
+  }
+
+  /** Keep filesystem details private while giving the user a durable repair path. */
+  private surfaceSettingsSaveFailure(): void {
+    const occurredAt = Date.now();
+    const notice = settingsSaveFailureNotice(occurredAt);
+    presentPanelActionableError(notice);
+    showPanelOnce(notice.kind);
+    this.broadcast('overlay:caption', {
+      itemId: `settings_save_failed_${occurredAt}`,
+      text: notice.message,
+      done: true,
+    });
   }
 
   /** M15 debug/QA snapshot (GET /hover/state on the debug server). */

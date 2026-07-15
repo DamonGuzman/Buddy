@@ -8,7 +8,7 @@
 
 import type { AgentBrief } from '../agents/types';
 import type { CaptureResult } from '../capture';
-import { showPanelOnce } from '../windows/panel';
+import type { ErrorKind } from '../errors';
 import { asRecord, asString } from '../util/guards';
 import type { AgentContinuationMode } from './agent-continuations';
 import type { AgentsPort } from './ports';
@@ -22,6 +22,8 @@ export interface AgentToolsDeps {
   turnCaptures: () => CaptureResult[];
   /** Remember which transport delegated the run (continuation routing). */
   noteOrigin: (agentId: string, mode: AgentContinuationMode) => void;
+  /** Route actionable agent gates through the same persistent error policy. */
+  surfaceError: (kind: ErrorKind) => void;
 }
 
 export class AgentTools {
@@ -35,17 +37,26 @@ export class AgentTools {
     const args = asRecord(value) ?? {};
     const task = asString(args['task']).trim().slice(0, 2_000);
     if (!task) return { error: 'task is required' };
+    const browserAccess = args['browser_access'];
+    if (typeof browserAccess !== 'boolean') return { error: 'browser_access must be a boolean' };
     const why = asString(args['why']).trim().slice(0, 1_000);
     const captures = this.deps.turnCaptures();
     const capture = captures.find((item) => item.meta.isActive) ?? captures[0];
+    const transcriptEntries = transcript.list();
+    const latestUserEntry = [...transcriptEntries].reverse().find((entry) => entry.role === 'user');
+    if (latestUserEntry?.streaming)
+      return { error: 'the original user request is still being transcribed' };
+    const userRequest = latestUserEntry?.text.trim().slice(0, 2_000);
+    if (!userRequest) return { error: 'the original user request is unavailable' };
     const id = `agent_${(this.agentSeq += 1)}_${Date.now()}`;
     const brief: AgentBrief = {
       id,
+      userRequest,
       task,
+      browserEnabled: browserAccess,
       ...(why ? { why } : {}),
       ...(capture ? { screenshot: { jpegBase64: capture.jpegBase64, meta: capture.meta } } : {}),
-      recentTranscript: transcript
-        .list()
+      recentTranscript: transcriptEntries
         .slice(-6)
         .map((entry) => `${entry.role === 'assistant' ? 'buddy' : entry.role}: ${entry.text}`)
         .join('\n')
@@ -59,7 +70,9 @@ export class AgentTools {
     }
     if (result.reason === 'at_capacity')
       return { error: 'at capacity — three agents are already running' };
-    showPanelOnce('agent_not_signed_in');
+    if (result.reason === 'browser_unavailable')
+      return { error: 'browser use is unavailable for background buddies right now' };
+    this.deps.surfaceError('agent_not_signed_in');
     return { error: 'agent mode needs chatgpt sign-in' };
   }
 
@@ -92,7 +105,7 @@ export class AgentTools {
         ...(agent.step !== undefined ? { step: agent.step } : {}),
         max_steps: agent.maxSteps,
         ...(agent.steps.length > 0
-          ? { latest_activity: agent.steps[agent.steps.length - 1]!.label.slice(0, 500) }
+          ? { latest_activity: agent.steps.at(-1)?.label.slice(0, 500) ?? '' }
           : {}),
         ...(agent.summary ? { summary: agent.summary.slice(0, 1_000) } : {}),
         ...(agent.error ? { error: agent.error.slice(0, 500) } : {}),

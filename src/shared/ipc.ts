@@ -10,6 +10,10 @@
  */
 
 import type {
+  ActionableErrorState,
+  ActionableErrorIdentity,
+  ApprovalGrant,
+  ApprovalRequest,
   AgentSummary,
   AssistantState,
   AudioDeviceError,
@@ -19,6 +23,7 @@ import type {
   CaptureControl,
   CaptureIndicatorUpdate,
   CodexSignInState,
+  EnrolledSite,
   MicDevice,
   OverlayDisplaySurface,
   OverlayHoverConfig,
@@ -104,6 +109,10 @@ export interface MainToPanelEvents {
   'panel:runtime': RuntimeFlags;
   /** Live macOS privacy and native-hotkey health. */
   'panel:permissions': PermissionHealth;
+  /** Latest user-repairable failure; null means the relevant recovery succeeded. */
+  'panel:actionable-error': ActionableErrorState;
+  /** Complete raise-hand queue; full-list snapshots prevent lost concurrent requests. */
+  'panel:approvals': ApprovalRequest[];
   // M21: 'panel:agents' and 'panel:show-agents' retired with the control
   // panel (the agents view is gone; overlay helper clicks summon the
   // whisper). The remaining panel:* channels serve the settings window +
@@ -188,6 +197,12 @@ export interface InvokeChannels {
   'permissions:get': { args: []; result: PermissionHealth };
   /** Run one explicit permission repair action. */
   'permissions:action': { args: [action: PermissionAction]; result: PermissionActionResult };
+  /** Latest persistent repair notice for Settings renderer bootstrap. */
+  'panel:get-actionable-error': { args: []; result: ActionableErrorState };
+  /** Clear one exact notice after the corresponding repair has succeeded. */
+  'panel:resolve-actionable-error': { args: [expected: ActionableErrorIdentity]; result: boolean };
+  /** Explicitly hide one exact notice without claiming that its failure was repaired. */
+  'panel:dismiss-actionable-error': { args: [expected: ActionableErrorIdentity]; result: boolean };
   // M17 addition: panel bootstrap for the Codex sign-in snapshot (push
   // updates ride on 'panel:codex-signin').
   'codex:signin-state': { args: []; result: CodexSignInState };
@@ -207,6 +222,29 @@ export interface InvokeChannels {
   'agents:cancel-all': { args: []; result: void };
   /** The user viewed this agent's Card — clear its unseen badge. */
   'agents:mark-seen': { args: [id: string]; result: void };
+  /** Resolve a buddy's pending raise-hand request. */
+  'approval:resolve': {
+    args: [agentId: string, approvalId: string, verdict: 'once' | 'always' | 'deny'];
+    result: void;
+  };
+  /** Show the buddy's browser so the user can handle sign-in or a CAPTCHA. */
+  'approval:show-window': { args: [agentId: string, approvalId: string]; result: void };
+  /** Hide the user-assisted browser and let the buddy re-observe it. */
+  'approval:hide-window': { args: [agentId: string, approvalId: string]; result: void };
+  /** Bootstrap the complete pending approval queue after renderer reload. */
+  'approvals:list': { args: []; result: ApprovalRequest[] };
+  /** Renderer-safe standing approval grants. */
+  'grants:list': { args: []; result: ApprovalGrant[] };
+  /** Revoke one standing approval grant. */
+  'grants:revoke': { args: [id: string]; result: void };
+  /** Open the visible browser enrollment window for user-managed sign-in. */
+  'buddy-browser:open-enroll': { args: [url: string]; result: void };
+  /** Sites with cookies in the shared buddy browser profile. */
+  'buddy-browser:list-enrolled-sites': { args: []; result: EnrolledSite[] };
+  /** Clear one enrolled site's cookies and storage. */
+  'buddy-browser:sign-out-site': { args: [domain: string]; result: void };
+  /** Clear all cookies and storage from the shared buddy browser profile. */
+  'buddy-browser:clear': { args: []; result: void };
 }
 
 // ===========================================================================
@@ -286,6 +324,8 @@ export interface PanelApi {
   // M11 addition: runtime flags (hookAlive + dev flags).
   onRuntime(cb: (flags: RuntimeFlags) => void): Unsubscribe;
   onPermissions(cb: (health: PermissionHealth) => void): Unsubscribe;
+  onActionableError(cb: (state: ActionableErrorState) => void): Unsubscribe;
+  onApprovals(cb: (requests: ApprovalRequest[]) => void): Unsubscribe;
   // M17 addition: Codex sign-in state push.
   onCodexSignin(cb: (state: CodexSignInState) => void): Unsubscribe;
 
@@ -294,6 +334,9 @@ export interface PanelApi {
   getRuntime(): Promise<RuntimeFlags>;
   getPermissionHealth(): Promise<PermissionHealth>;
   permissionAction(action: PermissionAction): Promise<PermissionActionResult>;
+  getActionableError(): Promise<ActionableErrorState>;
+  resolveActionableError(expected: ActionableErrorIdentity): Promise<boolean>;
+  dismissActionableError(expected: ActionableErrorIdentity): Promise<boolean>;
   // M17 addition: Codex sign-in state bootstrap.
   getCodexSigninState(): Promise<CodexSignInState>;
   signInToCodex(): Promise<SignInResult>;
@@ -313,6 +356,24 @@ export interface PanelApi {
   // M11 addition: audio device failure report (mic capture start failed /
   // playback init failed) — fire-and-forget.
   reportAudioError(payload: AudioDeviceError): void;
+
+  /** Resolve a buddy's pending raise-hand request. */
+  resolveApproval(
+    agentId: string,
+    approvalId: string,
+    verdict: 'once' | 'always' | 'deny',
+  ): Promise<void>;
+  /** Let the user act in the buddy's browser for sign-in or a CAPTCHA. */
+  showApprovalWindow(agentId: string, approvalId: string): Promise<void>;
+  /** Return the user-assisted browser to the buddy and trigger re-observation. */
+  hideApprovalWindow(agentId: string, approvalId: string): Promise<void>;
+  listApprovals(): Promise<ApprovalRequest[]>;
+  listGrants(): Promise<ApprovalGrant[]>;
+  revokeGrant(id: string): Promise<void>;
+  openBuddyBrowserEnrollment(url: string): Promise<void>;
+  listEnrolledSites(): Promise<EnrolledSite[]>;
+  signOutBuddyBrowserSite(domain: string): Promise<void>;
+  clearBuddyBrowser(): Promise<void>;
 }
 
 /** M20: exposed to the whisper renderer as `window.clicky`. */

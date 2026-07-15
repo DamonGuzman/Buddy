@@ -9,6 +9,7 @@
  */
 
 export * from './types/agents';
+export * from './types/actionable-error';
 export * from './types/audio';
 export * from './types/capture';
 export * from './types/debug';

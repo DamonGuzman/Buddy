@@ -10,7 +10,7 @@
  * plan-usage telemetry of the most recent text turn.
  */
 
-import type { CaptionUpdate } from '../../shared/types';
+import type { ActionableErrorIdentity, CaptionUpdate } from '../../shared/types';
 import type { ChatGptCodexAuthSource } from '../auth/auth-source';
 import type { CaptureResult } from '../capture';
 import type {
@@ -55,6 +55,9 @@ export interface CodexTextTurnDeps {
   onFunctionCall: (call: CodexFunctionCall, captures: CaptureResult[], token: number) => void;
   /** M17: fail-closed plan-limit copy, once per episode. */
   surfacePlanLimitOnce: (token: number) => void;
+  /** Exact prior plan-limit notice this operation is eligible to repair. */
+  codexPlanRepairIdentity: () => ActionableErrorIdentity | null;
+  noteCodexSucceeded: (expected: ActionableErrorIdentity | null) => void;
   failTurn: (err: unknown) => void;
   /** Turn settled cleanly: back to idle unless an error pill is showing. */
   setIdleUnlessError: () => void;
@@ -146,6 +149,7 @@ export class CodexTextTurnRunner {
     auth: ChatGptCodexAuthSource,
   ): Promise<boolean> {
     const { guard } = this.deps;
+    const planRepairIdentity = this.deps.codexPlanRepairIdentity();
     const session = this.getSession(auth);
     const framing = buildScreenshotFraming(
       captures.map((c) => c.meta),
@@ -217,6 +221,7 @@ export class CodexTextTurnRunner {
       }
     }
 
+    this.deps.noteCodexSucceeded(planRepairIdentity);
     this.finish(token);
     return true;
   }

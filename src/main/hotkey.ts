@@ -46,6 +46,8 @@ export interface HotkeyEvents {
   tap: [];
   /** Global primary-button click for click-through Buddy hit testing. */
   'primary-click': [ctrlKey: boolean];
+  /** Global secondary-button click for click-through Buddy hit testing. */
+  'secondary-click': [];
   error: [Error];
 }
 
@@ -133,6 +135,7 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
         });
         hook.on('click', (e: { button: unknown; ctrlKey?: boolean }) => {
           if (e.button === 1) this.emit('primary-click', e.ctrlKey === true);
+          if (e.button === 2) this.emit('secondary-click');
         });
         this.listenersAttached = true;
       }

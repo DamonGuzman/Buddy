@@ -11,6 +11,11 @@
 > rejects `previous_response_id`, so the runtime replays bounded client-side history. Hosted
 > `{type:"web_search"}` is supported and used directly.
 
+> Historical scope note: this document defines the original read-only M18 agent baseline. The
+> current runtime keeps that mode for research-only tasks and adds explicitly granted Buddy-browser
+> actions under the complete safety/lifecycle contract in `docs/AGENT-COMPUTER-USE.md`. References
+> below to “v1 is read-only” describe that baseline, not the current browser-enabled capability.
+
 ---
 
 ## 0. Executive summary

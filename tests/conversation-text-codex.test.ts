@@ -87,6 +87,10 @@ vi.mock('electron', () => ({
 }));
 
 const JPEG_B64 = 'ZmFrZS1qcGVn';
+const actionableCtl = vi.hoisted(() => ({
+  current: null as { revision: number; kind: 'codex_plan_limit' } | null,
+  resolved: [] as Array<{ revision: number; kind: string }>,
+}));
 vi.mock('../src/main/capture', () => ({
   captureAllDisplays: () =>
     Promise.resolve([
@@ -105,7 +109,15 @@ vi.mock('../src/main/capture', () => ({
     ]),
 }));
 
-vi.mock('../src/main/windows/panel', () => ({ showPanelOnce: () => {} }));
+vi.mock('../src/main/windows/panel', () => ({
+  showPanelOnce: () => {},
+  presentPanelActionableError: () => {},
+  currentPanelActionableError: (kinds: string[]) =>
+    kinds.includes('codex_plan_limit') ? actionableCtl.current : null,
+  resolvePanelActionableError: (expected: { revision: number; kind: string } | null) => {
+    if (expected !== null) actionableCtl.resolved.push(expected);
+  },
+}));
 vi.mock('../src/main/windows/overlay', () => ({}));
 
 const { Conversation } = await import('../src/main/conversation');
@@ -250,6 +262,8 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
     ctl.snap = async () => ctl.noMatch;
     ctl.snapQueries.length = 0;
     ctl.restCalls = 0;
+    actionableCtl.current = null;
+    actionableCtl.resolved.length = 0;
     server.clientEvents.length = 0;
   });
 
@@ -314,7 +328,7 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
         cb.onFunctionCall?.({
           callId: 'call_spawn',
           name: 'spawn_agent',
-          argsJson: JSON.stringify({ task: 'compare <unsafe> options' }),
+          argsJson: JSON.stringify({ task: 'compare <unsafe> options', browser_access: false }),
         });
         return { ...RESULT_OK, functionCalls: 1 };
       }
@@ -640,6 +654,17 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
         .filter((e) => e.role === 'system' && e.text.includes('chatgpt plan limit'));
       expect(planLimits).toHaveLength(1);
     });
+    expect(actionableCtl.resolved).toEqual([]);
+  });
+
+  it('CAS-resolves the exact prior plan-limit notice after a successful Codex turn', async () => {
+    const fake = new FakeCodexSession();
+    actionableCtl.current = { revision: 8, kind: 'codex_plan_limit' };
+    const c = make(makeDeps({ pointers: [], signedIn: true, fake }));
+
+    await c.askText('is my chatgpt plan working again?');
+
+    expect(actionableCtl.resolved).toEqual([{ revision: 8, kind: 'codex_plan_limit' }]);
   });
 
   it('not signed in and no key: falls back to the realtime askText path', async () => {

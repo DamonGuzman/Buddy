@@ -7,7 +7,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clicky } from '../clicky';
 import { audioPlayer, micCapture } from '../audio/engines';
+import {
+  actionableErrorIdentity,
+  EMPTY_ACTIONABLE_ERROR_STATE,
+  mergeActionableErrorState,
+} from '../actionable-error-state';
 import type {
+  ActionableErrorState,
   AssistantState,
   PermissionHealth,
   RuntimeFlags,
@@ -26,6 +32,7 @@ export interface PanelWiring {
   settings: Settings | null;
   runtime: RuntimeFlags | null;
   permissions: PermissionHealth | null;
+  actionableError: ActionableErrorState;
   setPermissions: (health: PermissionHealth) => void;
   /** Current mic preference (a live ref read — no resubscribe on change). */
   getMicDeviceId: () => string;
@@ -38,6 +45,18 @@ export function usePanelWiring({ onMicError }: PanelWiringDeps): PanelWiring {
   // M11 addition (orchestrator-approved): hookAlive + dev flags from main.
   const [runtime, setRuntime] = useState<RuntimeFlags | null>(null);
   const [permissions, setPermissions] = useState<PermissionHealth | null>(null);
+  const [actionableError, setActionableError] = useState<ActionableErrorState>(
+    EMPTY_ACTIONABLE_ERROR_STATE,
+  );
+  const actionableErrorRef = useRef<ActionableErrorState>(EMPTY_ACTIONABLE_ERROR_STATE);
+
+  const mergeActionableError = useCallback((incoming: ActionableErrorState): void => {
+    setActionableError((current) => {
+      const merged = mergeActionableErrorState(current, incoming);
+      actionableErrorRef.current = merged;
+      return merged;
+    });
+  }, []);
 
   // Capture needs the *current* mic preference without resubscribing.
   const micDeviceIdRef = useRef('');
@@ -52,6 +71,7 @@ export function usePanelWiring({ onMicError }: PanelWiringDeps): PanelWiring {
     try {
       void clicky.getRuntime().then(setRuntime);
       void clicky.getPermissionHealth().then(setPermissions);
+      void clicky.getActionableError().then(mergeActionableError);
     } catch {
       /* runtime flags are progressive enhancement */
     }
@@ -62,10 +82,11 @@ export function usePanelWiring({ onMicError }: PanelWiringDeps): PanelWiring {
       clicky.onSettings(setSettings),
       clicky.onRuntime(setRuntime),
       clicky.onPermissions(setPermissions),
+      clicky.onActionableError(mergeActionableError),
       // M17: merge the Codex sign-in snapshot into settings (the "ChatGPT"
       // settings card reads it) — lower latency than waiting for the next
       // panel:settings, and reflects the CLI's auth.json rotating live.
-      clicky.onCodexSignin((state) =>
+      clicky.onCodexSignin((state) => {
         setSettings((prev) =>
           prev === null
             ? prev
@@ -75,15 +96,34 @@ export function usePanelWiring({ onMicError }: PanelWiringDeps): PanelWiring {
                 codexValid: state.valid,
                 codexPlanType: state.planType,
               },
-        ),
-      ),
+        );
+        if (state.signedIn && state.valid) {
+          const expected = actionableErrorIdentity(actionableErrorRef.current, [
+            'agent_not_signed_in',
+          ]);
+          if (expected !== null) {
+            void clicky.resolveActionableError(expected).catch((error: unknown) => {
+              console.warn('[chatgpt] failed to resolve sign-in error state:', error);
+            });
+          }
+        }
+      }),
       clicky.onAudioOutput((delta) => audioPlayer.enqueue(delta)),
       // F1 (M2): the playback-epoch floor rides along with the command.
       clicky.onPlayback(({ command, epoch }) => audioPlayer.control(command, epoch)),
       clicky.onCaptureCommand(({ command }) => {
         if (command === 'start') {
-          void micCapture.start(micDeviceIdRef.current).then(() => {
+          const expected = actionableErrorIdentity(actionableErrorRef.current, ['mic_unavailable']);
+          void micCapture.start(micDeviceIdRef.current).then((result) => {
             onMicError(micCapture.error());
+            if (
+              expected !== null &&
+              (result.status === 'started' || result.status === 'already-running')
+            ) {
+              void clicky.resolveActionableError(expected).catch((error: unknown) => {
+                console.warn('[mic] failed to resolve microphone error state:', error);
+              });
+            }
           });
         } else {
           micCapture.stop();
@@ -91,7 +131,7 @@ export function usePanelWiring({ onMicError }: PanelWiringDeps): PanelWiring {
       }),
     ];
     return () => offs.forEach((off) => off());
-  }, [onMicError]);
+  }, [mergeActionableError, onMicError]);
 
   return {
     assistantState,
@@ -99,6 +139,7 @@ export function usePanelWiring({ onMicError }: PanelWiringDeps): PanelWiring {
     settings,
     runtime,
     permissions,
+    actionableError,
     setPermissions,
     getMicDeviceId,
   };

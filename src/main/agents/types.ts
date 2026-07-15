@@ -18,8 +18,18 @@
  *   response.output_item.added/done events.
  */
 
-import type { AgentStep, AgentSummary, CaptureMeta } from '../../shared/types';
+import type { AgentStep, AgentSummary, ApprovalRequest, CaptureMeta } from '../../shared/types';
 import type { ResponseItem } from '../codex/wire-types';
+import type { CaptureResult } from '../capture';
+import type { ComputerDriver } from '../computer/driver';
+import type {
+  GateDispatch,
+  GateDriverPort,
+  GateExecutionResult,
+  GatedActionRequest,
+  HumanApprovalDecision,
+} from './gate/action-gate';
+import type { TriggerAction } from './gate/trigger';
 
 // Tuning constants (AGENT_*) live in agents/config.ts — this file is the pure
 // type contract only.
@@ -27,11 +37,65 @@ import type { ResponseItem } from '../codex/wire-types';
 // --- brief (built by conversation.ts at spawn) ---
 export interface AgentBrief {
   id: string; // "agent_<seq>_<ts>"
+  /** Exact latest typed/ASR user request; the reviewer trust anchor. */
+  userRequest: string;
+  /** Foreground-model rewrite used as the helper's working brief, never as user authority. */
   task: string;
   why?: string;
   screenshot?: { jpegBase64: string; meta: CaptureMeta }; // active display's turn capture
   recentTranscript: string; // last ~6 entries flattened "user:/clicky:", capped ~1500 chars
   createdAt: number;
+  /** Explicit per-task capability grant. False keeps every acting tool out of the model request. */
+  browserEnabled: boolean;
+}
+
+export type AgentBrowserAction = Exclude<TriggerAction, { kind: 'screenshot' }>;
+
+/** Adapter boundary around the mechanical trigger + independent reviewer. */
+export interface AgentActionGatePort {
+  /** The gate is the only execution path and owns final TOCTOU re-inspection before dispatch. */
+  execute(
+    input: GatedActionRequest,
+    dispatch: GateDispatch<void>,
+  ): Promise<GateExecutionResult<void>>;
+  /** Re-inspects immutable pending evidence before executing an explicitly approved action. */
+  resolveEscalation(
+    assessmentId: string,
+    verdict: HumanApprovalDecision,
+  ): Promise<GateExecutionResult<void>>;
+  cancelAgent(agentId: string): void;
+}
+
+export type AgentApprovalVerdict = 'once' | 'always' | 'deny' | 'handled';
+
+/**
+ * One delivered human verdict. The parked executor must acknowledge only
+ * after its downstream gate/dispatch work succeeds. Reject keeps the same
+ * request visible and retryable; replace atomically swaps stale evidence.
+ */
+export interface AgentApprovalResolution {
+  verdict: AgentApprovalVerdict;
+  acknowledge(): void;
+  reject(error: Error): void;
+  replace(request: ApprovalRequest): Promise<AgentApprovalResolution>;
+}
+
+/** Parking/resume boundary owned by main-process approval UI wiring. */
+export interface AgentApprovalPort {
+  request(request: ApprovalRequest, signal: AbortSignal): Promise<AgentApprovalResolution>;
+  cancelAgent(agentId: string): void;
+  get(approvalId: string): ApprovalRequest | null;
+  /** Resolves only after the parked executor acknowledges successful downstream handling. */
+  resolve(approvalId: string, verdict: AgentApprovalVerdict): Promise<void>;
+}
+
+export interface AgentBrowserDeps {
+  createDriver(agentId: string): Promise<ComputerDriver & GateDriverPort>;
+  gate: AgentActionGatePort;
+  approvals: AgentApprovalPort;
+  settleMs?: number;
+  /** Electron-free test seam; production defaults to nativeImage JPEG→PNG conversion. */
+  captureToPngDataUrl?(capture: CaptureResult): Promise<string>;
 }
 
 // --- Responses-API wire shapes (client-side history; store:false) ---
@@ -86,10 +150,25 @@ export interface AgentToolContext {
   addSource(url: string): void;
   fetchCount(): number; // web_fetch budget bookkeeping
   noteFetch(): void;
+  /** Present only when this task was explicitly granted browser use. */
+  browser?: AgentBrowserToolPort;
+}
+
+export interface AgentBrowserToolResult {
+  output: string;
+  observation?: CaptureResult[];
+  halt?: boolean;
+}
+
+export interface AgentBrowserToolPort {
+  execute(name: string, args: Record<string, unknown>): Promise<AgentBrowserToolResult>;
+  requestUser(args: Record<string, unknown>): Promise<AgentBrowserToolResult>;
+  dispose(): Promise<void>;
 }
 export interface AgentToolSpec {
   definition: Extract<AgentToolDefinition, { type: 'function' }>;
-  timeoutMs: number;
+  /** Omitted for locally parked tools such as needs_user; runner cancellation still applies. */
+  timeoutMs?: number;
   stepKind: AgentStep['kind']; // activity-log kind for this tool
   stepLabel(args: Record<string, unknown>): string;
   /** Returns the function_call_output string handed back to the model. Throws/rejects → the loop wraps as {error}. */
@@ -125,6 +204,10 @@ export interface AgentManagerDeps {
   /** Overrides persistencePath with a custom store (tests / future backends). */
   persistence?: AgentPersistencePort;
   now?(): number;
+  monotonicNow?(): number;
+  /** Absent means browser tasks fail closed and cannot be accepted. */
+  browser?: AgentBrowserDeps;
 }
 export type SpawnResult =
-  { ok: true; agentId: string } | { ok: false; reason: 'at_capacity' | 'not_signed_in' };
+  | { ok: true; agentId: string }
+  | { ok: false; reason: 'at_capacity' | 'not_signed_in' | 'browser_unavailable' };

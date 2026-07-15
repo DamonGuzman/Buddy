@@ -32,6 +32,8 @@ const api: PanelApi = {
   // M11 addition (orchestrator-approved): runtime flags (hookAlive + dev flags).
   onRuntime: (cb) => subscribe('panel:runtime', cb),
   onPermissions: (cb) => subscribe('panel:permissions', cb),
+  onActionableError: (cb) => subscribe('panel:actionable-error', cb),
+  onApprovals: (cb) => subscribe('panel:approvals', cb),
   // M17 addition (integration-approved): Codex sign-in state push.
   onCodexSignin: (cb) => subscribe('panel:codex-signin', cb),
 
@@ -39,6 +41,11 @@ const api: PanelApi = {
   getRuntime: () => ipcRenderer.invoke('panel:get-runtime'),
   getPermissionHealth: () => ipcRenderer.invoke('permissions:get'),
   permissionAction: (action) => ipcRenderer.invoke('permissions:action', action),
+  getActionableError: () => ipcRenderer.invoke('panel:get-actionable-error'),
+  resolveActionableError: (expected) =>
+    ipcRenderer.invoke('panel:resolve-actionable-error', expected),
+  dismissActionableError: (expected) =>
+    ipcRenderer.invoke('panel:dismiss-actionable-error', expected),
   getCodexSigninState: () => ipcRenderer.invoke('codex:signin-state'),
   signInToCodex: () => ipcRenderer.invoke('codex:sign-in'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
@@ -53,6 +60,20 @@ const api: PanelApi = {
 
   // M11 addition (orchestrator-approved): audio device failure reporting.
   reportAudioError: (payload) => ipcRenderer.send('audio:capture-error', payload),
+
+  resolveApproval: (agentId, approvalId, verdict) =>
+    ipcRenderer.invoke('approval:resolve', agentId, approvalId, verdict),
+  showApprovalWindow: (agentId, approvalId) =>
+    ipcRenderer.invoke('approval:show-window', agentId, approvalId),
+  hideApprovalWindow: (agentId, approvalId) =>
+    ipcRenderer.invoke('approval:hide-window', agentId, approvalId),
+  listApprovals: () => ipcRenderer.invoke('approvals:list'),
+  listGrants: () => ipcRenderer.invoke('grants:list'),
+  revokeGrant: (id) => ipcRenderer.invoke('grants:revoke', id),
+  openBuddyBrowserEnrollment: (url) => ipcRenderer.invoke('buddy-browser:open-enroll', url),
+  listEnrolledSites: () => ipcRenderer.invoke('buddy-browser:list-enrolled-sites'),
+  signOutBuddyBrowserSite: (domain) => ipcRenderer.invoke('buddy-browser:sign-out-site', domain),
+  clearBuddyBrowser: () => ipcRenderer.invoke('buddy-browser:clear'),
 };
 
 contextBridge.exposeInMainWorld('clicky', api);

@@ -48,12 +48,17 @@ class FakeNativeImage {
 
 class FakeBrowserWindow {
   destroyed = false;
+  visible = true;
   protectionCalls: boolean[] = [];
   opacityCalls: number[] = [];
   opacity = 1;
 
   isDestroyed(): boolean {
     return this.destroyed;
+  }
+
+  isVisible(): boolean {
+    return this.visible;
   }
 
   setContentProtection(enabled: boolean): void {
@@ -473,6 +478,20 @@ describe('captureAllDisplays', () => {
       expect(dead.protectionCalls).toEqual([]);
       expect(control.protectionCalls).toEqual([]);
       expect(normal.protectionCalls).toEqual([true, false]);
+    });
+
+    it('does not alter hidden offscreen browser surfaces during a live desktop grab', async () => {
+      setupSingle4kDisplay();
+      const hiddenBrowser = new FakeBrowserWindow();
+      hiddenBrowser.visible = false;
+      const visibleBuddy = new FakeBrowserWindow();
+      mockState.windows = [hiddenBrowser, visibleBuddy];
+
+      await captureAllDisplays();
+
+      expect(hiddenBrowser.protectionCalls).toEqual([]);
+      expect(hiddenBrowser.opacityCalls).toEqual([]);
+      expect(visibleBuddy.protectionCalls).toEqual([true, false]);
     });
 
     it('a window throwing on setContentProtection does not break the capture', async () => {

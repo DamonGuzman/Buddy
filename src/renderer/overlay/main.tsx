@@ -596,7 +596,13 @@ function App(): React.JSX.Element {
           expandedKey={helperExpanded}
           now={nowTick}
           cardRef={cardRef}
-          onAgentClick={toggleHelperExpanded}
+          onAgentClick={(id) => {
+            if (agents.find((agent) => agent.id === id)?.status === 'waiting_approval') {
+              clicky.sendAgentClick(id);
+              return;
+            }
+            toggleHelperExpanded(id);
+          }}
           onAgentCancel={(id) => clicky.sendAgentCancel(id)}
         />
       )}

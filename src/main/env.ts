@@ -21,10 +21,10 @@
  *   - CAPTURE_OUT is the only string flag consumed with `??` — an EMPTY
  *     string is respected as a real value (index.ts capture self-test),
  *     unlike every other string flag. The accessor returns the raw value.
- *   - PHONE_AUDIO_AUTOSTART is tri-state: '1' forces on everywhere, '0'
- *     forces off, anything else defaults on ONLY when packaged.
- *   - PHONE_AUDIO_URL is trimmed and defaults to '' (index.ts treats '' as
- *     "use the bundled bridge default URL").
+ *   - PHONE_AUDIO_AUTOSTART is an exact opt-in: only '1' enables the bundled
+ *     Windows QA bridge. Packaging never changes this default.
+ *   - PHONE_AUDIO_URL is trimmed and defaults to '' (no externally managed
+ *     bridge; the bundled bridge still requires its own explicit opt-in).
  */
 
 import { ENV_DEBUG, ENV_MOCK_URL } from '../shared/constants';
@@ -209,22 +209,19 @@ export function bobIdleMsOverride(env: Env = process.env): number | null {
 // ---------------------------------------------------------------------------
 
 /**
- * CLICKY_PHONE_AUDIO_URL, trimmed; '' when unset (index.ts treats '' as
- * "use DEFAULT_PHONE_AUDIO_URL, no explicit bridge requested").
+ * CLICKY_PHONE_AUDIO_URL, trimmed; '' means no externally managed bridge.
  */
 export function phoneAudioUrl(env: Env = process.env): string {
   return env['CLICKY_PHONE_AUDIO_URL']?.trim() ?? '';
 }
 
 /**
- * CLICKY_PHONE_AUDIO_AUTOSTART tri-state: '1' forces the bundled bridge on,
- * '0' forces it off, and anything else defaults on ONLY when packaged.
+ * CLICKY_PHONE_AUDIO_AUTOSTART=1 explicitly enables the bundled Windows QA
+ * bridge. It is never inferred from app.isPackaged: ordinary development and
+ * packaged runs must both keep using the panel microphone by default.
  */
-export function phoneAudioAutostart(isPackaged: boolean, env: Env = process.env): boolean {
-  return (
-    env['CLICKY_PHONE_AUDIO_AUTOSTART'] === '1' ||
-    (isPackaged && env['CLICKY_PHONE_AUDIO_AUTOSTART'] !== '0')
-  );
+export function phoneAudioAutostart(env: Env = process.env): boolean {
+  return flag(env, 'CLICKY_PHONE_AUDIO_AUTOSTART');
 }
 
 // ---------------------------------------------------------------------------

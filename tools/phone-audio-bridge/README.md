@@ -1,8 +1,10 @@
 # Throwaway iPhone audio bridge
 
 Disposable QA harness for using an iPhone as Buddy's microphone and speaker.
-It is deliberately absent from the product UI and only activates when
-`CLICKY_PHONE_AUDIO_URL` is present.
+It is deliberately absent from the product UI. Buddy uses its normal panel
+microphone unless the bridge is explicitly selected with
+`CLICKY_PHONE_AUDIO_URL=<url>` or the bundled Windows bridge is explicitly
+started with `CLICKY_PHONE_AUDIO_AUTOSTART=1`.
 
 ## Use
 
@@ -25,9 +27,14 @@ process receives the bridge environment variable. Ctrl+C stops the harness.
 - `npm run phone-audio:e2e` drives a real Buddy dev instance through the mock
   Realtime server and proves mic PCM enters Buddy and response PCM reaches the
   simulated phone.
-- `npm run dev` (or its `npm run phone-audio:dev` alias) launches the bridge and
-  hot-reloading Electron development build together. The bridge remains running
-  while main-process edits restart Electron and both stop together on Ctrl+C.
+- In PowerShell, `$env:CLICKY_PHONE_AUDIO_AUTOSTART='1'; npm run dev` launches
+  the bundled bridge and hot-reloading Electron development build together on
+  Windows. The bridge remains running while main-process edits restart Electron
+  and both stop together on Ctrl+C. Plain `npm run dev` always uses the panel
+  microphone.
+- Setting `CLICKY_PHONE_AUDIO_URL=<url>` before `npm run dev` connects to an
+  externally managed bridge without launching the bundled bridge and works on
+  any supported Buddy platform.
 
 ## Removal
 

@@ -36,12 +36,25 @@ function makeSupervisor(options: {
     startupGraceMs: 100,
     restartMinMs: 20,
     restartMaxMs: 40,
+    platform: 'win32',
   });
 }
 
 describe('PhoneAudioBridgeSupervisor', () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('fails during construction on unsupported platforms', () => {
+    expect(
+      () =>
+        new PhoneAudioBridgeSupervisor({
+          entryPath: 'bridge.mjs',
+          executablePath: 'Buddy',
+          logPath: '/tmp/phone-audio.log',
+          platform: 'darwin',
+        }),
+    ).toThrow(/supports Windows only/);
   });
 
   it('reuses an already healthy bridge without spawning another server', async () => {

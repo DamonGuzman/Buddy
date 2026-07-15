@@ -1,7 +1,15 @@
 import type { AgentSummary, AssistantState } from '../../shared/types';
 
 export type IslandActivityKind =
-  'capture' | 'listening' | 'thinking' | 'speaking' | 'error' | 'agent' | 'result' | 'result-dot';
+  | 'capture'
+  | 'listening'
+  | 'thinking'
+  | 'speaking'
+  | 'error'
+  | 'approval'
+  | 'agent'
+  | 'result'
+  | 'result-dot';
 
 export interface IslandActivity {
   kind: IslandActivityKind;
@@ -31,6 +39,18 @@ export function resolveIslandActivity(input: IslandActivityInput): IslandActivit
       return { kind: 'speaking', label: 'speaking' };
     case 'idle':
       break;
+  }
+
+  const approvals = input.agents.filter((agent) => agent.status === 'waiting_approval');
+  if (approvals.length > 0) {
+    return {
+      kind: 'approval',
+      label:
+        approvals.length === 1
+          ? 'a helper needs your ok'
+          : `${approvals.length} helpers need your ok`,
+      count: approvals.length,
+    };
   }
 
   const running = input.agents.filter(

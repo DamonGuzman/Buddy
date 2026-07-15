@@ -201,6 +201,9 @@ describe('debug server routing', () => {
         'GET /agents',
         'POST /agents/spawn',
         'POST /agents/cancel',
+        'GET /mock/agent-scenarios',
+        'POST /gate/assess',
+        'GET /grants',
         'GET /timings',
         'GET /audio/output-stats',
         'GET /audio/last-output.wav',
@@ -208,6 +211,8 @@ describe('debug server routing', () => {
         'GET /eval/ground-truth',
         'POST /grounding/query',
         'GET /hover/state',
+        'POST /agents/:id/approve',
+        'POST /agents/:id/deny',
       ],
     });
   });

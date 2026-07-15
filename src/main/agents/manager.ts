@@ -3,8 +3,13 @@ import { dirname } from 'node:path';
 import type { AgentStatus, AgentStep, AgentSummary } from '../../shared/types';
 import { AgentRunner } from './agent';
 import type { AgentBrief, AgentManagerDeps, AgentPersistencePort, SpawnResult } from './types';
-import { AGENT_MAX_CONCURRENT, AGENT_RUN_WALL_CLOCK_MS, PERSISTED_SUMMARY_CAP } from './config';
+import {
+  AGENT_MANAGER_DISPOSE_TIMEOUT_MS,
+  AGENT_MAX_CONCURRENT,
+  PERSISTED_SUMMARY_CAP,
+} from './config';
 import { cloneAgentSummary } from './summary-text';
+import { errorMessage } from '../util/guards';
 
 /**
  * Default AgentPersistencePort: one JSON file, written atomically
@@ -28,7 +33,11 @@ export function createFilePersistence(path: string): AgentPersistencePort {
 export class AgentManager {
   private readonly records = new Map<string, AgentSummary>();
   private readonly runners = new Map<string, AgentRunner>();
+  private readonly runPromises = new Map<string, Promise<void>>();
   private readonly persistence: AgentPersistencePort | null;
+  private disposePromise: Promise<void> | null = null;
+  private disposed = false;
+  private browserAdmissionBlocked = false;
 
   constructor(private readonly deps: AgentManagerDeps) {
     this.persistence =
@@ -48,46 +57,122 @@ export class AgentManager {
   }
 
   spawn(brief: AgentBrief): SpawnResult {
+    if (this.disposed) throw new Error('agent manager is disposed');
     if (!this.deps.isReady()) return { ok: false, reason: 'not_signed_in' };
+    if (brief.browserEnabled && this.browserAdmissionBlocked)
+      return { ok: false, reason: 'browser_unavailable' };
+    if (brief.browserEnabled && !this.deps.browser)
+      return { ok: false, reason: 'browser_unavailable' };
     if (this.runners.size >= AGENT_MAX_CONCURRENT) return { ok: false, reason: 'at_capacity' };
     const runner = new AgentRunner({
       brief,
       backend: this.deps.backend,
+      ...(brief.browserEnabled && this.deps.browser ? { browser: this.deps.browser } : {}),
       ...(this.deps.now ? { now: this.deps.now } : {}),
+      ...(this.deps.monotonicNow ? { monotonicNow: this.deps.monotonicNow } : {}),
       onUpdate: (summary) => {
         this.records.set(summary.id, cloneAgentSummary(summary));
         this.push();
       },
     });
     this.runners.set(brief.id, runner);
-    const timeout = setTimeout(() => runner.cancel('timed_out'), AGENT_RUN_WALL_CLOCK_MS);
-    void runner
+    const completion = runner
       .run()
       .then((summary) => {
-        clearTimeout(timeout);
         this.runners.delete(summary.id);
         this.records.set(summary.id, cloneAgentSummary(summary));
         this.persist();
         this.push();
-        this.deps.onFinished(cloneAgentSummary(summary));
-        this.deps.notify?.('buddy finished', summary.task);
+        if (!this.disposed) {
+          this.deps.onFinished(cloneAgentSummary(summary));
+          this.deps.notify?.('buddy finished', summary.task);
+        }
       })
-      .catch(() => {
-        // run() never rejects today (every failure path resolves to a
-        // terminal summary) — this guard only exists so a future regression
-        // cannot leak a capacity slot.
-        clearTimeout(timeout);
+      .catch((error) => {
+        const summary = runner.finishUnexpected(error);
         this.runners.delete(brief.id);
+        this.records.set(summary.id, cloneAgentSummary(summary));
+        this.persist();
         this.push();
+        if (!this.disposed) {
+          this.deps.onFinished(cloneAgentSummary(summary));
+          this.deps.notify?.('buddy stopped', errorMessage(error));
+        }
+      })
+      .finally(() => {
+        this.runPromises.delete(brief.id);
       });
+    this.runPromises.set(brief.id, completion);
     return { ok: true, agentId: brief.id };
   }
 
   cancel(id: string): void {
     this.runners.get(id)?.cancel();
   }
+  async resolveApproval(approvalId: string, verdict: 'once' | 'always' | 'deny'): Promise<void> {
+    const approvals = this.deps.browser?.approvals;
+    if (!approvals) throw new Error('browser approvals are unavailable');
+    await approvals.resolve(approvalId, verdict);
+  }
+  async showBrowserForApproval(approvalId: string): Promise<void> {
+    const request = this.deps.browser?.approvals.get(approvalId);
+    if (!request || !request.allowTakeover) throw new Error('approval cannot take over a browser');
+    const runner = this.runners.get(request.agentId);
+    if (!runner) throw new Error('approval agent is no longer running');
+    await runner.showBrowserForUser();
+  }
+  async hideBrowserForApproval(approvalId: string): Promise<void> {
+    const request = this.deps.browser?.approvals.get(approvalId);
+    if (!request || !request.allowTakeover) throw new Error('approval cannot take over a browser');
+    const runner = this.runners.get(request.agentId);
+    if (!runner) throw new Error('approval agent is no longer running');
+    await runner.hideBrowserFromUser();
+    const approvals = this.deps.browser?.approvals;
+    if (!approvals) throw new Error('browser approvals are unavailable');
+    await approvals.resolve(approvalId, 'handled');
+  }
   cancelAll(): void {
     for (const runner of this.runners.values()) runner.cancel();
+  }
+  /**
+   * Destructive browser-state boundary: cancel and join every browser-enabled
+   * runner, including one still in its initial backend deliberation. Repeat
+   * until registration is empty so profile clearing cannot race late lazy
+   * driver creation.
+   */
+  async cancelBrowserRuns(): Promise<void> {
+    for (;;) {
+      const active = [...this.runners.entries()].filter(([, runner]) => runner.usesBrowser());
+      if (active.length === 0) return;
+      for (const [, runner] of active) runner.cancel();
+      await withTimeout(
+        Promise.all(
+          active.flatMap(([id]) => {
+            const completion = this.runPromises.get(id);
+            return completion ? [completion] : [];
+          }),
+        ).then(() => undefined),
+        AGENT_MANAGER_DISPOSE_TIMEOUT_MS,
+        'browser agent cancellation',
+      );
+    }
+  }
+  /**
+   * Atomic admission barrier for destructive browser-profile mutations.
+   * Browser spawns fail closed from the instant the barrier is entered until
+   * the mutation settles; read-only research remains independent.
+   */
+  async withBrowserAdmissionBlocked<T>(mutation: () => Promise<T>): Promise<T> {
+    if (this.disposed) throw new Error('agent manager is disposed');
+    if (this.browserAdmissionBlocked)
+      throw new Error('a browser state mutation is already in progress');
+    this.browserAdmissionBlocked = true;
+    try {
+      await this.cancelBrowserRuns();
+      return await mutation();
+    } finally {
+      this.browserAdmissionBlocked = false;
+    }
   }
   markSeen(id: string): void {
     const record = this.records.get(id);
@@ -103,12 +188,36 @@ export class AgentManager {
     this.persist();
     this.push();
   }
-  dispose(): void {
-    this.cancelAll();
-    this.persist();
+  async dispose(): Promise<void> {
+    if (this.disposePromise) return this.disposePromise;
+    this.disposed = true;
+    const runners = [...this.runners.values()];
+    const completions = [...this.runPromises.values()];
+    this.disposePromise = (async () => {
+      const settled = Promise.allSettled([
+        ...runners.map((runner) => runner.dispose()),
+        ...completions,
+      ]);
+      let results: Awaited<typeof settled>;
+      try {
+        results = await withTimeout(
+          settled,
+          AGENT_MANAGER_DISPOSE_TIMEOUT_MS,
+          'agent manager disposal',
+        );
+      } finally {
+        this.persist();
+      }
+      const failure = results.find(
+        (result): result is PromiseRejectedResult => result.status === 'rejected',
+      );
+      if (failure) throw failure.reason;
+    })();
+    return this.disposePromise;
   }
 
   private push(): void {
+    if (this.disposed) return;
     this.deps.onAgentsChanged(this.list());
   }
   private load(): void {
@@ -136,9 +245,26 @@ export class AgentManager {
   }
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 const KNOWN_STATUSES: readonly string[] = [
   'queued',
   'running',
+  'waiting_approval',
   'done',
   'failed',
   'timed_out',
@@ -149,6 +275,9 @@ const KNOWN_STEP_KINDS: readonly string[] = [
   'fetch',
   'note',
   'think',
+  'browse',
+  'action',
+  'review',
 ] satisfies AgentStep['kind'][];
 
 function isStep(value: unknown): value is AgentStep {

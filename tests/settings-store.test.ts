@@ -5,7 +5,7 @@
  * per-run temp dir.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -37,6 +37,7 @@ const { SettingsStore } = await import('../src/main/settings');
 const dir = mkdtempSync(join(tmpdir(), 'clicky-settings-'));
 let fileSeq = 0;
 const freshPath = (): string => join(dir, `settings-${(fileSeq += 1)}.json`);
+const VALID_KEY = 'sk-test-credential-1234567890';
 
 beforeEach(() => {
   control.decryptFails = false;
@@ -50,11 +51,44 @@ describe('SettingsStore: api key round trip', () => {
   it('stores, reports present, decrypts back, and never flags a healthy blob', () => {
     const path = freshPath();
     const store = new SettingsStore(path);
-    store.set({ apiKey: 'sk-test-123' });
+    store.set({ apiKey: VALID_KEY });
     expect(store.get().apiKeyPresent).toBe(true);
     expect(store.get().apiKeyUnreadable).toBe(false);
-    expect(store.getApiKey()).toBe('sk-test-123');
+    expect(store.getApiKey()).toBe(VALID_KEY);
     expect(store.get().apiKeyUnreadable).toBe(false);
+  });
+
+  it('normalizes surrounding whitespace before encryption', () => {
+    const store = new SettingsStore(freshPath());
+    store.set({ apiKey: `  ${VALID_KEY}\n` });
+    expect(store.getApiKey()).toBe(VALID_KEY);
+  });
+
+  it('rejects clearly malformed prose without replacing or exposing the previous key', () => {
+    const path = freshPath();
+    const store = new SettingsStore(path);
+    store.set({ apiKey: VALID_KEY });
+    const malformed = 'this is not a key and must never appear in an error';
+
+    let thrown: Error | null = null;
+    try {
+      store.set({ apiKey: malformed });
+    } catch (err) {
+      thrown = err as Error;
+    }
+
+    expect(thrown?.message).toContain('full key beginning with sk-');
+    expect(thrown?.message).not.toContain(malformed);
+    expect(store.getApiKey()).toBe(VALID_KEY);
+    expect(readFileSync(path, 'utf8')).not.toContain(malformed);
+  });
+
+  it('fails the save when persistence cannot commit and leaves memory unchanged', () => {
+    const path = freshPath();
+    mkdirSync(path);
+    const store = new SettingsStore(path);
+    expect(() => store.set({ apiKey: VALID_KEY })).toThrow('previous API key is unchanged');
+    expect(store.get().apiKeyPresent).toBe(false);
   });
 
   it('re-encrypts an environment key into the active Electron DPAPI context', () => {
@@ -94,13 +128,31 @@ describe('SettingsStore: api key round trip', () => {
       else process.env['OPENAI_API_KEY'] = previousKey;
     }
   });
+
+  it('rejects a malformed environment key and removes it from the process', () => {
+    const previousImport = process.env['CLICKY_IMPORT_API_KEY_FROM_ENV'];
+    const previousKey = process.env['OPENAI_API_KEY'];
+    process.env['CLICKY_IMPORT_API_KEY_FROM_ENV'] = '1';
+    process.env['OPENAI_API_KEY'] = 'copied prose instead of a credential';
+    try {
+      const store = new SettingsStore(freshPath());
+      expect(store.importApiKeyFromEnvironment()).toBe(false);
+      expect(store.get().apiKeyPresent).toBe(false);
+      expect(process.env['OPENAI_API_KEY']).toBeUndefined();
+    } finally {
+      if (previousImport === undefined) delete process.env['CLICKY_IMPORT_API_KEY_FROM_ENV'];
+      else process.env['CLICKY_IMPORT_API_KEY_FROM_ENV'] = previousImport;
+      if (previousKey === undefined) delete process.env['OPENAI_API_KEY'];
+      else process.env['OPENAI_API_KEY'] = previousKey;
+    }
+  });
 });
 
 describe('SettingsStore: DPAPI decrypt failure (M11 api_key_unreadable)', () => {
   it('flags the dead blob, persists the flag, and notifies listeners', () => {
     const path = freshPath();
     const store = new SettingsStore(path);
-    store.set({ apiKey: 'sk-test-123' });
+    store.set({ apiKey: VALID_KEY });
 
     control.decryptFails = true;
     const notified: boolean[] = [];
@@ -122,7 +174,7 @@ describe('SettingsStore: DPAPI decrypt failure (M11 api_key_unreadable)', () => 
   it('flags only once (no persist/notify churn per failing call)', () => {
     const path = freshPath();
     const store = new SettingsStore(path);
-    store.set({ apiKey: 'sk-x' });
+    store.set({ apiKey: VALID_KEY });
     control.decryptFails = true;
     const notified: number[] = [];
     store.onChange(() => notified.push(1));
@@ -132,29 +184,41 @@ describe('SettingsStore: DPAPI decrypt failure (M11 api_key_unreadable)', () => 
     expect(notified.length).toBe(1);
   });
 
+  it('returns null even when the unreadable diagnostic flag cannot be persisted', () => {
+    const path = freshPath();
+    const store = new SettingsStore(path);
+    store.set({ apiKey: VALID_KEY });
+    rmSync(path);
+    mkdirSync(path);
+    control.decryptFails = true;
+
+    expect(store.getApiKey()).toBeNull();
+    expect(store.get().apiKeyUnreadable).toBe(true);
+  });
+
   it('pasting a new key clears the flag', () => {
     const path = freshPath();
     const store = new SettingsStore(path);
-    store.set({ apiKey: 'sk-old' });
+    store.set({ apiKey: 'sk-old-credential-1234567890' });
     control.decryptFails = true;
     store.getApiKey();
     expect(store.get().apiKeyUnreadable).toBe(true);
 
     control.decryptFails = false;
-    store.set({ apiKey: 'sk-new' });
+    store.set({ apiKey: 'sk-new-credential-1234567890' });
     expect(store.get().apiKeyUnreadable).toBe(false);
-    expect(store.getApiKey()).toBe('sk-new');
+    expect(store.getApiKey()).toBe('sk-new-credential-1234567890');
   });
 
   it('heals the flag if the blob decrypts again', () => {
     const path = freshPath();
     const store = new SettingsStore(path);
-    store.set({ apiKey: 'sk-x' });
+    store.set({ apiKey: VALID_KEY });
     control.decryptFails = true;
     store.getApiKey();
     expect(store.get().apiKeyUnreadable).toBe(true);
     control.decryptFails = false;
-    expect(store.getApiKey()).toBe('sk-x');
+    expect(store.getApiKey()).toBe(VALID_KEY);
     expect(store.get().apiKeyUnreadable).toBe(false);
   });
 });

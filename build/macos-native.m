@@ -178,6 +178,185 @@ static NSString *best_ax_name(AXUIElementRef element) {
   return nil;
 }
 
+@interface BuddyFocusedReceiver : NSObject
+@property(nonatomic, assign, readonly) AXUIElementRef app;
+@property(nonatomic, assign, readonly) AXUIElementRef window;
+@property(nonatomic, assign, readonly) AXUIElementRef focus;
+@property(nonatomic, assign, readonly) pid_t pid;
+- (instancetype)initWithApp:(AXUIElementRef)app
+                     window:(AXUIElementRef)window
+                      focus:(AXUIElementRef)focus
+                        pid:(pid_t)pid;
+@end
+
+@implementation BuddyFocusedReceiver
+- (instancetype)initWithApp:(AXUIElementRef)app
+                     window:(AXUIElementRef)window
+                      focus:(AXUIElementRef)focus
+                        pid:(pid_t)pid {
+  self = [super init];
+  if (self != nil) {
+    _app = (AXUIElementRef)CFRetain(app);
+    _window = (AXUIElementRef)CFRetain(window);
+    _focus = (AXUIElementRef)CFRetain(focus);
+    _pid = pid;
+  }
+  return self;
+}
+- (void)dealloc {
+  if (_app != NULL) CFRelease(_app);
+  if (_window != NULL) CFRelease(_window);
+  if (_focus != NULL) CFRelease(_focus);
+}
+@end
+
+static NSMutableDictionary<NSString *, BuddyFocusedReceiver *> *focused_receiver_tokens;
+static NSMutableArray<NSString *> *focused_receiver_order;
+
+static NSString *retain_focused_receiver(
+  AXUIElementRef app,
+  AXUIElementRef window,
+  AXUIElementRef focus,
+  pid_t pid
+) {
+  @synchronized([BuddyFocusedReceiver class]) {
+    if (focused_receiver_tokens == nil) {
+      focused_receiver_tokens = [NSMutableDictionary dictionary];
+      focused_receiver_order = [NSMutableArray array];
+    }
+    NSString *token = NSUUID.UUID.UUIDString;
+    focused_receiver_tokens[token] = [[BuddyFocusedReceiver alloc]
+      initWithApp:app window:window focus:focus pid:pid];
+    [focused_receiver_order addObject:token];
+    while (focused_receiver_order.count > 32) {
+      NSString *expired = focused_receiver_order.firstObject;
+      [focused_receiver_order removeObjectAtIndex:0];
+      [focused_receiver_tokens removeObjectForKey:expired];
+    }
+    return token;
+  }
+}
+
+/** Bounded native identity of the receiver that would get keyboard input. */
+static napi_value query_focused_receiver(napi_env env, napi_callback_info info) {
+  (void)info;
+  @autoreleasepool {
+    if (!AXIsProcessTrusted()) {
+      return json_string(env, @{ @"error": @"accessibility_permission_required" });
+    }
+    NSRunningApplication *frontmost = NSWorkspace.sharedWorkspace.frontmostApplication;
+    pid_t pid = frontmost.processIdentifier;
+    if (frontmost == nil || pid <= 0) {
+      return json_string(env, @{ @"error": @"focused_application_unavailable" });
+    }
+    AXUIElementRef app = AXUIElementCreateApplication(pid);
+    if (app == NULL) {
+      return json_string(env, @{ @"error": @"focused_application_unavailable" });
+    }
+    AXUIElementSetMessagingTimeout(app, 0.15);
+
+    CFTypeRef window_value = NULL;
+    CFTypeRef focus_value = NULL;
+    AXError window_error = AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute, &window_value);
+    AXError focus_error = AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute, &focus_value);
+    if (window_error != kAXErrorSuccess || focus_error != kAXErrorSuccess ||
+        window_value == NULL || focus_value == NULL ||
+        CFGetTypeID(window_value) != AXUIElementGetTypeID() ||
+        CFGetTypeID(focus_value) != AXUIElementGetTypeID()) {
+      if (window_value != NULL) CFRelease(window_value);
+      if (focus_value != NULL) CFRelease(focus_value);
+      CFRelease(app);
+      return json_string(env, @{ @"error": @"focused_receiver_unavailable" });
+    }
+    AXUIElementRef window = (AXUIElementRef)window_value;
+    AXUIElementRef focus = (AXUIElementRef)focus_value;
+    CGRect window_rect = CGRectZero;
+    CGRect focus_rect = CGRectZero;
+    NSString *role = copy_ax_string(focus, kAXRoleAttribute);
+    if (pid <= 0 || role.length == 0 || !copy_ax_rect(window, &window_rect) ||
+        !copy_ax_rect(focus, &focus_rect)) {
+      CFRelease(window_value);
+      CFRelease(focus_value);
+      CFRelease(app);
+      return json_string(env, @{ @"error": @"focused_receiver_incomplete" });
+    }
+    NSString *identifier = copy_ax_string(focus, CFSTR("AXIdentifier")) ?: @"";
+    NSString *window_identifier = copy_ax_string(window, CFSTR("AXIdentifier")) ?: @"";
+    NSString *window_title = copy_ax_string(window, kAXTitleAttribute) ?: @"";
+    NSString *restore_token = retain_focused_receiver(app, window, focus, pid);
+    NSDictionary *payload = @{
+      @"pid": @(pid),
+      @"restoreToken": restore_token,
+      @"window": @{
+        @"identifier": window_identifier,
+        @"title": window_title,
+        @"x": @(round(window_rect.origin.x)), @"y": @(round(window_rect.origin.y)),
+        @"w": @(round(window_rect.size.width)), @"h": @(round(window_rect.size.height)),
+      },
+      @"focus": @{
+        @"role": role,
+        @"identifier": identifier,
+        @"x": @(round(focus_rect.origin.x)), @"y": @(round(focus_rect.origin.y)),
+        @"w": @(round(focus_rect.size.width)), @"h": @(round(focus_rect.size.height)),
+      },
+    };
+    CFRelease(window_value);
+    CFRelease(focus_value);
+    CFRelease(app);
+    return json_string(env, payload);
+  }
+}
+
+/** Restore the exact retained application/window/focused AX element. */
+static napi_value restore_focused_receiver(napi_env env, napi_callback_info info) {
+  napi_value result = NULL;
+  size_t argc = 1;
+  napi_value argv[1] = { NULL };
+  size_t token_length = 0;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != 0 || argc < 1 ||
+      napi_get_value_string_utf8(env, argv[0], NULL, 0, &token_length) != 0 ||
+      token_length == 0 || token_length > 128) {
+    napi_get_boolean(env, false, &result);
+    return result;
+  }
+  char token_buffer[129] = { 0 };
+  if (napi_get_value_string_utf8(
+        env, argv[0], token_buffer, sizeof(token_buffer), &token_length
+      ) != 0) {
+    napi_get_boolean(env, false, &result);
+    return result;
+  }
+  @autoreleasepool {
+    NSString *token = [[NSString alloc] initWithBytes:token_buffer
+                                               length:token_length
+                                             encoding:NSUTF8StringEncoding];
+    BuddyFocusedReceiver *receiver = nil;
+    @synchronized([BuddyFocusedReceiver class]) {
+      receiver = focused_receiver_tokens[token];
+    }
+    if (receiver == nil || receiver.pid <= 0 || !AXIsProcessTrusted()) {
+      napi_get_boolean(env, false, &result);
+      return result;
+    }
+    NSRunningApplication *application =
+      [NSRunningApplication runningApplicationWithProcessIdentifier:receiver.pid];
+    if (application == nil || application.terminated ||
+        ![application activateWithOptions:NSApplicationActivateIgnoringOtherApps]) {
+      napi_get_boolean(env, false, &result);
+      return result;
+    }
+    AXUIElementSetMessagingTimeout(receiver.app, 0.15);
+    // AX implementations vary in which focus setters they expose. Issue all
+    // exact-handle operations; the caller then re-queries and requires a byte-
+    // identical canonical identity before input can dispatch.
+    AXUIElementPerformAction(receiver.window, kAXRaiseAction);
+    AXUIElementSetAttributeValue(receiver.app, kAXFocusedWindowAttribute, receiver.window);
+    AXUIElementSetAttributeValue(receiver.app, kAXFocusedUIElementAttribute, receiver.focus);
+    napi_get_boolean(env, true, &result);
+    return result;
+  }
+}
+
 /**
  * Enumerate named AX elements from the visible apps whose on-screen windows
  * intersect the search radius. CGWindowList is front-to-back, so split-view,
@@ -523,6 +702,8 @@ napi_value napi_register_module_v1(napi_env env, napi_value exports) {
     { "coverDisplayWithWindow", 22, cover_display_with_window },
     { "getDisplaySurface", 17, get_display_surface },
     { "queryAccessibility", 18, query_accessibility },
+    { "queryFocusedReceiver", 20, query_focused_receiver },
+    { "restoreFocusedReceiver", 22, restore_focused_receiver },
   };
 
   for (size_t i = 0; i < sizeof(functions) / sizeof(functions[0]); i++) {

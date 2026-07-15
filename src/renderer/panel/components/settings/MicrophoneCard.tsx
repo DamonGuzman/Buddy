@@ -1,4 +1,3 @@
-import { clicky } from '../../clicky';
 import { SettingsCard } from './SettingsCard';
 import { Kbd } from '@/components/ui/kbd';
 import { Label } from '@/components/ui/label';
@@ -35,7 +34,9 @@ export function MicrophoneCard({
         </Label>
         <Select
           value={settings.micDeviceId === '' ? '__default__' : settings.micDeviceId}
-          onValueChange={(value) => void clicky.selectMic(value === '__default__' ? '' : value)}
+          onValueChange={(value) =>
+            void onPatch({ micDeviceId: value === '__default__' ? '' : value })
+          }
         >
           <SelectTrigger id="mic" size="sm" className="max-w-[190px] text-xs">
             <SelectValue />
@@ -57,7 +58,8 @@ export function MicrophoneCard({
       </div>
       {micError ? (
         <p className="text-[11px] leading-relaxed text-muted-foreground/80">
-          couldn&rsquo;t reach a microphone ({micError.toLowerCase()}) — you can still type below.
+          couldn&rsquo;t reach a microphone ({micError.toLowerCase()}) — tap the hotkey or click
+          buddy to type instead.
         </p>
       ) : null}
       <div className="flex min-h-7 items-center gap-2.5 border-t pt-2.5">

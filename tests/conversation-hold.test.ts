@@ -13,6 +13,7 @@
 import { createRequire } from 'node:module';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ConversationDeps } from '../src/main/conversation';
+import { DEFAULT_SETTINGS } from '../src/shared/types';
 import type * as MockRealtime from '../tools/mock-realtime/server';
 
 const captureAllDisplaysMock = vi.hoisted(() =>
@@ -39,6 +40,9 @@ vi.mock('../src/main/capture', () => ({
 
 vi.mock('../src/main/windows/panel', () => ({
   showPanelOnce: () => {},
+  presentPanelActionableError: () => {},
+  currentPanelActionableError: () => null,
+  resolvePanelActionableError: () => {},
 }));
 
 vi.mock('../src/main/windows/overlay', () => ({}));
@@ -116,6 +120,67 @@ describe('Conversation: quick barge-in tap commit guard (M9)', () => {
     conversations.push(conversation);
     return conversation;
   }
+
+  it('does not read safeStorage-backed API credentials during construction', () => {
+    const deps = fakeDeps();
+    const getApiKey = vi.fn(() => {
+      throw new Error('safeStorage cannot be used before app is ready');
+    });
+    deps.settings.getApiKey = getApiKey;
+
+    const conversation = new Conversation(deps);
+    conversations.push(conversation);
+
+    expect(getApiKey).not.toHaveBeenCalled();
+  });
+
+  it('an unrelated settings update preserves a live mock push-to-talk session', async () => {
+    const deps = fakeDeps();
+    const getApiKey = vi.fn(() => null);
+    deps.settings.getApiKey = getApiKey;
+    const conversation = new Conversation(deps);
+    conversations.push(conversation);
+
+    conversation.holdStart();
+    await vi.waitFor(() => expect(conversation.sessionStatus().state).toBe('ready'));
+    expect(getApiKey).toHaveBeenCalledOnce();
+
+    conversation.onSettingsChanged({
+      ...DEFAULT_SETTINGS,
+      model: 'gpt-realtime-2.1-mini',
+      voice: 'marin',
+      captionsEnabled: true,
+    });
+
+    expect(conversation.sessionStatus().state).toBe('ready');
+    expect(conversation.assistantState()).toBe('listening');
+    conversation.cancelHold();
+  });
+
+  it('an unrelated settings update preserves a live mock open-mic session', async () => {
+    const capture = vi.fn();
+    const deps = fakeDeps({ capture, playback: vi.fn(), sendAudio: vi.fn() }, true);
+    const getApiKey = vi.fn(() => null);
+    deps.settings.getApiKey = getApiKey;
+    const conversation = new Conversation(deps);
+    conversations.push(conversation);
+
+    await conversation.toggleFullRealtime();
+    expect(conversation.sessionStatus().state).toBe('ready');
+    expect(getApiKey).toHaveBeenCalledOnce();
+
+    conversation.onSettingsChanged({
+      ...DEFAULT_SETTINGS,
+      model: 'gpt-realtime-2.1-mini',
+      voice: 'marin',
+      captionsEnabled: true,
+      fullRealtimeMode: true,
+    });
+
+    expect(conversation.sessionStatus().state).toBe('ready');
+    expect(conversation.assistantState()).toBe('listening');
+    expect(capture).not.toHaveBeenCalledWith('stop');
+  });
 
   it('a >250ms hold with <200ms of appended audio cancels instead of committing', async () => {
     const conversation = makeConversation();

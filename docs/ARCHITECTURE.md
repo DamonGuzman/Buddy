@@ -47,8 +47,11 @@ typed action** and is always signposted by a visible indicator.
 
 **Out (stub or defer):**
 
-- Agent mode ("Buddy, agent") — main-process, read-only research agents with hosted web search,
-  guarded web fetch, persisted panel results, cancellation, and voice handoff/return.
+- Agent mode ("Buddy, agent") — main-process background helpers with hosted web search, guarded
+  web fetch, persisted results, cancellation, and voice handoff/return. An explicitly granted
+  task may also use Buddy's dedicated persistent browser profile through the shared ActionGate;
+  the user's live desktop remains a separate Settings opt-in with one-use human approval per
+  action. See `docs/AGENT-COMPUTER-USE.md`.
 - Cloudflare Worker / ephemeral-token proxy (MVP is local-key, single user).
 - Integrations (Notion/Gmail/Calendar/Linear), wake word, ElevenLabs, auto-update, installer polish.
 

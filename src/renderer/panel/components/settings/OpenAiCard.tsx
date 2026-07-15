@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
 import { SettingsCard } from './SettingsCard';
+import {
+  INVALID_KEY_COPY,
+  REJECTED_KEY_COPY,
+  isClearlyMalformedApiKey,
+  sessionRejectedApiKey,
+} from './api-key-feedback';
 import { STATUS_TINT } from '../status-tint';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,7 +20,7 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import type { PatchSettings } from './patch';
-import type { ModelId, Settings } from '../../../../shared/types';
+import type { ModelId, SessionStatus, Settings } from '../../../../shared/types';
 
 const MODELS: { id: ModelId; label: string }[] = [
   { id: 'gpt-realtime-2.1-mini', label: 'gpt-realtime-2.1-mini (faster, cheaper)' },
@@ -26,14 +32,18 @@ const JUST_SAVED_MS = 2_500;
 
 interface OpenAiCardProps {
   settings: Settings;
+  session: SessionStatus | null;
   onPatch: PatchSettings;
 }
 
 /** API key save/clear + realtime model picker. */
-export function OpenAiCard({ settings, onPatch }: OpenAiCardProps): React.JSX.Element {
+export function OpenAiCard({ settings, session, onPatch }: OpenAiCardProps): React.JSX.Element {
   const [keyDraft, setKeyDraft] = useState('');
   const [savingKey, setSavingKey] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+  const [keyError, setKeyError] = useState<string | null>(null);
+  const rejectedByOpenAi = settings.apiKeyPresent && sessionRejectedApiKey(session);
+  const visibleKeyError = keyError ?? (rejectedByOpenAi ? REJECTED_KEY_COPY : null);
 
   useEffect(() => {
     if (!justSaved) return;
@@ -44,11 +54,30 @@ export function OpenAiCard({ settings, onPatch }: OpenAiCardProps): React.JSX.El
   const saveKey = async (): Promise<void> => {
     const value = keyDraft.trim();
     if (!value || savingKey) return;
+    if (isClearlyMalformedApiKey(value)) {
+      setJustSaved(false);
+      setKeyError(INVALID_KEY_COPY);
+      return;
+    }
     setSavingKey(true);
+    setKeyError(null);
     try {
-      await onPatch({ apiKey: value });
+      if (!(await onPatch({ apiKey: value }))) return;
       setKeyDraft('');
       setJustSaved(true);
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
+  const clearKey = async (): Promise<void> => {
+    if (savingKey) return;
+    setSavingKey(true);
+    setKeyError(null);
+    setJustSaved(false);
+    try {
+      if (!(await onPatch({ apiKey: null }))) return;
+      setKeyDraft('');
     } finally {
       setSavingKey(false);
     }
@@ -70,12 +99,19 @@ export function OpenAiCard({ settings, onPatch }: OpenAiCardProps): React.JSX.El
               >
                 saved key unreadable — paste it again
               </Badge>
+            ) : rejectedByOpenAi ? (
+              <Badge
+                variant="outline"
+                className={cn('rounded-full font-medium', STATUS_TINT.danger)}
+              >
+                key rejected — replace it
+              </Badge>
             ) : (
               <Badge
                 variant="outline"
                 className={cn('rounded-full font-medium', STATUS_TINT.positive)}
               >
-                key saved ✓
+                key stored ✓
               </Badge>
             )}
             <span className="flex-1" />
@@ -84,7 +120,8 @@ export function OpenAiCard({ settings, onPatch }: OpenAiCardProps): React.JSX.El
               variant="outline"
               size="sm"
               className="h-7 px-2.5 text-xs text-muted-foreground"
-              onClick={() => void onPatch({ apiKey: null })}
+              disabled={savingKey}
+              onClick={() => void clearKey()}
             >
               clear
             </Button>
@@ -102,7 +139,12 @@ export function OpenAiCard({ settings, onPatch }: OpenAiCardProps): React.JSX.El
           placeholder={settings.apiKeyPresent ? 'paste a new key to replace…' : 'sk-…'}
           autoComplete="off"
           className="h-8 text-xs"
-          onChange={(e) => setKeyDraft(e.target.value)}
+          aria-invalid={visibleKeyError !== null}
+          onChange={(e) => {
+            setKeyDraft(e.target.value);
+            setKeyError(null);
+            setJustSaved(false);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') void saveKey();
           }}
@@ -117,6 +159,11 @@ export function OpenAiCard({ settings, onPatch }: OpenAiCardProps): React.JSX.El
           {justSaved ? 'saved ✓' : 'save'}
         </Button>
       </div>
+      {visibleKeyError ? (
+        <p role="alert" className="text-[11px] leading-relaxed text-destructive">
+          {visibleKeyError}
+        </p>
+      ) : null}
       <p className="text-[11px] leading-relaxed text-muted-foreground/80">
         stored encrypted on this device. never shown again, never synced.
       </p>

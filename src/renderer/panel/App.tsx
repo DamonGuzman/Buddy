@@ -12,15 +12,26 @@ import { useState } from 'react';
 import { useMicDevices } from './hooks/use-mic-devices';
 import { usePanelWiring } from './hooks/use-panel-wiring';
 import { Header } from './components/Header';
+import { ComputerUseApprovalCard } from './components/ComputerUseApprovalCard';
 import { SettingsView } from './components/SettingsView';
+import { useComputerUseApproval } from './hooks/use-computer-use';
 
 export function App(): React.JSX.Element {
   const [micError, setMicError] = useState<string | null>(null);
+  const computerUse = useComputerUseApproval();
+  const currentApproval = computerUse.approvals[0] ?? null;
 
-  const { assistantState, session, settings, runtime, permissions, setPermissions } =
-    usePanelWiring({
-      onMicError: setMicError,
-    });
+  const {
+    assistantState,
+    session,
+    settings,
+    runtime,
+    permissions,
+    actionableError,
+    setPermissions,
+  } = usePanelWiring({
+    onMicError: setMicError,
+  });
   const canPrewarmMic =
     permissions?.supported !== true || permissions.grants.microphone === 'granted';
   const micDevices = useMicDevices(setMicError, canPrewarmMic);
@@ -33,12 +44,28 @@ export function App(): React.JSX.Element {
         devFlags={runtime?.devFlags ?? []}
       />
       <main className="flex min-h-0 flex-1 flex-col">
-        {settings ? (
+        {currentApproval ? (
+          <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+            <ComputerUseApprovalCard
+              request={currentApproval}
+              pendingCount={computerUse.approvals.length}
+              resolving={computerUse.resolving}
+              actingInPlace={computerUse.actingInPlace}
+              error={computerUse.error}
+              onResolve={(verdict) => void computerUse.resolve(verdict)}
+              onShowBrowser={() => void computerUse.showBrowser()}
+              onFinishInBrowser={() => void computerUse.finishInBrowser()}
+            />
+          </div>
+        ) : settings ? (
           <SettingsView
             settings={settings}
+            session={session}
+            actionableError={actionableError}
             micDevices={micDevices}
             micError={micError}
             permissions={permissions}
+            grantsRevision={computerUse.grantsRevision}
             onPermissionHealth={setPermissions}
           />
         ) : null}

@@ -19,7 +19,7 @@
 import WebSocket from 'ws';
 import type { ServerEvent, UnknownServerEvent } from './protocol';
 import { isKnownServerEvent, parseServerEvent } from './protocol';
-import { withErrorCode } from '../errors';
+import { redactSensitiveErrorText, withErrorCode } from '../errors';
 
 export interface ConnectParams {
   url: string;
@@ -97,7 +97,10 @@ export function connectRealtimeSocket(params: ConnectParams, hooks: ConnectHooks
           // the close/timeout that follows — do NOT route it onward, whose
           // status churn the connect failure would immediately overwrite
           // anyway.
-          preSettleError = { message: evt.error.message, code: evt.error.code ?? '' };
+          preSettleError = {
+            message: evt.error.message,
+            code: normalizeServerErrorCode(evt.error.code ?? ''),
+          };
           return;
         }
       }
@@ -152,10 +155,11 @@ export function describeHandshakeRejection(
     return 'openai says your account is out of credit — add credits at platform.openai.com/billing';
   }
   if (err !== null) {
-    const msg = singleLine(err.message);
-    return err.code.length > 0 ? `openai error: ${msg} (${err.code})` : `openai error: ${msg}`;
+    const msg = redactSensitiveErrorText(singleLine(err.message));
+    const code = normalizeServerErrorCode(err.code);
+    return code.length > 0 ? `openai error: ${msg} (${code})` : `openai error: ${msg}`;
   }
-  const reason = close !== null ? singleLine(close.reason) : '';
+  const reason = close !== null ? redactSensitiveErrorText(singleLine(close.reason)) : '';
   const detail =
     close !== null ? ` (code ${close.code}${reason.length > 0 ? `: ${reason}` : ''})` : '';
   return `connection closed during handshake${detail}`;
@@ -163,6 +167,33 @@ export function describeHandshakeRejection(
 
 function singleLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Codes are server-controlled and renderer-visible. Preserve only the small
+ * set that Buddy's error catalog actually classifies; a shape check alone is
+ * insufficient because credentials such as `sk-...` are syntactically valid
+ * machine tokens too.
+ */
+const DISPLAYABLE_SERVER_ERROR_CODES = new Set([
+  'access_denied',
+  'authentication_error',
+  'billing_hard_limit_reached',
+  'insufficient_quota',
+  'internal_server_error',
+  'invalid_api_key',
+  'model_not_available',
+  'model_not_found',
+  'permission_denied',
+  'rate_limit_error',
+  'rate_limit_exceeded',
+  'server_error',
+  'usage_limit_reached',
+]);
+
+function normalizeServerErrorCode(code: string): string {
+  const normalized = code.trim().toLowerCase();
+  return DISPLAYABLE_SERVER_ERROR_CODES.has(normalized) ? normalized : '';
 }
 
 function rawDataToString(data: WebSocket.RawData): string {

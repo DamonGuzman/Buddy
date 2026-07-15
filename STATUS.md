@@ -1,16 +1,18 @@
 # Buddy for Windows — Project Status
 
-_Last updated: 2026-07-13. Single-source status for the MVP and follow-on work._
+_Last updated: 2026-07-15. Single-source status for the MVP and follow-on work._
 _Companion docs: [ARCHITECTURE](docs/ARCHITECTURE.md) · [EVAL](docs/EVAL.md) · [COORD-STUDY](docs/COORD-STUDY.md) · [AGENT-MODE](docs/AGENT-MODE.md)_
 
 ## TL;DR
 
 Buddy is a Windows tray companion: hold **Ctrl + left-Alt**, talk, and Buddy sees the monitors,
-answers in voice, and flies its pointer to the UI element it describes. Typed questions and
-read-only background research agents use the user's ChatGPT plan; realtime voice uses an OpenAI API
-key. The app is built, tested, packaged, upgraded in place, and running on this machine.
+answers in voice, and flies its pointer to the UI element it describes. Typed questions,
+background research, explicitly granted Buddy-browser tasks, and independent action review use the
+user's ChatGPT plan; realtime voice uses an OpenAI API key. Live-desktop computer use remains a
+separate Settings opt-in and is human-approved action by action.
 
-**Current source:** `main`, M18 Agent Mode + subscription text path + in-app ChatGPT sign-in.
+**Current source:** `main`, Agent Mode + browser/computer use + subscription text path + in-app
+ChatGPT sign-in.
 **Installed build:** local M18 compatibility build at `%LOCALAPPDATA%\Programs\heyclicky\Buddy App.exe`.
 SHA-256: `7614732DB20A59E79F698ACB83456E1CB8D08B4DF2FE3966C3580F7B0F9B6EEA`.
 Settings migrated to schema v2; encrypted key, model, voice, captions, mic, and buddy position were
@@ -56,11 +58,32 @@ preserved.
   spend. A real `gpt-5.6-sol` run used hosted search, returned two official Node.js citations, and
   completed in about seven seconds.
 
+### Browser and computer use
+
+- Browser-enabled helpers receive a task-scoped, explicitly approved browser capability backed by
+  Buddy's separately enrolled persistent profile. No profile, screenshot, or takeover surface is
+  created before that approval.
+- Hidden capture/input, DOM and frame inspection, exact one-use navigation authorization, fresh
+  one-action observations, user takeover, site sign-out, grant revocation, clear-all, suspend, and
+  shutdown are wired end to end.
+- Every consequential action crosses the mechanically enforced ActionGate, independent reviewer,
+  fresh evidence reinspection, and transactional human fallback. Credentials, OAuth consent, file
+  transfer, unsafe schemes, stale approvals, and secret-shaped payloads fail closed.
+- Browser traffic uses a per-instance authenticated loopback proxy that pins the validated public
+  IP. Research `web_fetch` uses the same resolve-once/connect-exact-IP rule per redirect hop.
+- Live-desktop input remains a separate Settings opt-in. Every action is approved once; clicks use
+  dense target-crop freshness, and keyboard actions require exact native AX/UIA receiver identity
+  before approval and immediately before dispatch.
+- The product and implementation call this **computer use** / **Buddy's browser**. The persistent
+  browser workspace is explicitly not described as a security sandbox.
+
 ### Verification and release
 
-- `npm test`: **343 passed, 2 intentional live tests skipped**. Vitest files are serialized to
+- `npm test`: **1,271 passed, 3 intentional platform/live tests skipped**. Vitest files are serialized to
   eliminate local server/UIA daemon contention.
 - `npm run build`: pass (node + web type checks and all Electron renderer/main bundles).
+- `npm run test:browser`: pass (raw Electron hidden-browser, network/containment, persistence, and
+  composed capability → review → approval → real action → fresh capture flow).
 - `npm run dist`: pass (portable and one-click per-user NSIS artifacts).
 - Electron debug E2E: spawn → tool loop → panel-safe record → persisted `agents.json`: pass.
 - Live ChatGPT-plan research run: pass.
@@ -79,8 +102,9 @@ decision is unchanged: API-key grounding uses `gpt-5.4-mini`; subscription groun
 
 ## Future scope (not a Windows MVP blocker)
 
-- Side-effecting agent tools (files, programs, calendar/email) require per-action confirmation and
-  separate connector consent designs. Phase 1 intentionally remains read-only.
+- Direct filesystem/program/connector APIs remain out of scope. Browser actions use Buddy's
+  separately enrolled profile and the ActionGate; dedicated calendar/email/Notion integrations
+  still require their own connector-consent designs.
 - In-flight agents do not resume after an app/OS crash; completed summaries do persist.
 - macOS port.
 

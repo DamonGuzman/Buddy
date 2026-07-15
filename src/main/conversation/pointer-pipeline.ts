@@ -47,6 +47,7 @@ import type {
 } from '../grounding/rest-grounder';
 import type { PointAtArgs } from '../realtime/protocol';
 import type {
+  ActionableErrorIdentity,
   GroundingAttribution,
   PointerCommand,
   PointerSnapInfo,
@@ -96,6 +97,9 @@ export interface PointerPipelineDeps {
   codexTextUsedPercent: () => CodexUsedPercent | null;
   /** M17: fail-closed plan-limit copy, once per episode. */
   surfacePlanLimitOnce: (token: number) => void;
+  /** Exact prior plan-limit notice this Codex operation may repair. */
+  codexPlanRepairIdentity: () => ActionableErrorIdentity | null;
+  noteCodexSucceeded: (expected: ActionableErrorIdentity | null) => void;
   /** Lazy constructors — injected fakes in tests, real services in the app. */
   buildElementGrounder: () => ElementGrounder;
   buildRestGrounder: () => RestGroundPort;
@@ -286,6 +290,8 @@ export class PointerPipeline {
         preferApiKey: deps.codexDisabled || deps.settings.get().preferApiKeyGrounding,
       });
       if (auth !== null) {
+        const planRepairIdentity =
+          auth.kind === 'chatgptCodex' ? deps.codexPlanRepairIdentity() : null;
         restUsed = true;
         const t0 = Date.now();
         const outcome = await this.getRest().ground(
@@ -301,6 +307,14 @@ export class PointerPipeline {
         groundingBackend = outcome.source;
         quotaExhausted = outcome.quotaExhausted;
         usedPercent = outcome.usedPercent;
+        if (
+          planRepairIdentity !== null &&
+          outcome.source === 'codex' &&
+          !outcome.quotaExhausted &&
+          outcome.point !== null
+        ) {
+          deps.noteCodexSucceeded(planRepairIdentity);
+        }
         if (outcome.point !== null && !deps.guard.isStale(token)) {
           const regrounded = mapModelPoint(
             {

@@ -48,4 +48,55 @@ describe('showPanelOnce (M11 per-kind auto-show budget)', () => {
 
     panel.destroy();
   });
+
+  it('retains the latest notice and clears only the exact recovered revision and kind', () => {
+    const panel = new PanelManager();
+    panel.presentActionableError({
+      kind: 'no_api_key',
+      message: 'add a key',
+      target: 'openai',
+      occurredAt: 1,
+    });
+    expect(panel.actionableErrorState()).toMatchObject({
+      revision: 1,
+      notice: { kind: 'no_api_key', target: 'openai' },
+    });
+
+    panel.resolveActionableError({ revision: 1, kind: 'mic_unavailable' });
+    expect(panel.actionableErrorState().revision).toBe(1);
+
+    panel.resolveActionableError({ revision: 1, kind: 'no_api_key' });
+    expect(panel.actionableErrorState()).toEqual({ revision: 2, notice: null });
+    panel.destroy();
+  });
+
+  it('does not let an older async recovery clear a newer notice with the same target', () => {
+    const panel = new PanelManager();
+    panel.presentActionableError({
+      kind: 'no_api_key',
+      message: 'add a key',
+      target: 'openai',
+      occurredAt: 1,
+    });
+    const oldRecovery = panel.currentActionableError(['no_api_key']);
+    panel.presentActionableError({
+      kind: 'api_key_rejected',
+      message: 'replace the key',
+      target: 'openai',
+      occurredAt: 2,
+    });
+
+    expect(oldRecovery).toEqual({ revision: 1, kind: 'no_api_key' });
+    if (oldRecovery === null) throw new Error('expected a recovery identity');
+    expect(panel.resolveActionableError(oldRecovery)).toBe(false);
+    expect(panel.actionableErrorState()).toMatchObject({
+      revision: 2,
+      notice: { kind: 'api_key_rejected' },
+    });
+
+    expect(panel.dismissActionableError({ revision: 1, kind: 'no_api_key' })).toBe(false);
+    expect(panel.dismissActionableError({ revision: 2, kind: 'api_key_rejected' })).toBe(true);
+    expect(panel.actionableErrorState()).toEqual({ revision: 3, notice: null });
+    panel.destroy();
+  });
 });

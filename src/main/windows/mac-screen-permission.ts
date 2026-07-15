@@ -12,6 +12,8 @@ interface MacPrivacyNative {
   coverDisplayWithWindow(nativeHandle: Buffer, displayId: number): boolean;
   getDisplaySurface(displayId: number): MacDisplaySurfaceNative | null;
   queryAccessibility(requestJson: string): string;
+  queryFocusedReceiver(): string;
+  restoreFocusedReceiver(token: string): boolean;
 }
 
 export interface MacDisplaySurfaceNative {
@@ -189,6 +191,34 @@ export function queryMacAccessibility(request: {
       err instanceof Error ? err.message : String(err),
     );
     return empty('native_query_failed');
+  }
+}
+
+/** Raw bounded AX receiver snapshot; validated by the computer-use evidence parser. */
+export function queryMacFocusedReceiverRaw(): string | null {
+  if (process.platform !== 'darwin') return null;
+  try {
+    return bridge()?.queryFocusedReceiver() ?? null;
+  } catch (err) {
+    console.warn(
+      '[computer-use] macOS focused receiver query failed:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return null;
+  }
+}
+
+/** Restore a receiver retained by `queryMacFocusedReceiverRaw`. */
+export function restoreMacFocusedReceiver(token: string): boolean {
+  if (process.platform !== 'darwin' || !token) return false;
+  try {
+    return bridge()?.restoreFocusedReceiver(token) ?? false;
+  } catch (err) {
+    console.warn(
+      '[computer-use] macOS focused receiver restore failed:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return false;
   }
 }
 

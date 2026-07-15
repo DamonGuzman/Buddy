@@ -112,22 +112,12 @@ describe('phoneAudioUrl', () => {
 });
 
 describe('phoneAudioAutostart', () => {
-  it("'1' forces on regardless of packaging", () => {
-    expect(phoneAudioAutostart(false, { CLICKY_PHONE_AUDIO_AUTOSTART: '1' })).toBe(true);
-    expect(phoneAudioAutostart(true, { CLICKY_PHONE_AUDIO_AUTOSTART: '1' })).toBe(true);
-  });
-
-  it("'0' forces off, even packaged", () => {
-    expect(phoneAudioAutostart(true, { CLICKY_PHONE_AUDIO_AUTOSTART: '0' })).toBe(false);
-    expect(phoneAudioAutostart(false, { CLICKY_PHONE_AUDIO_AUTOSTART: '0' })).toBe(false);
-  });
-
-  it('unset defaults on ONLY when packaged', () => {
-    expect(phoneAudioAutostart(true, {})).toBe(true);
-    expect(phoneAudioAutostart(false, {})).toBe(false);
-    // Any non-'1'/'0' value behaves like unset (site checks !== '0' when packaged).
-    expect(phoneAudioAutostart(true, { CLICKY_PHONE_AUDIO_AUTOSTART: 'yes' })).toBe(true);
-    expect(phoneAudioAutostart(false, { CLICKY_PHONE_AUDIO_AUTOSTART: 'yes' })).toBe(false);
+  it("is an exact '1' opt-in and defaults off", () => {
+    expect(phoneAudioAutostart({ CLICKY_PHONE_AUDIO_AUTOSTART: '1' })).toBe(true);
+    expect(phoneAudioAutostart({ CLICKY_PHONE_AUDIO_AUTOSTART: '0' })).toBe(false);
+    expect(phoneAudioAutostart({ CLICKY_PHONE_AUDIO_AUTOSTART: 'yes' })).toBe(false);
+    expect(phoneAudioAutostart({ CLICKY_PHONE_AUDIO_AUTOSTART: '' })).toBe(false);
+    expect(phoneAudioAutostart({})).toBe(false);
   });
 });
 

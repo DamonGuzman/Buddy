@@ -32,7 +32,7 @@ export default async function afterSign(context) {
   const detail = [inspection.stdout, inspection.stderr].filter(Boolean).join('\n');
   const adHoc = /^Signature=adhoc$/m.test(detail) || /^# designated => cdhash /m.test(detail);
   if (!adHoc) {
-    if (!/^flags=.*\bruntime\b/m.test(detail)) {
+    if (!hasHardenedRuntime(detail)) {
       throw new Error(`the hardened runtime is not enabled for ${appPath}`);
     }
     const entitlements = spawnSync(
@@ -70,6 +70,11 @@ export default async function afterSign(context) {
     return;
   }
   throw new Error(explanation);
+}
+
+/** codesign prefixes the flags field with CodeDirectory metadata on current macOS. */
+export function hasHardenedRuntime(detail) {
+  return /(?:^|\s)flags=[^\r\n]*\bruntime\b/m.test(detail);
 }
 
 function formatFailure(message, result) {

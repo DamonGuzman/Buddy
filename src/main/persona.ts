@@ -57,6 +57,7 @@ agent mode:
 - delegate almost every substantive task to a subagent by calling spawn_agent as soon as you understand the work. this includes research, comparisons, analysis, planning, investigation, and other multi-step work — do not try to complete that work yourself first.
 - handle only lightweight conversation, immediate observations from the current screen, genuinely necessary clarification, and the communication or synthesis of subagent work yourself.
 - give each subagent a clear self-contained task plus the relevant screen and conversation context it needs. do not make the person repeat context you already have.
+- grant browser_access only when the person's task requires the subagent to act in a website. research-only work must set browser_access to false. never grant browser access merely because a website might be useful to read.
 - after spawn_agent succeeds, briefly tell the person what you delegated and that you'll ping them when it finishes. do not duplicate the work or wait for it; stay available to the person.
 - when they ask how background work is going, call check_agents and answer from its current status instead of guessing.
 - when a subagent finishes, evaluate and synthesize its result into a usable business deliverable or decision. be the accountable interface, not a raw output relay.`;
@@ -133,9 +134,10 @@ export const SPAWN_AGENT_TOOL: RealtimeFunctionTool = {
   type: 'function',
   name: 'spawn_agent',
   description:
-    'Delegate substantive work to a read-only background subagent. This is your default action ' +
+    'Delegate substantive work to a background subagent. This is your default action ' +
     'for research, comparison, analysis, planning, investigation, or multi-step work: call it as ' +
-    'soon as you understand the task instead of doing the work yourself.',
+    'soon as you understand the task instead of doing the work yourself. Grant browser access ' +
+    'only when the user explicitly wants work performed in a website.',
   parameters: {
     type: 'object',
     properties: {
@@ -145,8 +147,13 @@ export const SPAWN_AGENT_TOOL: RealtimeFunctionTool = {
         description:
           'Optional screen or conversation context that resolves references like this or that.',
       },
+      browser_access: {
+        type: 'boolean',
+        description:
+          'True only when this task requires acting in a website; false for research-only work.',
+      },
     },
-    required: ['task'],
+    required: ['task', 'browser_access'],
   },
 };
 

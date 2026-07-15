@@ -128,6 +128,12 @@ macOS artifacts unless `BUDDY_ALLOW_ADHOC=1` is deliberately set for disposable
 QA. QA packages use a separate entitlement file because an ad-hoc outer bundle
 must load Electron frameworks carrying a different upstream Team ID.
 
+The project-owned macOS signer preserves the exact SHA-1 identity fingerprint
+resolved by electron-builder, so duplicate certificate display names cannot make
+`codesign` ambiguous. Release operators may additionally pin that fingerprint
+with `BUDDY_MAC_SIGNING_IDENTITY_SHA1`; a mismatch fails before an artifact is
+created.
+
 `npm run dist:release:mac` is the production gate. Before building, it requires
 a Developer ID Application identity plus one complete electron-builder
 notarization credential set (App Store Connect API key, Apple ID credentials,

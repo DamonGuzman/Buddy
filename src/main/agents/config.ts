@@ -7,6 +7,15 @@
 export const AGENT_MAX_CONCURRENT = 3;
 export const AGENT_STEP_LOG_CAP = 30;
 export const AGENT_RUN_WALL_CLOCK_MS = 4 * 60_000;
+/** Acting buddies get a larger, still-hard-bounded task tier. */
+export const AGENT_BROWSER_RUN_WALL_CLOCK_MS = 10 * 60_000;
+export const AGENT_BROWSER_MAX_STEPS = 40;
+/** Let a browser repaint/network handlers settle before the mandatory fresh observation. */
+export const AGENT_BROWSER_SETTLE_MS = 350;
+/** Browser act/capture/load boundary. Human approval waits deliberately do not use it. */
+export const AGENT_BROWSER_TOOL_TIMEOUT_MS = 45_000;
+/** Quit must not wait indefinitely for a backend/renderer that ignored abort. */
+export const AGENT_MANAGER_DISPOSE_TIMEOUT_MS = 5_000;
 export const AGENT_BACKEND_TIMEOUT_MS = 90_000; // per backend request (search rounds can be slow)
 export const AGENT_TOOL_TIMEOUT_MS = 15_000;
 export const AGENT_FETCH_TIMEOUT_MS = 20_000;

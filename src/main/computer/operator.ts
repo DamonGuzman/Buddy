@@ -1,9 +1,15 @@
-import { screen } from 'electron';
 import type { ChatGptCodexAuthSource } from '../auth/auth-source';
-import { captureAllDisplays } from '../capture';
+import type { ApprovalRequest } from '../../shared/types';
+import type { AgentActionGatePort, AgentApprovalPort, AgentApprovalVerdict } from '../agents/types';
+import type {
+  GateDriverInspection,
+  GateDriverPort,
+  GateExecutionResult,
+  GatedActionRequest,
+} from '../agents/gate/action-gate';
+import type { TriggerAction } from '../agents/gate/trigger';
+import { isSecretLikeValue } from '../agents/gate/reviewer';
 import type { CaptureResult } from '../capture';
-import { mapModelPoint } from '../coords';
-import type { Point } from '../coords';
 import { CodexResponsesSession, DEFAULT_CODEX_MODEL } from '../codex/responses-session';
 import type {
   CodexFunctionCall,
@@ -13,9 +19,11 @@ import type {
   CodexUserTurn,
 } from '../codex/responses-session';
 import { asFiniteNumber, asRecord, errorMessage } from '../util/guards';
-import type { ComputerInputController, MouseButton } from './input-controller';
+import type { ComputerDriver, MouseButton } from './driver';
+import { VisualLiveDesktopEvidence, type LiveDesktopEvidencePort } from './live-desktop-evidence';
 
 const MAX_ACTIONS = 12;
+const MAX_APPROVAL_REPLACEMENTS = 3;
 const SETTLE_MS = 350;
 /** Network budget for one Sol Responses request. */
 const OPERATOR_TIMEOUT_MS = 45_000;
@@ -184,26 +192,40 @@ export interface ComputerUseResult {
 
 export interface ComputerUseOperatorOptions {
   auth: ChatGptCodexAuthSource;
-  input: ComputerInputController;
+  driver: ComputerDriver;
+  /** One immutable identity for this foreground computer-use run. */
+  agentId: string;
+  /** Exact typed/ASR request. The model-authored `task` is never substituted for this authority. */
+  userRequest: string;
+  gate: AgentActionGatePort;
+  approvals: AgentApprovalPort;
+  evidence?: LiveDesktopEvidencePort;
+  signal?: AbortSignal;
   initialCaptures?: CaptureResult[];
   isAllowed(): boolean;
-  capture?: () => Promise<CaptureResult[]>;
   buildSession?: (auth: ChatGptCodexAuthSource) => CodexResponsesSession;
-  /** DIP -> physical px conversion (tests inject; default Electron `screen`). */
-  dipToScreenPoint?: (point: Point) => Point;
 }
 
 export class ComputerUseOperator {
-  private readonly capture: () => Promise<CaptureResult[]>;
-  private readonly dipToScreenPoint: (point: Point) => Point;
   private readonly session: CodexResponsesSession;
+  private readonly gateDriver: LiveActionGateDriver;
   private captures: CaptureResult[];
+  private lastClickTarget: { screenIndex: number; x: number; y: number } | null = null;
   private finalText = '';
 
   constructor(private readonly options: ComputerUseOperatorOptions) {
-    this.capture = options.capture ?? captureAllDisplays;
-    this.dipToScreenPoint = options.dipToScreenPoint ?? inputPointFromDip;
+    if (!options.agentId.trim()) throw new Error('computer-use agentId is required');
+    if (!options.userRequest.trim())
+      throw new Error('computer use requires the exact user request');
     this.captures = options.initialCaptures ?? [];
+    this.gateDriver = new LiveActionGateDriver(
+      options.driver,
+      () => this.captures,
+      (captures) => {
+        this.captures = [...captures];
+      },
+      options.evidence ?? new VisualLiveDesktopEvidence(),
+    );
     this.session =
       options.buildSession?.(options.auth) ??
       new CodexResponsesSession({
@@ -218,63 +240,71 @@ export class ComputerUseOperator {
   }
 
   async run(task: string): Promise<ComputerUseResult> {
-    if (!this.options.isAllowed()) return stopped(0);
-    if (this.captures.length === 0) this.captures = await this.capture();
-    if (this.captures.length === 0)
-      return failure('i could not see the screen, so i did not act.', 0);
-
-    let calls: CodexFunctionCall[] = [];
-    const callbacks: CodexResponsesCallbacks = {
-      onFunctionCall: (call) => calls.push(call),
-      onTextDone: (_id, text) => {
-        if (text.trim()) this.finalText = text.trim();
-      },
-    };
-    let result = await this.session.submit(this.turn(task), callbacks);
-    let actions = 0;
-
-    for (;;) {
-      const failed = resultFailure(result, actions);
-      if (failed) return failed;
-      if (!this.options.isAllowed()) {
-        this.session.cancel();
-        return stopped(actions);
-      }
-      if (calls.length === 0) {
-        return { ok: true, summary: this.finalText || 'done.', actions, quotaExhausted: false };
-      }
-      if (actions >= MAX_ACTIONS)
-        return failure(
-          'i stopped after twelve actions before the task was clearly complete.',
-          actions,
-        );
-
-      const [first, ...extra] = calls;
-      calls = [];
-      if (!first) return failure('the operator returned an empty action.', actions);
-      const output = await this.execute(first);
-      this.session.sendToolOutput(first.callId, output);
-      for (const call of extra) {
-        this.session.sendToolOutput(call.callId, {
-          error: 'only one action is allowed per screen observation',
-        });
-      }
-      if (output.ok !== true) return failure(output.error || 'the action failed.', actions);
-      actions += 1;
-      await delay(SETTLE_MS);
-      if (!this.options.isAllowed()) {
-        this.session.cancel();
-        return stopped(actions);
-      }
-      this.captures = await this.capture();
+    try {
+      if (!this.options.isAllowed() || this.options.signal?.aborted) return stopped(0);
+      if (this.captures.length === 0) this.captures = await this.options.driver.capture();
       if (this.captures.length === 0)
-        return failure('i lost sight of the screen after acting, so i stopped.', actions);
-      result = await this.session.continueWithTurn(
-        this.turn(
-          'the previous action completed. inspect this fresh screen state and either take the next single action or finish.',
-        ),
-        callbacks,
-      );
+        return failure('i could not see the screen, so i did not act.', 0);
+
+      let calls: CodexFunctionCall[] = [];
+      const callbacks: CodexResponsesCallbacks = {
+        onFunctionCall: (call) => calls.push(call),
+        onTextDone: (_id, text) => {
+          if (text.trim()) this.finalText = text.trim();
+        },
+      };
+      let result = await this.session.submit(this.turn(task), callbacks);
+      let actions = 0;
+
+      for (;;) {
+        const failed = resultFailure(result, actions);
+        if (failed) return failed;
+        if (!this.options.isAllowed() || this.options.signal?.aborted) {
+          this.session.cancel();
+          return stopped(actions);
+        }
+        if (calls.length === 0) {
+          return { ok: true, summary: this.finalText || 'done.', actions, quotaExhausted: false };
+        }
+        if (actions >= MAX_ACTIONS)
+          return failure(
+            'i stopped after twelve actions before the task was clearly complete.',
+            actions,
+          );
+
+        const [first, ...extra] = calls;
+        calls = [];
+        if (!first) return failure('the operator returned an empty action.', actions);
+        const output = await this.execute(first, task);
+        this.session.sendToolOutput(first.callId, output);
+        for (const call of extra) {
+          this.session.sendToolOutput(call.callId, {
+            error: 'only one action is allowed per screen observation',
+          });
+        }
+        if (output.ok !== true) return failure(output.error || 'the action failed.', actions);
+        actions += 1;
+        await delay(SETTLE_MS);
+        if (!this.options.isAllowed() || this.options.signal?.aborted) {
+          this.session.cancel();
+          return stopped(actions);
+        }
+        this.captures = await this.options.driver.capture();
+        if (this.captures.length === 0)
+          return failure('i lost sight of the screen after acting, so i stopped.', actions);
+        result = await this.session.continueWithTurn(
+          this.turn(
+            'the previous action completed. inspect this fresh screen state and either take the next single action or finish.',
+          ),
+          callbacks,
+        );
+      }
+    } finally {
+      // A stale re-assessment can produce a fresh escalation. Live desktop
+      // never carries an old human decision forward, so discard every parked
+      // capability when this run leaves its single-action boundary.
+      this.options.approvals.cancelAgent(this.options.agentId);
+      this.options.gate.cancelAgent(this.options.agentId);
     }
   }
 
@@ -286,7 +316,7 @@ export class ComputerUseOperator {
     };
   }
 
-  private async execute(call: CodexFunctionCall): Promise<ToolOutcome> {
+  private async execute(call: CodexFunctionCall, taskClaim: string): Promise<ToolOutcome> {
     let args: Record<string, unknown> | null;
     try {
       args = asRecord(JSON.parse(call.argsJson || '{}'));
@@ -300,30 +330,309 @@ export class ComputerUseOperator {
         const parsed = parseClickArgs(args);
         if (!parsed.ok) return { error: parsed.error };
         const click = parsed.value;
-        const capture = this.captures.find((item) => item.meta.screenIndex === click.screen);
-        if (!capture) return { error: 'that screenshot does not exist' };
-        const mapped = mapModelPoint({ x: click.x, y: click.y }, capture.meta);
-        const physical = this.dipToScreenPoint(mapped.global);
-        await this.options.input.click(physical.x, physical.y, click.button, click.count);
-        return { ok: true, clicked: click.label };
+        return this.executeGated(
+          {
+            kind: 'click',
+            x: click.x,
+            y: click.y,
+            label: click.label,
+            button: click.button,
+            count: click.count,
+            justification: 'perform the operator-proposed click for the delegated task',
+          },
+          click.screen,
+          async () => {
+            await this.options.driver.click(
+              { screenIndex: click.screen, x: click.x, y: click.y },
+              click.button,
+              click.count,
+            );
+            this.lastClickTarget = {
+              screenIndex: click.screen,
+              x: click.x,
+              y: click.y,
+            };
+          },
+          { ok: true, clicked: click.label },
+          taskClaim,
+        );
       }
       if (call.name === 'type_text') {
         const parsed = parseTypeTextArgs(args);
         if (!parsed.ok) return { error: parsed.error };
-        await this.options.input.typeText(parsed.value.text);
-        return { ok: true, typed_characters: parsed.value.text.length };
+        return this.executeGated(
+          {
+            kind: 'type',
+            text: parsed.value.text,
+            justification: 'type the operator-proposed text for the delegated task',
+          },
+          undefined,
+          () => this.options.driver.typeText(parsed.value.text),
+          { ok: true, typed_characters: parsed.value.text.length },
+          taskClaim,
+        );
       }
       if (call.name === 'press_keys') {
         const parsed = parsePressKeysArgs(args);
         if (!parsed.ok) return { error: parsed.error };
-        await this.options.input.pressKeys(parsed.value.keys);
-        return { ok: true, pressed: parsed.value.keys };
+        return this.executeGated(
+          {
+            kind: 'press_keys',
+            keys: parsed.value.keys,
+            justification: 'press the operator-proposed keys for the delegated task',
+          },
+          undefined,
+          () => this.options.driver.pressKeys(parsed.value.keys),
+          { ok: true, pressed: parsed.value.keys },
+          taskClaim,
+        );
       }
       return { error: `unknown tool: ${call.name}` };
     } catch (error) {
       return { error: errorMessage(error) };
     }
   }
+
+  private async executeGated(
+    action: TriggerAction,
+    screenIndex: number | undefined,
+    dispatch: () => Promise<void>,
+    success: Extract<ToolOutcome, { ok: true }>,
+    taskClaim: string,
+  ): Promise<ToolOutcome> {
+    const requiresReceiverIdentity =
+      (action.kind === 'type' || action.kind === 'press_keys') &&
+      !(action.kind === 'type' && isSecretLikeValue(action.text));
+    let expectedReceiverIdentity: string | null = null;
+    if (requiresReceiverIdentity) {
+      expectedReceiverIdentity = await this.gateDriver.queryReceiverIdentity();
+      if (expectedReceiverIdentity === null) {
+        return {
+          error:
+            'live keyboard input is unavailable because the native focused receiver cannot be verified',
+        };
+      }
+    }
+    this.gateDriver.prepare(
+      action.kind === 'click'
+        ? { screenIndex: screenIndex ?? 0, x: action.x, y: action.y }
+        : this.lastClickTarget,
+      requiresReceiverIdentity,
+      expectedReceiverIdentity,
+    );
+    const actionAbort = new AbortController();
+    const parentSignal = this.options.signal;
+    const abortFromParent = (): void => actionAbort.abort(parentSignal?.reason);
+    if (parentSignal?.aborted || !this.options.isAllowed()) abortFromParent();
+    else parentSignal?.addEventListener('abort', abortFromParent, { once: true });
+    const allowedPoll = setInterval(() => {
+      if (!this.options.isAllowed()) actionAbort.abort(new Error('computer use was cancelled'));
+    }, 50);
+    allowedPoll.unref?.();
+
+    const request: GatedActionRequest = {
+      agentId: this.options.agentId,
+      origin: 'live-desktop',
+      userRequest: this.options.userRequest,
+      taskClaim,
+      action,
+      driver: this.gateDriver,
+      ...(screenIndex === undefined ? {} : { screenIndex }),
+      signal: actionAbort.signal,
+    };
+
+    try {
+      let result = await this.options.gate.execute(request, dispatch);
+      if (result.kind !== 'escalated') return closedGateOutcome(result, success);
+
+      let escalation = result;
+      let replacements = 0;
+      let resolution = await this.options.approvals.request(
+        liveApprovalRequest(escalation),
+        actionAbort.signal,
+      );
+      for (;;) {
+        const verdict = resolution.verdict;
+        try {
+          if (
+            verdict === 'once' &&
+            requiresReceiverIdentity &&
+            !(await this.gateDriver.restoreExpectedReceiver())
+          ) {
+            await this.options.gate.resolveEscalation(escalation.approvalId, 'handled');
+            resolution.acknowledge();
+            return { error: receiverRestoreFailure() };
+          }
+          result = await this.options.gate.resolveEscalation(escalation.approvalId, verdict);
+          if (result.kind === 'escalated') {
+            if (requiresReceiverIdentity && !(await this.gateDriver.matchesExpectedReceiver())) {
+              await this.options.gate.resolveEscalation(result.approvalId, 'handled');
+              resolution.acknowledge();
+              return { error: receiverRestoreFailure() };
+            }
+            replacements += 1;
+            if (replacements >= MAX_APPROVAL_REPLACEMENTS) {
+              resolution.acknowledge();
+              this.options.gate.cancelAgent(this.options.agentId);
+              return {
+                error: 'desktop action approval could not stabilize after fresh evidence checks',
+              };
+            }
+            // The old human decision is never carried across fresh evidence.
+            // Atomically replace its card/capability and park for a new choice.
+            escalation = result;
+            resolution = await resolution.replace(liveApprovalRequest(escalation));
+            continue;
+          }
+          resolution.acknowledge();
+        } catch (error) {
+          const failure = error instanceof Error ? error : new Error(errorMessage(error));
+          resolution.reject(failure);
+          throw failure;
+        }
+        if (verdict !== 'once') return { error: approvalFailure(verdict) };
+        return closedGateOutcome(result, success);
+      }
+    } finally {
+      clearInterval(allowedPoll);
+      parentSignal?.removeEventListener('abort', abortFromParent);
+    }
+  }
+}
+
+function liveApprovalRequest(
+  escalation: Extract<GateExecutionResult<void>, { kind: 'escalated' }>,
+): ApprovalRequest {
+  return Object.freeze<ApprovalRequest>({
+    agentId: escalation.agentId,
+    approvalId: escalation.approvalId,
+    kind: 'live-action',
+    userRequest: escalation.userRequest,
+    allowAlways: false,
+    grantScope: null,
+    allowTakeover: false,
+    browserDomain: null,
+    actionText: escalation.actionText,
+    concern: escalation.concern,
+    screenshotPng: escalation.screenshotPng
+      ? `data:image/png;base64,${escalation.screenshotPng}`
+      : '',
+    payloadDigest: Object.freeze([...escalation.payloadDigest]) as string[],
+  });
+}
+
+/** Gate adapter binding live keyboard actions to one native receiver identity. */
+class LiveActionGateDriver implements GateDriverPort {
+  private approvalEvidence: CaptureResult[] | null = null;
+  private anchor: { screenIndex: number; x: number; y: number } | null = null;
+  private requiresReceiverIdentity = false;
+  private expectedReceiverIdentity: string | null = null;
+
+  constructor(
+    private readonly driver: ComputerDriver,
+    private readonly currentCaptures: () => CaptureResult[],
+    private readonly replaceCaptures: (captures: CaptureResult[]) => void,
+    private readonly evidence: LiveDesktopEvidencePort,
+  ) {}
+
+  prepare(
+    anchor: { screenIndex: number; x: number; y: number } | null,
+    requiresReceiverIdentity: boolean,
+    expectedReceiverIdentity: string | null,
+  ): void {
+    this.anchor = anchor;
+    this.requiresReceiverIdentity = requiresReceiverIdentity;
+    this.expectedReceiverIdentity = expectedReceiverIdentity;
+    this.approvalEvidence = null;
+  }
+
+  async queryReceiverIdentity(): Promise<string | null> {
+    return (await this.evidence.receiverIdentity?.()) ?? null;
+  }
+
+  async matchesExpectedReceiver(): Promise<boolean> {
+    if (!this.requiresReceiverIdentity || this.expectedReceiverIdentity === null) return false;
+    return (await this.queryReceiverIdentity()) === this.expectedReceiverIdentity;
+  }
+
+  async restoreExpectedReceiver(): Promise<boolean> {
+    if (!this.requiresReceiverIdentity || this.expectedReceiverIdentity === null) return false;
+    if (await this.matchesExpectedReceiver()) return true;
+    const restored =
+      (await this.evidence.restoreReceiverIdentity?.(this.expectedReceiverIdentity)) ?? false;
+    return restored && (await this.matchesExpectedReceiver());
+  }
+
+  async capture(): Promise<CaptureResult[]> {
+    // ActionGate asks for review evidence immediately after inspectDetailed.
+    // Return that exact observation once so the image shown to the user and
+    // the pending mechanical fingerprint describe the same desktop state.
+    if (this.approvalEvidence !== null) {
+      const captures = this.approvalEvidence;
+      this.approvalEvidence = null;
+      return [...captures];
+    }
+    const captures = await this.driver.capture();
+    this.replaceCaptures(captures);
+    return captures;
+  }
+
+  async inspectDetailed(
+    target: Parameters<GateDriverPort['inspectDetailed']>[0],
+  ): Promise<GateDriverInspection> {
+    // Capture and query native focus inside every inspection. The approval
+    // image, visual fingerprint, and keyboard receiver describe one bounded
+    // pre-dispatch observation.
+    const captures = await this.driver.capture();
+    this.replaceCaptures(captures);
+    this.approvalEvidence = [...captures];
+    const facts =
+      target === null ? await this.driver.inspectFocused() : await this.driver.inspect(target);
+    const payloadFields = await this.driver.readPendingPayload(target);
+    const current = this.currentCaptures();
+    const receiverIdentity = this.requiresReceiverIdentity
+      ? await this.queryReceiverIdentity()
+      : null;
+    if (
+      this.requiresReceiverIdentity &&
+      (receiverIdentity === null || receiverIdentity !== this.expectedReceiverIdentity)
+    ) {
+      throw new Error('the original native desktop receiver is no longer focused');
+    }
+    const fingerprint = await this.evidence.fingerprint(
+      current,
+      this.anchor,
+      this.requiresReceiverIdentity,
+      receiverIdentity,
+    );
+    if (fingerprint === null) throw new Error('native desktop receiver identity is unavailable');
+    return {
+      facts,
+      payloadFields,
+      fingerprint,
+      pageRevision: fingerprint,
+    };
+  }
+}
+
+function receiverRestoreFailure(): string {
+  return 'the original focused control could not be restored after approval, so the keyboard action was discarded';
+}
+
+function closedGateOutcome(
+  result: GateExecutionResult<void>,
+  success: Extract<ToolOutcome, { ok: true }>,
+): ToolOutcome {
+  if (result.kind === 'executed') return success;
+  if (result.kind === 'denied') return { error: result.reason };
+  if (result.kind === 'reobserve') return { error: result.reason };
+  return { error: 'the desktop changed while approval was pending, so the action was discarded' };
+}
+
+function approvalFailure(verdict: Exclude<AgentApprovalVerdict, 'once'>): string {
+  if (verdict === 'deny') return 'the user denied this desktop action';
+  if (verdict === 'handled') return 'the pending desktop action was discarded after user control';
+  return 'standing approval is unavailable for live desktop actions';
 }
 
 function captureContext(captures: CaptureResult[]): string {
@@ -335,15 +644,6 @@ function captureContext(captures: CaptureResult[]): string {
     .join('\n');
 }
 
-/** CoreGraphics mouse coordinates are macOS global logical points, matching Electron DIPs. */
-export function inputPointFromDip(
-  point: Point,
-  platform: NodeJS.Platform = process.platform,
-): Point {
-  return platform === 'darwin'
-    ? { x: Math.round(point.x), y: Math.round(point.y) }
-    : screen.dipToScreenPoint(point);
-}
 function isButton(value: unknown): value is MouseButton {
   return value === 'left' || value === 'right' || value === 'middle';
 }

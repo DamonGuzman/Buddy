@@ -22,9 +22,11 @@ import { join } from 'node:path';
 import { getCodexAuthProvider } from './auth/codex-auth';
 import { CodexOAuthLoopback } from './auth/oauth-loopback';
 import { CodexAgentBackend } from './agents/backend';
+import { ComputerUseRuntime } from './agents/computer-use-runtime';
 import { AgentManager } from './agents/manager';
-import { MockAgentBackend } from './agents/mock-backend';
+import { MockActionReviewer, MockAgentBackend } from './agents/mock-backend';
 import type { AgentBackend } from './agents/types';
+import { assertPublicBrowserDestination, BuddyBrowserProfile } from './computer/browser-profile';
 import { runCaptureSelfTest } from './capture-self-test';
 import { Conversation } from './conversation';
 import { startDebugServer } from './debug-server';
@@ -61,16 +63,16 @@ import { PanelManager } from './windows/panel';
 import { WhisperManager } from './windows/whisper';
 import { PermissionController } from './windows/permission-controller';
 import { PhoneAudioBridgeClient } from './phone-audio-bridge';
-import {
-  DEFAULT_PHONE_AUDIO_URL,
-  PhoneAudioBridgeSupervisor,
-} from './phone-audio-bridge-supervisor';
+import { PhoneAudioBridgeSupervisor } from './phone-audio-bridge-supervisor';
+import { resolvePhoneAudioConfiguration } from './phone-audio-config';
+import { NativeReceiverLiveDesktopEvidence } from './computer/live-desktop-evidence';
 import type { MainToPanelChannel, MainToPanelEvents } from '../shared/ipc';
 import type {
   AssistantState,
   AudioDeviceError,
   DebugState,
   RuntimeFlags,
+  SessionStatus,
   TranscriptEntry,
 } from '../shared/types';
 
@@ -123,6 +125,7 @@ interface Services {
   whisper: WhisperManager;
   hotkey: HotkeyManager;
   permissions: PermissionController;
+  computerUseRuntime: ComputerUseRuntime;
   agents: AgentManager;
   conversation: Conversation;
   phoneAudio: PhoneAudioBridgeClient | null;
@@ -256,14 +259,81 @@ function createServices(tray: TrayRef): Services {
   const codexAgentBackend = new CodexAgentBackend(codexAuth);
   const agentMock = isAgentMockEnabled();
   const agentBackend: AgentBackend = agentMock ? new MockAgentBackend() : codexAgentBackend;
+  let visibleApprovalIds = new Set<string>();
+  const computerUseRuntime = new ComputerUseRuntime({
+    whenAppReady: () => app.whenReady(),
+    userDataPath: () => app.getPath('userData'),
+    codexProvider: () => getCodexAuthProvider(),
+    onApprovalsChanged: (requests) => {
+      panel.send('panel:approvals', requests);
+      const added = requests.filter((request) => !visibleApprovalIds.has(request.approvalId));
+      visibleApprovalIds = new Set(requests.map((request) => request.approvalId));
+      // Foreground live-desktop computer use has no helper sprite to click.
+      // Surface its one-use decision immediately so the user's explicit
+      // request cannot park invisibly. Keep the first presentation inactive;
+      // clicking a decision may focus it, and the runtime hides/restores the
+      // target surface before any verdict can wake native input.
+      if (added.some((request) => request.kind === 'live-action')) {
+        panel.showInactive();
+      } else if (added.length > 0) {
+        try {
+          tray.current?.displayBalloon({
+            title: 'Buddy needs your approval',
+            content: added[0]?.actionText ?? 'A helper is waiting for your decision.',
+          });
+        } catch {
+          /* the persistent raised-hand helper remains the fallback surface */
+        }
+      }
+    },
+    journal: {
+      recordActionGateAssessment: (entry) =>
+        sessionRecorder?.record('action_gate_assessment', entry),
+      recordComputerActionOutcome: (entry) => {
+        if (entry.type === 'computer_action_executed') {
+          sessionRecorder?.record('computer_action_executed', entry);
+        } else {
+          sessionRecorder?.record('computer_action_failed', entry);
+        }
+        sessionRecorder?.flush();
+      },
+    },
+    onError: (error) => console.error('[computer-use]', error),
+    onEnrollmentClosed: () => panel.show(),
+    onTakeoverWindowHidden: () => panel.show(),
+    beforeLiveApprovalResolution: () => panel.prepareForLiveActionDispatch(),
+    onLiveApprovalResolutionFailed: () => panel.showInactive(),
+    ...(agentMock ? { createReviewer: () => new MockActionReviewer() } : {}),
+    ...(agentMock
+      ? {
+          createProfile: () =>
+            new BuddyBrowserProfile({
+              destinationGuard: async (url) => {
+                if (
+                  url.protocol === 'http:' &&
+                  url.hostname === '127.0.0.1' &&
+                  url.port === '8237'
+                ) {
+                  return;
+                }
+                await assertPublicBrowserDestination(url);
+              },
+            }),
+        }
+      : {}),
+  });
 
-  const explicitPhoneAudioUrl = phoneAudioUrl();
-  const phoneBridgeAutostart = phoneAudioAutostart(app.isPackaged);
-  const bridgeUrl = explicitPhoneAudioUrl || DEFAULT_PHONE_AUDIO_URL;
+  const phoneAudioConfiguration = resolvePhoneAudioConfiguration({
+    explicitUrl: phoneAudioUrl(),
+    autostartBundledBridge: phoneAudioAutostart(),
+    platform: process.platform,
+  });
   const phoneAudio =
-    explicitPhoneAudioUrl || phoneBridgeAutostart ? new PhoneAudioBridgeClient(bridgeUrl) : null;
+    phoneAudioConfiguration.kind === 'panel'
+      ? null
+      : new PhoneAudioBridgeClient(phoneAudioConfiguration.url);
   const phoneBridgeSupervisor =
-    phoneBridgeAutostart && bridgeUrl === DEFAULT_PHONE_AUDIO_URL
+    phoneAudioConfiguration.kind === 'bundled'
       ? new PhoneAudioBridgeSupervisor({
           entryPath: app.isPackaged
             ? join(process.resourcesPath, 'phone-audio-bridge', 'start.mjs')
@@ -290,6 +360,7 @@ function createServices(tray: TrayRef): Services {
     backend: agentBackend,
     isReady: () => agentMock || codexAgentBackend.isReady(),
     persistencePath: join(app.getPath('userData'), 'agents.json'),
+    browser: computerUseRuntime.browser,
     // M19: the overlays mirror the same renderer-safe list (helper sprites).
     // M21: the panel's agents view is gone — the overlay helper sprites are
     // the agents surface now.
@@ -316,6 +387,19 @@ function createServices(tray: TrayRef): Services {
         whisper.send('whisper:transcript', payload as TranscriptEntry);
       } else if (channel === 'panel:assistant-state') {
         whisper.send('whisper:assistant-state', payload as AssistantState);
+      } else if (
+        channel === 'panel:session-status' &&
+        (payload as SessionStatus).state === 'ready'
+      ) {
+        panel.resolveCurrentActionableError([
+          'no_api_key',
+          'api_key_rejected',
+          'api_key_unreadable',
+          'insufficient_quota',
+          'model_unavailable',
+          'api_access_forbidden',
+          'settings_reset',
+        ]);
       }
     },
   };
@@ -325,6 +409,11 @@ function createServices(tray: TrayRef): Services {
     panel: panelPortWithWhisperMirror,
     codexAuth,
     agents,
+    computerUseSecurity: {
+      gate: computerUseRuntime.gate,
+      approvals: computerUseRuntime.approvals,
+      evidence: new NativeReceiverLiveDesktopEvidence(),
+    },
     ...(sessionRecorder !== null ? { sessionRecorder } : {}),
     ...(phoneAudio !== null ? { phoneAudio } : {}),
   });
@@ -381,8 +470,11 @@ function createServices(tray: TrayRef): Services {
   phoneAudio?.on('disconnected', () => {
     sessionRecorder?.record('phone_audio_bridge_client', { state: 'disconnected' });
   });
-  phoneAudio?.start();
+  // The bundled supervisor has a synchronous platform guard. Start it before
+  // opening the client socket so an unsupported explicit QA configuration
+  // fails without leaving a reconnecting transport behind.
   phoneBridgeSupervisor?.start();
+  phoneAudio?.start();
 
   return {
     settings,
@@ -392,6 +484,7 @@ function createServices(tray: TrayRef): Services {
     whisper,
     hotkey,
     permissions,
+    computerUseRuntime,
     agents,
     conversation,
     phoneAudio,
@@ -488,6 +581,9 @@ function wireCodexSignin({ settings, panel, conversation }: Services): CodexSign
     lastCodexSignin = key;
     panel.send('panel:codex-signin', state);
     panel.send('panel:settings', settings.get());
+    if (state.signedIn && state.valid) {
+      panel.resolveCurrentActionableError(['agent_not_signed_in']);
+    }
     conversation.onAgentAvailabilityChanged();
   };
   const oauth = new CodexOAuthLoopback({
@@ -522,7 +618,7 @@ function startCodexSigninPolling(push: (force: boolean) => void): NodeJS.Timeout
 // ===========================================================================
 
 function registerInvokeHandlers(
-  { settings, conversation, agents, permissions }: Services,
+  { settings, conversation, agents, permissions, panel, computerUseRuntime }: Services,
   codexOAuth: CodexOAuthLoopback,
   runtime: RuntimeReporter,
 ): void {
@@ -540,13 +636,46 @@ function registerInvokeHandlers(
   handle('panel:get-runtime', () => runtime.flags());
   handle('permissions:get', () => permissions.current());
   handle('permissions:action', (action) => permissions.act(action));
+  handle('panel:get-actionable-error', () => panel.actionableErrorState());
+  handle('panel:resolve-actionable-error', (expected) => panel.resolveActionableError(expected));
+  handle('panel:dismiss-actionable-error', (expected) => panel.dismissActionableError(expected));
   // M17 addition (integration-approved): Codex sign-in snapshot bootstrap.
   handle('codex:signin-state', () => getCodexAuthProvider().codexSignInState());
   handle('codex:sign-in', () => codexOAuth.start());
   handle('agents:list', () => agents.list());
-  handle('agents:cancel', (id) => agents.cancel(id));
-  handle('agents:cancel-all', () => agents.cancelAll());
+  handle('agents:cancel', async (id) => {
+    agents.cancel(id);
+    await computerUseRuntime.cancelAgent(id);
+  });
+  handle('agents:cancel-all', async () => {
+    agents.cancelAll();
+    await computerUseRuntime.cancelAll();
+  });
   handle('agents:mark-seen', (id) => agents.markSeen(id));
+  handle('approval:resolve', (agentId, approvalId, verdict) =>
+    computerUseRuntime.controller.resolveApproval(agentId, approvalId, verdict),
+  );
+  handle('approval:show-window', (agentId, approvalId) =>
+    computerUseRuntime.controller.showApprovalWindow(agentId, approvalId),
+  );
+  handle('approval:hide-window', (agentId, approvalId) =>
+    computerUseRuntime.controller.hideApprovalWindow(agentId, approvalId),
+  );
+  handle('approvals:list', () => computerUseRuntime.controller.listApprovals());
+  handle('grants:list', () => computerUseRuntime.controller.listGrants());
+  handle('grants:revoke', (id) => computerUseRuntime.controller.revokeGrant(id));
+  handle('buddy-browser:open-enroll', (url) => computerUseRuntime.controller.openEnrollment(url));
+  handle('buddy-browser:list-enrolled-sites', () =>
+    computerUseRuntime.controller.listEnrolledSites(),
+  );
+  handle('buddy-browser:sign-out-site', async (domain) => {
+    await agents.withBrowserAdmissionBlocked(() =>
+      computerUseRuntime.controller.signOutSite(domain),
+    );
+  });
+  handle('buddy-browser:clear', async () => {
+    await agents.withBrowserAdmissionBlocked(() => computerUseRuntime.controller.clearAll());
+  });
 }
 
 // ===========================================================================
@@ -568,7 +697,13 @@ function validAgentId(payload: { id: string }): string | null {
   return payload && typeof payload.id === 'string' ? payload.id : null;
 }
 
-function registerRendererEvents({ conversation, whisper, agents }: Services): void {
+function registerRendererEvents({
+  conversation,
+  whisper,
+  agents,
+  panel,
+  computerUseRuntime,
+}: Services): void {
   onRendererEvent('audio:chunk', (chunk) => {
     conversation.handleAudioChunk(chunk);
   });
@@ -585,12 +720,23 @@ function registerRendererEvents({ conversation, whisper, agents }: Services): vo
   onRendererEvent('audio:playback-ring', (ring) => {
     conversation.handlePlaybackRing(ring);
   });
-  // M22: helper sprite / agent card clicks are handled inside the overlay
-  // (the card expands to the helper's full status); the 'overlay:agent-click'
-  // channel stays in the frozen contract but nothing sends it anymore.
+  // Waiting helpers use their click to bring the approval queue into view.
+  onRendererEvent('overlay:agent-click', (payload) => {
+    const id = validAgentId(payload);
+    if (id === null) return;
+    const agent = agents.list().find((item) => item.id === id);
+    if (agent?.status === 'waiting_approval') panel.show();
+  });
   onRendererEvent('overlay:agent-cancel', (payload) => {
     const id = validAgentId(payload);
-    if (id !== null) agents.cancel(id);
+    if (id !== null) {
+      agents.cancel(id);
+      void computerUseRuntime
+        .cancelAgent(id)
+        .catch((error: unknown) =>
+          console.error('[computer-use] agent cancellation failed', error),
+        );
+    }
   });
   // M20: the whisper asked to tuck away (esc / close affordance).
   onRendererEvent('whisper:hide', () => whisper.hide());
@@ -630,9 +776,16 @@ function wireHotkey({ hotkey, settings, conversation, whisper, overlays }: Servi
     if (!settings.get().fullRealtimeMode) whisper.toggle();
   });
   hotkey.on('primary-click', (ctrlKey) => {
-    if (process.platform === 'darwin' && !ctrlKey && !overlays.isBuddyInteractive()) {
-      overlays.openWhisperIfBuddyClicked();
-    }
+    if (process.platform !== 'darwin' || overlays.isBuddyInteractive()) return;
+    if (ctrlKey) overlays.openSettingsIfBuddyClicked();
+    else overlays.openWhisperIfBuddyClicked();
+  });
+  hotkey.on('secondary-click', () => {
+    // Before the hover dwell flips the narrow Buddy region interactive, the
+    // overlay is intentionally click-through. Hit-test the global click so a
+    // normal immediate right-click still opens Settings. Once interactive,
+    // the renderer owns the contextmenu event and this fallback stays silent.
+    if (!overlays.isBuddyInteractive()) overlays.openSettingsIfBuddyClicked();
   });
   // F1 fix (C1): forced release (max-hold watchdog / lock / suspend) cancels
   // the hold — mic released, held audio cleared, NO turn committed.
@@ -646,7 +799,7 @@ function wireHotkey({ hotkey, settings, conversation, whisper, overlays }: Servi
 }
 
 function wirePanelLifecycle(
-  { panel, whisper, settings, conversation, permissions }: Services,
+  { panel, whisper, settings, conversation, permissions, computerUseRuntime }: Services,
   tray: TrayRef,
   runtime: RuntimeReporter,
   pushCodexSignin: (force: boolean) => void,
@@ -672,6 +825,7 @@ function wirePanelLifecycle(
     panel.send('panel:settings', settings.get());
     runtime.push();
     panel.send('panel:permissions', permissions.current());
+    panel.send('panel:approvals', computerUseRuntime.controller.listApprovals());
     // M17: hand the (re)loaded panel the current Codex sign-in snapshot.
     pushCodexSignin(true);
   });
@@ -686,7 +840,14 @@ function wirePanelLifecycle(
   });
 }
 
-function wirePowerMonitor({ sessionRecorder, hotkey, conversation, permissions }: Services): void {
+function wirePowerMonitor({
+  sessionRecorder,
+  hotkey,
+  conversation,
+  permissions,
+  agents,
+  computerUseRuntime,
+}: Services): void {
   // F1 fix (C1 + sleep/resume): the secure desktop (Ctrl+Alt+Del) and lock
   // screen swallow keyups — force-cancel any live hold and reset modifier
   // state so the mic can never stay hot on a locked machine. On resume, the
@@ -695,15 +856,24 @@ function wirePowerMonitor({ sessionRecorder, hotkey, conversation, permissions }
     sessionRecorder?.record('system_lock', null);
     hotkey.forceCancel();
     conversation.deactivateFullRealtime();
+    void agents
+      .cancelBrowserRuns()
+      .then(() => computerUseRuntime.suspend())
+      .catch((error: unknown) => console.error('[computer-use] lock shutdown failed', error));
   });
   powerMonitor.on('suspend', () => {
     sessionRecorder?.record('system_suspend', null);
     sessionRecorder?.flush();
     hotkey.forceCancel();
     conversation.deactivateFullRealtime();
+    void agents
+      .cancelBrowserRuns()
+      .then(() => computerUseRuntime.suspend())
+      .catch((error: unknown) => console.error('[computer-use] suspend shutdown failed', error));
   });
   powerMonitor.on('resume', () => {
     sessionRecorder?.record('system_resume', null);
+    computerUseRuntime.resume();
     conversation.onSystemResume();
     permissions.refresh();
   });
@@ -730,7 +900,14 @@ function scheduleTestThrow(): void {
   }, 3_000);
 }
 
-function buildDebugSurface({ conversation, overlays, panel, hotkey, agents }: Services): void {
+function buildDebugSurface({
+  conversation,
+  overlays,
+  panel,
+  hotkey,
+  agents,
+  computerUseRuntime,
+}: Services): void {
   const getDebugState = (): DebugState => ({
     appVersion: app.getVersion(),
     assistantState: conversation.assistantState(),
@@ -771,12 +948,51 @@ function buildDebugSurface({ conversation, overlays, panel, hotkey, agents }: Se
       spawn: (task) =>
         agents.spawn({
           id: `agent_debug_${Date.now()}`,
+          userRequest: task,
           task,
           recentTranscript: '',
           createdAt: Date.now(),
+          browserEnabled: false,
+        }),
+      spawnBrowser: (task) =>
+        agents.spawn({
+          id: `agent_debug_browser_${Date.now()}`,
+          userRequest: task,
+          task,
+          recentTranscript: '',
+          createdAt: Date.now(),
+          browserEnabled: true,
         }),
       list: () => agents.list(),
-      cancel: (id) => agents.cancel(id),
+      cancel: (id) => {
+        agents.cancel(id);
+        void computerUseRuntime
+          .cancelAgent(id)
+          .catch((error: unknown) =>
+            console.error('[computer-use] debug cancellation failed', error),
+          );
+      },
+    },
+    computerUse: {
+      assessGate: async (input) => ({
+        ok: false,
+        error:
+          'standalone assessment has no trusted browser observation; spawn a browser mock scenario to exercise the production gate',
+        agentId: input.agentId ?? null,
+      }),
+      listGrants: () => computerUseRuntime.controller.listGrants(),
+      resolveAgentApproval: async (agentId, verdict) => {
+        const request = computerUseRuntime.controller
+          .listApprovals()
+          .find((item) => item.agentId === agentId);
+        if (!request) return false;
+        await computerUseRuntime.controller.resolveApproval(
+          request.agentId,
+          request.approvalId,
+          verdict,
+        );
+        return true;
+      },
     },
   });
 }
@@ -792,6 +1008,7 @@ function registerShutdown(
     phoneAudio,
     phoneBridgeSupervisor,
     agents,
+    computerUseRuntime,
     sessionRecorder,
     overlays,
     panel,
@@ -805,20 +1022,39 @@ function registerShutdown(
   app.on('window-all-closed', () => {
     /* keep running in tray */
   });
-  // Teardown order is load-bearing: hotkey → conversation → phoneAudio →
-  // supervisor → agents → recorder → overlays → panel.
-  app.on('will-quit', () => {
-    clearInterval(codexPoll); // M17: stop the Codex sign-in refresh poll
-    clearInterval(permissionPoll);
-    codexOAuth.stop();
-    hotkey.stop();
-    conversation.close();
-    phoneAudio?.close();
-    phoneBridgeSupervisor?.close();
-    agents.dispose();
-    sessionRecorder?.close('app_quit');
-    overlays.destroy();
-    panel.destroy();
-    whisper.destroy();
+  // Electron does not await `will-quit`. Hold the first before-quit so parked
+  // approvals, acting runs, browser windows, and profile handlers are gone
+  // before the session journal is closed.
+  let shutdownStarted = false;
+  let shutdownFinished = false;
+  app.on('before-quit', (event) => {
+    if (shutdownFinished) return;
+    event.preventDefault();
+    if (shutdownStarted) return;
+    shutdownStarted = true;
+    void (async () => {
+      const attempt = async (label: string, run: () => void | Promise<void>): Promise<void> => {
+        try {
+          await run();
+        } catch (error) {
+          console.error(`[shutdown] ${label} failed`, error);
+        }
+      };
+      clearInterval(codexPoll);
+      clearInterval(permissionPoll);
+      await attempt('codex oauth', () => codexOAuth.stop());
+      await attempt('hotkey', () => hotkey.stop());
+      await attempt('conversation', () => conversation.close());
+      await attempt('phone audio', () => phoneAudio?.close());
+      await attempt('phone bridge', () => phoneBridgeSupervisor?.close());
+      await attempt('agents', () => agents.dispose());
+      await attempt('computer use', () => computerUseRuntime.dispose());
+      await attempt('session recorder', () => sessionRecorder?.close('app_quit'));
+      await attempt('overlays', () => overlays.destroy());
+      await attempt('panel', () => panel.destroy());
+      await attempt('whisper', () => whisper.destroy());
+      shutdownFinished = true;
+      app.quit();
+    })();
   });
 }

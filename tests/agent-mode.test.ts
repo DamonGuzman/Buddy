@@ -9,13 +9,24 @@ import type {
   AgentBackendRequest,
   AgentBackendResult,
   AgentBrief,
+  AgentBrowserDeps,
   AgentPersistencePort,
   AgentToolContext,
 } from '../src/main/agents/types';
 import type { AgentSummary } from '../src/shared/types';
+import { AGENT_MANAGER_DISPOSE_TIMEOUT_MS } from '../src/main/agents/config';
+import { AgentTools } from '../src/main/conversation/agent-tools';
+import { TranscriptStore } from '../src/main/conversation/transcript-store';
 
 function brief(id: string): AgentBrief {
-  return { id, task: `research ${id}`, recentTranscript: '', createdAt: Date.now() };
+  return {
+    id,
+    userRequest: `research ${id}`,
+    task: `research ${id}`,
+    recentTranscript: '',
+    createdAt: Date.now(),
+    browserEnabled: false,
+  };
 }
 
 describe('Agent Mode runtime', () => {
@@ -239,6 +250,252 @@ describe('Agent Mode runtime', () => {
     expect(manager.spawn(brief('fragile')).ok).toBe(true);
     await vi.waitFor(() => expect(finished).toBe(true));
     expect(manager.list()[0]?.status).toBe('done');
+  });
+
+  it('disposes active runners and suppresses lifecycle callbacks after shutdown begins', async () => {
+    const changed = vi.fn();
+    const finished = vi.fn();
+    const backend: AgentBackend = {
+      isReady: () => true,
+      request: (request) =>
+        new Promise<AgentBackendResult>((resolve) => {
+          request.signal.addEventListener(
+            'abort',
+            () =>
+              resolve({
+                ok: false,
+                errorKind: 'agent_backend_down',
+                detail: 'aborted for shutdown',
+                retryable: false,
+              }),
+            { once: true },
+          );
+        }),
+    };
+    const manager = new AgentManager({
+      backend,
+      isReady: () => true,
+      onAgentsChanged: changed,
+      onFinished: finished,
+    });
+    expect(manager.spawn(brief('shutdown')).ok).toBe(true);
+    await vi.waitFor(() => expect(manager.list()[0]?.status).toBe('running'));
+    const callbacksBeforeDispose = changed.mock.calls.length;
+
+    await manager.dispose();
+
+    expect(manager.list()[0]?.status).toBe('cancelled');
+    expect(changed).toHaveBeenCalledTimes(callbacksBeforeDispose);
+    expect(finished).not.toHaveBeenCalled();
+    expect(() => manager.spawn(brief('too_late'))).toThrow('agent manager is disposed');
+  });
+
+  it('fails manager disposal within a finite bound when a backend ignores abort', async () => {
+    vi.useFakeTimers();
+    const manager = new AgentManager({
+      backend: {
+        isReady: () => true,
+        request: () => new Promise<AgentBackendResult>(() => undefined),
+      },
+      isReady: () => true,
+      onAgentsChanged: () => undefined,
+      onFinished: () => undefined,
+    });
+    expect(manager.spawn(brief('stuck-shutdown')).ok).toBe(true);
+    const disposal = manager.dispose();
+    const rejection = expect(disposal).rejects.toThrow('agent manager disposal timed out');
+
+    await vi.advanceTimersByTimeAsync(AGENT_MANAGER_DISPOSE_TIMEOUT_MS);
+
+    await rejection;
+  });
+
+  it('joins a browser run cancelled during initial deliberation before profile clearing proceeds', async () => {
+    const backend: AgentBackend = {
+      isReady: () => true,
+      request: (request) =>
+        new Promise<AgentBackendResult>((resolve) => {
+          request.signal.addEventListener(
+            'abort',
+            () =>
+              resolve({
+                ok: false,
+                errorKind: 'agent_backend_down',
+                detail: 'aborted before first browser action',
+                retryable: false,
+              }),
+            { once: true },
+          );
+        }),
+    };
+    const createDriver = vi.fn(async () => {
+      throw new Error('a driver must not be created after cancellation joined');
+    });
+    const browser: AgentBrowserDeps = {
+      createDriver,
+      gate: {
+        execute: async () => {
+          throw new Error('gate must not run');
+        },
+        resolveEscalation: async () => {
+          throw new Error('gate must not run');
+        },
+        cancelAgent: () => undefined,
+      },
+      approvals: {
+        request: async () => {
+          throw new Error('approval must not be requested');
+        },
+        cancelAgent: () => undefined,
+        get: () => null,
+        resolve: async () => undefined,
+      },
+    };
+    const manager = new AgentManager({
+      backend,
+      browser,
+      isReady: () => true,
+      onAgentsChanged: () => undefined,
+      onFinished: () => undefined,
+    });
+    expect(manager.spawn({ ...brief('initial-browser-race'), browserEnabled: true })).toEqual({
+      ok: true,
+      agentId: 'initial-browser-race',
+    });
+
+    await manager.cancelBrowserRuns();
+
+    expect(manager.list()[0]).toMatchObject({ status: 'cancelled' });
+    expect(createDriver).not.toHaveBeenCalled();
+  });
+
+  it('atomically blocks browser admission through cancellation and destructive profile mutation', async () => {
+    let mutationStarted = false;
+    let finishMutation!: () => void;
+    const mutationWait = new Promise<void>((resolve) => {
+      finishMutation = resolve;
+    });
+    const browser: AgentBrowserDeps = {
+      createDriver: async () => {
+        throw new Error('no browser action is expected');
+      },
+      gate: {
+        execute: async () => {
+          throw new Error('no gate action is expected');
+        },
+        resolveEscalation: async () => {
+          throw new Error('no gate action is expected');
+        },
+        cancelAgent: () => undefined,
+      },
+      approvals: {
+        request: async () => {
+          throw new Error('no approval is expected');
+        },
+        cancelAgent: () => undefined,
+        get: () => null,
+        resolve: async () => undefined,
+      },
+    };
+    const manager = new AgentManager({
+      backend: new MockAgentBackend(),
+      browser,
+      isReady: () => true,
+      onAgentsChanged: () => undefined,
+      onFinished: () => undefined,
+    });
+
+    const mutation = manager.withBrowserAdmissionBlocked(async () => {
+      mutationStarted = true;
+      await mutationWait;
+    });
+    await vi.waitFor(() => expect(mutationStarted).toBe(true));
+
+    expect(manager.spawn({ ...brief('blocked-browser-spawn'), browserEnabled: true })).toEqual({
+      ok: false,
+      reason: 'browser_unavailable',
+    });
+    expect(manager.spawn(brief('allowed-research-spawn'))).toEqual({
+      ok: true,
+      agentId: 'allowed-research-spawn',
+    });
+    await expect(manager.withBrowserAdmissionBlocked(async () => undefined)).rejects.toThrow(
+      'a browser state mutation is already in progress',
+    );
+
+    finishMutation();
+    await mutation;
+    expect(manager.spawn({ ...brief('browser-after-mutation'), browserEnabled: true })).toEqual({
+      ok: true,
+      agentId: 'browser-after-mutation',
+    });
+    manager.cancelAll();
+    await manager.dispose();
+  });
+
+  it('reports browser runtime unavailability without misclassifying it as sign-in failure', () => {
+    const transcript = new TranscriptStore(10, () => undefined);
+    transcript.upsert({
+      id: 'user_1',
+      role: 'user',
+      text: 'file the issue in linear',
+      streaming: false,
+      timestamp: Date.now(),
+    });
+    const surfaceError = vi.fn();
+    const tools = new AgentTools({
+      agents: {
+        isReady: () => true,
+        list: () => [],
+        spawn: () => ({ ok: false, reason: 'browser_unavailable' }),
+        markSpoken: () => undefined,
+      },
+      transcript,
+      turnCaptures: () => [],
+      noteOrigin: () => undefined,
+      surfaceError,
+    });
+
+    expect(tools.spawnAgent({ task: 'file the issue', browser_access: true }, 'text')).toEqual({
+      error: 'browser use is unavailable for background buddies right now',
+    });
+    expect(surfaceError).not.toHaveBeenCalled();
+  });
+
+  it('never authorizes an agent from an older user turn while the latest request is streaming', () => {
+    const transcript = new TranscriptStore(10, () => undefined);
+    transcript.upsert({
+      id: 'user_old',
+      role: 'user',
+      text: 'send the payment',
+      streaming: false,
+      timestamp: 1,
+    });
+    transcript.upsert({
+      id: 'user_current',
+      role: 'user',
+      text: '…',
+      streaming: true,
+      timestamp: 2,
+    });
+    const spawn = vi.fn(() => ({ ok: true as const, agentId: 'must-not-spawn' }));
+    const tools = new AgentTools({
+      agents: {
+        isReady: () => true,
+        list: () => [],
+        spawn,
+        markSpoken: () => undefined,
+      },
+      transcript,
+      turnCaptures: () => [],
+      noteOrigin: () => undefined,
+      surfaceError: () => undefined,
+    });
+
+    expect(tools.spawnAgent({ task: 'send the payment', browser_access: true }, 'text')).toEqual({
+      error: 'the original user request is still being transcribed',
+    });
+    expect(spawn).not.toHaveBeenCalled();
   });
 });
 

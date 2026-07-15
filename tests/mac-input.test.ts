@@ -2,7 +2,8 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { MacInputController } from '../src/main/computer/mac-input';
-import { inputPointFromDip, operatorInstructions } from '../src/main/computer/operator';
+import { inputPointFromDip } from '../src/main/computer/live-desktop-driver';
+import { operatorInstructions } from '../src/main/computer/operator';
 
 class FakeChild extends EventEmitter {
   readonly stdout = new PassThrough();

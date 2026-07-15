@@ -33,8 +33,10 @@
  */
 
 import { app, screen } from 'electron';
+import { createHash } from 'node:crypto';
 import { AUDIO_SAMPLE_RATE } from '../../shared/constants';
 import type {
+  ActionableErrorIdentity,
   AgentSummary,
   AssistantState,
   AudioDeviceError,
@@ -55,7 +57,7 @@ import { captureAllDisplays } from '../capture';
 import type { CaptureResult } from '../capture';
 import { CodexResponsesSession } from '../codex/responses-session';
 import type { CodexFunctionCall, CodexToolDef } from '../codex/responses-session';
-import { classifyError, describeKind } from '../errors';
+import { classifyError, describeKind, redactSensitiveErrorText } from '../errors';
 import type { ErrorKind, ErrorParams } from '../errors';
 import { isCodexSubDisabled, isRestGroundDisabled, isSnapDisabled, mockRealtimeUrl } from '../env';
 import { createElementGrounder } from '../grounding/accessibility-grounder';
@@ -71,6 +73,8 @@ import type { ResponseDoneInfo, ToolCall } from '../realtime/session';
 import { RealtimeSession } from '../realtime/session';
 import { errorMessage } from '../util/guards';
 import type { PhoneAudioTransport } from '../phone-audio-bridge';
+import type { AgentActionGatePort, AgentApprovalPort } from '../agents/types';
+import type { LiveDesktopEvidencePort } from '../computer/live-desktop-evidence';
 import { AgentContinuations } from './agent-continuations';
 import { AgentTools } from './agent-tools';
 import { AssistantStateMachine } from './assistant-state';
@@ -122,6 +126,12 @@ export interface ConversationDeps {
   phoneAudio?: PhoneAudioTransport;
   /** Durable local journal + turn artifacts; omitted in focused tests. */
   sessionRecorder?: RecorderPort;
+  /** Shared browser/live action gate and main-process approval parking queue. */
+  computerUseSecurity?: {
+    gate: AgentActionGatePort;
+    approvals: AgentApprovalPort;
+    evidence?: LiveDesktopEvidencePort;
+  };
   /** Native accessibility seam (UIA on Windows, AX on macOS). */
   buildElementGrounder?: () => ElementGrounder;
   /** M10 seam: the REST grounder. Optional — defaults to the real transport. */
@@ -148,6 +158,8 @@ export interface ConversationDebugInfo {
   lastGrounding: GroundingAttribution | null;
 }
 
+type HoldConnectResult = { ok: true } | { ok: false; error: unknown };
+
 export class Conversation {
   private readonly settings: SettingsPort;
   private readonly overlays: OverlayPort;
@@ -159,6 +171,8 @@ export class Conversation {
   private sessionModel: string;
   private sessionVoice: string;
   private sessionFullRealtimeMode: boolean;
+  /** Secret-safe identity used to rebuild a socket when a stored key changes. */
+  private apiKeyFingerprint: string | null | undefined;
 
   /**
    * The ONE owner of AssistantState. Call sites dispatch semantic events
@@ -185,6 +199,10 @@ export class Conversation {
   private holdCommitted = false;
   /** Mic chunks parked until the hold commits (flushed then; dropped on tap). */
   private pendingHoldChunks: ArrayBuffer[] = [];
+  /** The hold-scoped session warmup, retained so release can surface its real failure. */
+  private holdConnectResult: Promise<HoldConnectResult> | null = null;
+  /** Invalidates an async zero-audio release when a newer hold starts. */
+  private holdSequence = 0;
   /** Mic chunks are appended to the session only while this is true. */
   private acceptingAudio = false;
   private pendingCaptures: Promise<CaptureResult[]> | null = null;
@@ -194,6 +212,7 @@ export class Conversation {
     token: number;
     itemId: string;
     promise: Promise<CaptureResult[]>;
+    repairIdentity: ActionableErrorIdentity | null;
   } | null = null;
 
   /** CLICKY_NO_SNAP=1 disables snapping (eval A/B attribution). */
@@ -259,6 +278,10 @@ export class Conversation {
     this.sessionModel = snapshot.model;
     this.sessionVoice = snapshot.voice;
     this.sessionFullRealtimeMode = snapshot.fullRealtimeMode;
+    // safeStorage is unavailable until Electron app.ready. createServices()
+    // constructs the conversation earlier, so resolve credential identity
+    // lazily on the first turn/settings update instead.
+    this.apiKeyFingerprint = undefined;
 
     this.transcriptStore = new TranscriptStore(TRANSCRIPT_LIMIT, (entry) => {
       this.recorder?.record('transcript_upsert', {
@@ -302,6 +325,8 @@ export class Conversation {
       broadcastCaption: (update) => this.overlays.broadcast('overlay:caption', update),
       onFunctionCall: (call, captures, token) => this.onCodexFunctionCall(call, captures, token),
       surfacePlanLimitOnce: (token) => this.errors.surfacePlanLimitOnce(token),
+      codexPlanRepairIdentity: () => this.errors.codexPlanRepairIdentity(),
+      noteCodexSucceeded: (expected) => this.errors.noteCodexSucceeded(expected),
       failTurn: (err) => this.failTurn(err),
       // 'turn_settled' is ignored while an error flash shows; a clean finish
       // starts the normal idle grace.
@@ -316,6 +341,8 @@ export class Conversation {
       codexProvider: () => this.codexProvider(),
       codexTextUsedPercent: () => this.codexText.lastUsedPercent(),
       surfacePlanLimitOnce: (token) => this.errors.surfacePlanLimitOnce(token),
+      codexPlanRepairIdentity: () => this.errors.codexPlanRepairIdentity(),
+      noteCodexSucceeded: (expected) => this.errors.noteCodexSucceeded(expected),
       buildElementGrounder:
         deps.buildElementGrounder ??
         (() =>
@@ -366,13 +393,26 @@ export class Conversation {
       transcript: this.transcriptStore,
       turnCaptures: () => this.turnCaptures,
       noteOrigin: (agentId, mode) => this.continuations.noteOrigin(agentId, mode),
+      surfaceError: (kind) => this.errors.surface(describeKind(kind)),
     });
     this.computerUse = new ComputerUseRunner({
       settings: this.settings,
       guard: this.guard,
+      ...(deps.computerUseSecurity ?? {}),
+      userRequest: () => {
+        const latestUser = [...this.transcriptStore.list()]
+          .reverse()
+          .find((entry) => entry.role === 'user');
+        // Never fall back to an older request while the current voice
+        // transcript is still a placeholder: that would grant authority from
+        // a different turn. The runner fails closed until exact ASR is ready.
+        return latestUser && !latestUser.streaming ? latestUser.text : '';
+      },
       codexProvider: () => this.codexProvider(),
       enabledSnapshot: () => this.computerUseEnabledSnapshot,
       surfacePlanLimitOnce: (token) => this.errors.surfacePlanLimitOnce(token),
+      codexPlanRepairIdentity: () => this.errors.codexPlanRepairIdentity(),
+      noteCodexSucceeded: (expected) => this.errors.noteCodexSucceeded(expected),
       userDataDir: () => app.getPath('userData'),
     });
 
@@ -497,6 +537,11 @@ export class Conversation {
     this.machine.dispatch('open_mic_on');
 
     try {
+      // Mock sessions do not need authentication, so RealtimeSession will not
+      // invoke its getApiKey callback. Still establish the key baseline once
+      // a real user action begins; otherwise the next unrelated settings
+      // notification looks like a credential change and tears open-mic down.
+      this.getApiKeyAndInitializeFingerprint();
       await this.session.connect();
       if (this.guard.closed || !this.fullRealtimeActive || !this.guard.isCurrent(token)) return;
       this.acceptingAudio = true;
@@ -538,6 +583,8 @@ export class Conversation {
     this.holdAudioMs = 0; // M9
     this.holdCommitted = false;
     this.pendingHoldChunks = [];
+    this.holdConnectResult = null;
+    this.holdSequence += 1;
     this.errors.clearMicError(); // M11: mic failures are per-hold
     // M8.5: new voice turn timings. M20 note: begun BEFORE the (deferred)
     // barge-in, so a barge stop is measured against THIS turn's bargeWatch
@@ -548,16 +595,19 @@ export class Conversation {
     this.setCaptureIndicator(true);
     this.audio.capture('start');
     if (this.canReachServer()) {
-      // Warm the socket early; failures re-surface (fail-soft) at commit.
-      void this.session.connect().catch(() => undefined);
+      // Warm the socket early. Retain the outcome: a real zero-audio release
+      // must not misreport an authentication failure as a microphone failure.
+      this.holdConnectResult = this.connectForHold();
     }
     // M20 (the whisper): a tap must leave whatever buddy is doing untouched,
     // so the irreversible half of hold-start — barge-in, episode begin,
     // session buffer clear — waits out the tap window. Mic chunks arriving
     // meanwhile are parked and flushed on commit, so no speech is lost.
     this.holdCommitTimer = setTimeout(() => this.commitHoldAsTalk(), MIN_HOLD_MS);
+    const captureRepairIdentity = this.errors.captureRepairIdentity();
     this.pendingCaptures = captureAllDisplays()
       .then((results) => {
+        this.noteCaptureSucceeded(results, captureRepairIdentity);
         this.lastCapture = results.map((r) => r.meta);
         // M8.5: capture completed (kicked off at hold-start).
         turn.tCaptureDone = Date.now();
@@ -607,6 +657,34 @@ export class Conversation {
     this.holdCommitTimer = null;
   }
 
+  private connectForHold(): Promise<HoldConnectResult> {
+    return this.session.connect().then(
+      () => ({ ok: true }),
+      (error: unknown) => ({ ok: false, error }),
+    );
+  }
+
+  private async surfaceZeroAudioRelease(
+    sequence: number,
+    attempt: Promise<HoldConnectResult>,
+  ): Promise<void> {
+    const result = await attempt;
+    if (
+      this.guard.closed ||
+      this.holding ||
+      this.holdSequence !== sequence ||
+      this.holdConnectResult !== attempt
+    ) {
+      return;
+    }
+    this.holdConnectResult = null;
+    if (result.ok) {
+      this.errors.surface(describeKind('mic_unavailable', this.errors.micErrorParams()));
+    } else {
+      this.failTurn(result.error);
+    }
+  }
+
   /**
    * Hotkey released: stop the mic + indicator. Short/silent holds cancel
    * gracefully; real holds commit the audio with the captured screenshots.
@@ -627,21 +705,24 @@ export class Conversation {
       this.session.clearAudio();
       this.pendingCaptures = null;
       this.telemetry.discardActiveTurn(); // M8.5: no turn -> no timings record
-      // M11 (mic_unavailable): a REAL hold that produced zero mic chunks is a
-      // dead/blocked microphone, not a tap — until now this was a silent
-      // nothing (the renderer swallowed the capture error and this branch
-      // treated it as a tap). The renderer's capture-error report (if any)
-      // selects the NotAllowedError privacy-toggle copy variant.
-      if (heldMs >= MIN_HOLD_MS && this.chunksThisHold === 0) {
-        this.errors.surface(describeKind('mic_unavailable', this.errors.micErrorParams()));
-      } else {
+      if (heldMs < MIN_HOLD_MS) {
+        this.holdConnectResult = null;
         this.machine.dispatch('hold_cancelled');
+      } else {
+        // A real zero-audio hold can coincide with a failed warm connection.
+        // Resolve that exact attempt first so auth/network/model failures win;
+        // only a healthy session proves this is actually a microphone issue.
+        const sequence = this.holdSequence;
+        const attempt = this.holdConnectResult ?? this.connectForHold();
+        this.holdConnectResult = attempt;
+        void this.surfaceZeroAudioRelease(sequence, attempt);
       }
       return;
     }
     // M20: a fast-but-real release can beat the deferral timer (setTimeout
     // jitter) — the commit must have happened before the turn is finished.
     if (!this.holdCommitted) this.commitHoldAsTalk();
+    this.holdConnectResult = null;
     const turn = this.telemetry.active();
     if (turn) turn.tHoldEnd = Date.now(); // M8.5
     void this.finishVoiceTurn();
@@ -657,6 +738,8 @@ export class Conversation {
     this.holding = false;
     this.clearHoldCommitTimer(); // M20
     this.pendingHoldChunks = [];
+    this.holdConnectResult = null;
+    this.holdSequence += 1;
     this.guard.beginEpisode(); // invalidate any in-flight continuation
     this.acceptingAudio = false;
     this.audio.capture('stop');
@@ -724,6 +807,7 @@ export class Conversation {
 
     this.setCaptureIndicator(true);
     let captures: CaptureResult[] = [];
+    const captureRepairIdentity = this.errors.captureRepairIdentity();
     try {
       captures = await captureAllDisplays();
     } catch (err) {
@@ -740,6 +824,7 @@ export class Conversation {
     turn.captureMs = turn.tCaptureDone - tAsk;
     this.lastCapture = captures.map((r) => r.meta);
     this.turnCaptures = captures;
+    this.noteCaptureSucceeded(captures, captureRepairIdentity);
     this.recorder?.recordCaptures(turn.turnId, captures);
 
     // M11 (capture_failed): the turn is going ahead with ZERO screenshots —
@@ -753,7 +838,7 @@ export class Conversation {
     // harness + screenshots. Otherwise fall back to the realtime voice model
     // so text still works for non-signed-in users.
     const auth = resolveGroundingAuth({
-      getApiKey: () => this.settings.getApiKey(),
+      getApiKey: () => this.getApiKeyAndInitializeFingerprint(),
       codex: this.codexProvider(),
       preferApiKey: this.codexDisabled || this.settings.get().preferApiKeyGrounding,
     });
@@ -838,10 +923,14 @@ export class Conversation {
     }
   }
 
-  /** Model, voice, and VAD mode require a fresh session (key does not). */
+  /** Credential, model, voice, and VAD changes require a fresh session. */
   onSettingsChanged(next: Settings): void {
     this.recorder?.recordSettings(next);
+    const nextApiKeyFingerprint = fingerprintApiKey(this.settings.getApiKey());
+    const apiKeyChanged =
+      this.apiKeyFingerprint === undefined || nextApiKeyFingerprint !== this.apiKeyFingerprint;
     if (
+      !apiKeyChanged &&
       next.model === this.sessionModel &&
       next.voice === this.sessionVoice &&
       next.fullRealtimeMode === this.sessionFullRealtimeMode &&
@@ -849,6 +938,7 @@ export class Conversation {
     ) {
       return;
     }
+    this.apiKeyFingerprint = nextApiKeyFingerprint;
     this.sessionModel = next.model;
     this.sessionVoice = next.voice;
     this.sessionFullRealtimeMode = next.fullRealtimeMode;
@@ -868,12 +958,27 @@ export class Conversation {
 
   /** AgentManager completion hook: enqueue a normal automated foreground turn. */
   deliverAgentResult(summary: AgentSummary): void {
+    if (summary.status === 'done') {
+      this.errors.noteAgentSucceeded();
+    } else if (summary.status === 'failed') {
+      for (const kind of ['agent_not_signed_in', 'agent_quota'] as const) {
+        if (summary.error === describeKind(kind).message) {
+          this.errors.surface(describeKind(kind));
+          break;
+        }
+      }
+    }
     this.continuations.deliver(summary);
   }
 
   private rebuildRealtimeSession(): void {
     // F1 fix (m3): a mid-turn rebuild must not leave debris.
     if (this.holding) this.cancelHold(); // graceful: mic released, no turn
+    // A released zero-audio hold may still be awaiting its warm connection.
+    // Invalidate it before closing the old session so its rejection cannot
+    // fail or clear the newly rebuilt session/turn.
+    this.holdConnectResult = null;
+    this.holdSequence += 1;
     if (this.fullRealtimeActive) this.deactivateFullRealtime();
     // M18: abort any in-flight text turn too (its stream stops emitting).
     this.codexText.cancelActive();
@@ -950,6 +1055,7 @@ export class Conversation {
     this.setCaptureIndicator(false);
     this.lastCapture = captures.map((capture) => capture.meta);
     this.turnCaptures = captures;
+    this.noteCaptureSucceeded(captures, pending.repairIdentity);
     this.recorder?.recordCaptures(this.telemetry.active()?.turnId ?? `vad_${itemId}`, captures);
 
     let contextText = '';
@@ -1024,7 +1130,7 @@ export class Conversation {
    * (src/main/errors.ts) classifies the failure and owns the copy.
    */
   private failTurn(err: unknown): void {
-    console.error('[conversation] turn failed:', errorMessage(err));
+    console.error('[conversation] turn failed:', redactSensitiveErrorText(errorMessage(err)));
     // F1 (M7): the failed turn's audio must never leak into the next turn.
     this.session.clearAudio();
     this.transcriptStore.resolvePendingVoice('(voice message)');
@@ -1069,6 +1175,14 @@ export class Conversation {
     return CAPTURE_FAILED_CONTEXT;
   }
 
+  /** Resolve capture repair UI only after a real non-empty capture succeeds. */
+  private noteCaptureSucceeded(
+    captures: readonly CaptureResult[],
+    expected: ActionableErrorIdentity | null,
+  ): void {
+    if (captures.length > 0) this.errors.noteCaptureSucceeded(expected);
+  }
+
   /**
    * M11: re-send the transcript ring + status snapshots to a (re)loaded panel
    * renderer — entries pushed before the renderer existed (boot-time errors)
@@ -1082,7 +1196,24 @@ export class Conversation {
   }
 
   private canReachServer(): boolean {
-    return this.session.usingMock || this.settings.getApiKey() !== null;
+    const apiKey = this.getApiKeyAndInitializeFingerprint();
+    return this.session.usingMock || apiKey !== null;
+  }
+
+  /**
+   * Credential reads must stay lazy because safeStorage is unavailable until
+   * Electron is ready. Once a real turn reads the credential, capture its
+   * identity as the current session baseline so an unrelated later settings
+   * update does not look like a key replacement and tear down that session.
+   * Do not overwrite an existing baseline here: onSettingsChanged owns real
+   * key transitions and must compare the new key against the previous one.
+   */
+  private getApiKeyAndInitializeFingerprint(): string | null {
+    const apiKey = this.settings.getApiKey();
+    if (this.apiKeyFingerprint === undefined) {
+      this.apiKeyFingerprint = fingerprintApiKey(apiKey);
+    }
+    return apiKey;
   }
 
   /**
@@ -1146,7 +1277,7 @@ export class Conversation {
       voice: this.sessionVoice,
       instructions: getSessionInstructions(this.agentModeAvailableSnapshot, computerUseAvailable),
       tools: getToolDefinitions(this.agentModeAvailableSnapshot, computerUseAvailable),
-      getApiKey: () => this.settings.getApiKey(),
+      getApiKey: () => this.getApiKeyAndInitializeFingerprint(),
       turnDetection: this.sessionFullRealtimeMode ? 'server_vad' : 'manual',
     });
     this.wireSession(session);
@@ -1194,6 +1325,7 @@ export class Conversation {
     const turn = this.telemetry.beginTurn('voice');
     turn.tHoldStart = Date.now();
     this.setCaptureIndicator(true);
+    const repairIdentity = this.errors.captureRepairIdentity();
     const promise = captureAllDisplays()
       .catch((err: unknown) => {
         console.warn('[conversation] full realtime turn capture failed:', err);
@@ -1211,7 +1343,7 @@ export class Conversation {
         }
         return captures;
       });
-    this.pendingFullRealtimeCapture = { token, itemId, promise };
+    this.pendingFullRealtimeCapture = { token, itemId, promise, repairIdentity };
     this.machine.dispatch('open_mic_ready');
   }
 
@@ -1362,7 +1494,7 @@ export class Conversation {
   }
 
   private onSessionError(err: Error): void {
-    console.error('[conversation] session error:', err.message);
+    console.error('[conversation] session error:', redactSensitiveErrorText(err.message));
     this.recorder?.record('realtime_error', err);
     this.recorder?.flush();
     this.guard.bumpEpoch();
@@ -1473,4 +1605,9 @@ export class Conversation {
   private sendPlaybackCommand(command: PlaybackCommand): void {
     this.audio.playback(command, this.guard.playbackEpoch());
   }
+}
+
+/** Compare key changes without retaining a second plaintext credential. */
+function fingerprintApiKey(apiKey: string | null): string | null {
+  return apiKey === null ? null : createHash('sha256').update(apiKey, 'utf8').digest('hex');
 }

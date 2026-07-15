@@ -5,15 +5,61 @@
  */
 
 /** Lifecycle of one background agent (docs/AGENT-MODE.md §2.4, §5.3). */
-export type AgentStatus = 'queued' | 'running' | 'done' | 'failed' | 'timed_out' | 'cancelled';
+export type AgentStatus =
+  'queued' | 'running' | 'waiting_approval' | 'done' | 'failed' | 'timed_out' | 'cancelled';
 
 /** One activity-log line on the agent Card (docs/AGENT-MODE.md §5.2). */
 export interface AgentStep {
-  kind: 'search' | 'fetch' | 'note' | 'think';
+  kind: 'search' | 'fetch' | 'note' | 'think' | 'browse' | 'action' | 'review';
   /** e.g. 'searched "best 27 inch monitor 2026"', 'read rtings.com/…'. */
   label: string;
   /** Epoch ms. */
   at: number;
+}
+
+/** A remembered consequence approval; alignment is still reviewed for every action. */
+export interface ApprovalGrant {
+  id: string;
+  /** Registrable domain, never a full host or URL. */
+  domain: string;
+  actionKind: 'form-submit' | 'button' | 'keyboard-submit' | 'navigation';
+  /** Normalized element descriptor, for example "create issue". */
+  target: string;
+  /** Epoch ms. */
+  createdAt: number;
+  /** Epoch ms. */
+  lastUsedAt: number;
+  timesUsed: number;
+}
+
+/** Renderer-safe evidence for a buddy action that requires a human verdict. */
+export interface ApprovalRequest {
+  agentId: string;
+  /** Immutable identifier for this exact pending assessment. */
+  approvalId: string;
+  kind: 'browser-capability' | 'browser-action' | 'needs-user' | 'live-action';
+  /** Exact original request that authorizes this helper run; never derived from page or payload. */
+  userRequest: string;
+  /** Whether this assessment has a safe normalized signature for standing permission memory. */
+  allowAlways: boolean;
+  /** Human-readable normalized signature; null when standing permission is unavailable. */
+  grantScope: string | null;
+  /** Whether showing the controlled browser is meaningful for this request. */
+  allowTakeover: boolean;
+  /** Driver-derived ASCII registrable domain for controlled-browser actions. */
+  browserDomain: string | null;
+  actionText: string;
+  concern: string;
+  /** PNG data URL for the marked screenshot. */
+  screenshotPng: string;
+  /** Capped, credential-elided summary of the pending payload. */
+  payloadDigest: string[];
+}
+
+/** Renderer-safe summary of authenticated state in the shared buddy browser profile. */
+export interface EnrolledSite {
+  domain: string;
+  cookieCount: number;
 }
 
 /**

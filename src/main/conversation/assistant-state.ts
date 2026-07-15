@@ -64,9 +64,7 @@ export interface TransitionContext {
 
 /** What a dispatch should do — 'settle' holds the state and arms the grace. */
 export type TransitionAction =
-  | { kind: 'ignore' }
-  | { kind: 'go'; next: AssistantState }
-  | { kind: 'settle' };
+  { kind: 'ignore' } | { kind: 'go'; next: AssistantState } | { kind: 'settle' };
 
 /** The base (resting) state for the current mode. */
 export function baseState(ctx: Pick<TransitionContext, 'openMic'>): AssistantState {
@@ -107,9 +105,7 @@ export function resolveTransition(
       // 'listening' (user is talking) and 'error' never show output activity.
       return { kind: 'ignore' };
     case 'turn_settled':
-      return state === 'thinking' || state === 'speaking'
-        ? { kind: 'settle' }
-        : { kind: 'ignore' };
+      return state === 'thinking' || state === 'speaking' ? { kind: 'settle' } : { kind: 'ignore' };
     case 'open_mic_on':
       return { kind: 'go', next: 'thinking' };
     case 'open_mic_ready':

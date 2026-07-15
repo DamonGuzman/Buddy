@@ -1,4 +1,4 @@
-import type { Settings, SettingsPatch } from '../../../../shared/types';
+import type { SettingsPatch } from '../../../../shared/types';
 
 /**
  * The typed patch seam every settings card writes through: SettingsView
@@ -6,4 +6,4 @@ import type { Settings, SettingsPatch } from '../../../../shared/types';
  * renderer-safe settings. Toggles fire-and-forget (`void onPatch(...)`);
  * the key save awaits it to drive its saved/saving affordances.
  */
-export type PatchSettings = (patch: SettingsPatch) => Promise<Settings>;
+export type PatchSettings = (patch: SettingsPatch) => Promise<boolean>;

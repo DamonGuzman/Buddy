@@ -64,7 +64,11 @@ export function exemptFromCaptureProtection(win: BrowserWindow): void {
  */
 function setBuddyWindowsContentProtection(enabled: boolean, logger: CaptureLogger): void {
   for (const win of BrowserWindow.getAllWindows()) {
-    if (win.isDestroyed() || captureVisibleWindows.has(win)) continue;
+    // Hidden offscreen browser surfaces cannot appear in a desktop grab. Do
+    // not mutate their compositor/content-protection state: a concurrent
+    // webContents.capturePage() must keep producing the agent's page rather
+    // than a protected blank frame.
+    if (win.isDestroyed() || !win.isVisible() || captureVisibleWindows.has(win)) continue;
     try {
       win.setContentProtection(enabled);
     } catch (err) {
@@ -78,7 +82,7 @@ function hideBuddyWindowsForMacCapture(logger: CaptureLogger): () => void {
   if (process.platform !== 'darwin') return () => undefined;
   const prior = new Map<BrowserWindow, number>();
   for (const win of BrowserWindow.getAllWindows()) {
-    if (win.isDestroyed() || captureVisibleWindows.has(win)) continue;
+    if (win.isDestroyed() || !win.isVisible() || captureVisibleWindows.has(win)) continue;
     try {
       prior.set(win, win.getOpacity());
       win.setOpacity(0);

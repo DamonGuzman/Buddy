@@ -27,6 +27,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { arch, platform, release } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { CaptureResult } from './capture';
+import type { ActionGateJournalEntry, ComputerActionOutcomeEntry } from './agents/gate/action-gate';
 import type { CodexFunctionCall } from './codex/responses-session';
 import type { ErrorPresentation } from './errors';
 import type { PhoneAudioBridgeStatus } from './phone-audio-bridge-supervisor';
@@ -151,6 +152,9 @@ export interface SessionEventMap {
   phone_audio_bridge_status: PhoneAudioBridgeStatus;
   phone_audio_bridge_client: { state: 'connected' | 'disconnected' };
   agents_changed: AgentSummary[];
+  action_gate_assessment: ActionGateJournalEntry;
+  computer_action_executed: ComputerActionOutcomeEntry;
+  computer_action_failed: ComputerActionOutcomeEntry;
   hotkey_start_failed: { name: string; message: string; permissions: PermissionHealth };
   fatal_error: { kind: string; error: unknown };
   system_lock: null;

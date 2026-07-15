@@ -70,9 +70,11 @@ describe('stripLinks', () => {
 describe('buildInitialMessage', () => {
   const base: AgentBrief = {
     id: 'agent_1',
+    userRequest: 'find the best monitor',
     task: 'find the best monitor',
     recentTranscript: '',
     createdAt: 1,
+    browserEnabled: false,
   };
 
   it('includes only the task when why/transcript/screenshot are absent', () => {

@@ -66,12 +66,14 @@ export interface HelperView {
 }
 
 function isActive(agent: AgentSummary): boolean {
-  return agent.status === 'queued' || agent.status === 'running';
+  return (
+    agent.status === 'queued' || agent.status === 'running' || agent.status === 'waiting_approval'
+  );
 }
 
 /**
  * Where a helper is in its on-screen life:
- * - 'active'    queued/running — stays as long as the agent works
+ * - 'active'    queued/running/waiting approval — stays until the runtime advances it
  * - 'settled'   finished — celebrating / available to hover
  * - 'departing' last HELPER_DEPART_MS of the linger — shrinking back home
  * - 'gone'      not shown (expired, viewed in the panel, or cancelled)
@@ -98,7 +100,11 @@ export function helperPhase(agent: AgentSummary, now: number, keepId?: string): 
  * never show — the user asked for them to go away.
  */
 export function selectHelpers(agents: AgentSummary[], now: number, keepId?: string): HelperView {
-  const active = agents.filter(isActive).sort((a, b) => a.createdAt - b.createdAt);
+  const active = agents.filter(isActive).sort((a, b) => {
+    const attention =
+      Number(b.status === 'waiting_approval') - Number(a.status === 'waiting_approval');
+    return attention || a.createdAt - b.createdAt;
+  });
   const finished = agents
     .filter((a) => !isActive(a) && helperPhase(a, now, keepId) !== 'gone')
     .sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0));
@@ -265,7 +271,7 @@ export interface HelperStatusView {
   /** Short status pill, e.g. 'on it' / 'all done'. */
   pill: string;
   /** Drives pill/badge styling. */
-  kind: 'waiting' | 'working' | 'done' | 'trouble';
+  kind: 'waiting' | 'working' | 'approval' | 'done' | 'trouble';
   /** One warm line about what it's doing / how it ended. */
   line: string;
   /** Muted call-to-action (what a click does), or null. */
@@ -289,6 +295,12 @@ function activityLine(agent: AgentSummary): string {
       return 'thinking it over';
     case 'note':
       return 'writing down what i found';
+    case 'browse':
+      return 'looking through a page';
+    case 'action':
+      return 'getting an action ready';
+    case 'review':
+      return 'double-checking an action';
     default:
       return 'working on it';
   }
@@ -304,6 +316,13 @@ export function helperStatus(agent: AgentSummary): HelperStatusView {
         kind: 'working',
         line: activityLine(agent),
         cta: 'click to watch my progress',
+      };
+    case 'waiting_approval':
+      return {
+        pill: 'needs your ok',
+        kind: 'approval',
+        line: 'i paused before doing something that needs your choice',
+        cta: 'click to review this action',
       };
     case 'done':
       return {
@@ -338,6 +357,7 @@ export function helperStatus(agent: AgentSummary): HelperStatusView {
 
 /** 'just started' / 'working for about a minute' / 'took 3 minutes' … */
 export function elapsedPhrase(agent: AgentSummary, now: number): string {
+  if (agent.status === 'waiting_approval') return 'waiting for your choice';
   if (isActive(agent)) {
     const ms = Math.max(0, now - agent.createdAt);
     if (ms < 75_000) return 'just started';
@@ -381,10 +401,7 @@ export function timeAgoPhrase(at: number, now: number): string {
 }
 
 /** Deduped source hostnames ('rtings.com'), capped for the expanded card. */
-export function sourceHosts(
-  agent: AgentSummary,
-  max = 5,
-): { hosts: string[]; more: number } {
+export function sourceHosts(agent: AgentSummary, max = 5): { hosts: string[]; more: number } {
   const hosts: string[] = [];
   for (const url of agent.sources ?? []) {
     let host: string;
@@ -421,7 +438,12 @@ export function plainText(md: string): string {
  * over the short spoken summary.
  */
 export function expandedFindings(agent: AgentSummary): string | null {
-  if (agent.status === 'queued' || agent.status === 'running') return null;
+  if (
+    agent.status === 'queued' ||
+    agent.status === 'running' ||
+    agent.status === 'waiting_approval'
+  )
+    return null;
   const text = agent.output ?? agent.summary;
   if (text === undefined || text.trim() === '') return null;
   return clip(plainText(text), EXPANDED_FINDINGS_MAX);

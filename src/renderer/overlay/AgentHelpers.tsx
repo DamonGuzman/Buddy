@@ -189,9 +189,9 @@ function HelperSprite({
       >
         <HelperSvg id={agent.id} tint={tint} />
       </div>
-      {(kind === 'done' || kind === 'trouble') && (
+      {(kind === 'approval' || kind === 'done' || kind === 'trouble') && (
         <span className="helper-badge" data-kind={kind}>
-          {kind === 'done' ? '✓' : '!'}
+          {kind === 'approval' ? '?' : kind === 'done' ? '✓' : '!'}
         </span>
       )}
       {agent.status === 'done' && (

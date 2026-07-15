@@ -9,18 +9,6 @@ files:
   - out/**
   - package.json
   - '!**/*.map'
-extraResources:
-  - from: tools/phone-audio-bridge
-    to: phone-audio-bridge
-    filter:
-      - start.mjs
-      - setup-cert.ps1
-      - phone.html
-      - phone.js
-      - styles.css
-      - capture-worklet.js
-  - from: node_modules/ws
-    to: phone-audio-bridge/node_modules/ws
 asarUnpack:
   - '**/node_modules/uiohook-napi/**'
 win:
@@ -32,10 +20,28 @@ win:
   # Executable editing must stay ON so the icon/version resources get stamped
   # into Buddy.exe; the build remains unsigned (no certificate configured).
   signAndEditExecutable: true
+  # The disposable PowerShell phone-audio QA bridge is Windows-only. Keeping
+  # it out of macOS artifacts makes the platform boundary structural as well
+  # as runtime-enforced.
+  extraResources:
+    - from: tools/phone-audio-bridge
+      to: phone-audio-bridge
+      filter:
+        - start.mjs
+        - setup-cert.ps1
+        - phone.html
+        - phone.js
+        - styles.css
+        - capture-worklet.js
+    - from: node_modules/ws
+      to: phone-audio-bridge/node_modules/ws
 mac:
   target:
     - dmg
     - zip
+  # Preserve electron-builder's exact resolved certificate fingerprint. Its
+  # default signer drops the hash and becomes ambiguous when names collide.
+  sign: build/mac-sign.mjs
   icon: build/icon.icns
   category: public.app-category.utilities
   minimumSystemVersion: '12.0'

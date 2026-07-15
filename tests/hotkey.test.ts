@@ -90,16 +90,19 @@ describe('hold-to-talk state machine', () => {
   });
 });
 
-describe('global primary click', () => {
-  it('emits only for the left/primary mouse button', () => {
+describe('global mouse clicks', () => {
+  it('emits primary and secondary buttons through distinct typed events', () => {
     const h = makeHarness();
     const clicks: boolean[] = [];
+    let secondaryClicks = 0;
     h.hotkey.on('primary-click', (ctrlKey) => clicks.push(ctrlKey));
+    h.hotkey.on('secondary-click', () => secondaryClicks++);
     h.click(3);
     h.click(2);
     h.click(1);
     h.click(1, true);
     expect(clicks).toEqual([false, true]);
+    expect(secondaryClicks).toBe(1);
   });
 });
 

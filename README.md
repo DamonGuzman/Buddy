@@ -11,9 +11,9 @@ layers, never the model's raw pixel guess alone: the buddy first snaps onto the 
 element matching what Buddy said via the platform accessibility tree (AX/UIA), and when nothing
 there matches (unnamed glyph buttons, canvas UI) a fast vision-model grounding call
 (gpt-5.4-mini, ~10px median) re-locates the target in the same screenshot. No chat window to manage:
-ask "where do I turn on dark mode?" and Buddy tells you — and points. There's also a small
-control panel (tray icon) with a live transcript and a typed-question fallback for when you
-can't talk.
+ask "where do I turn on dark mode?" and Buddy tells you — and points. There's also a compact
+Settings window from the tray icon, plus a floating whisper composer for typed questions when
+you can't talk.
 
 ## Requirements
 
@@ -34,7 +34,7 @@ Choose the artifact for your computer. MVP builds are unsigned:
 ## First run
 
 1. Launch Buddy. A menu-bar/tray icon appears, and settings opens by itself on first run.
-2. Open settings (gear in the panel) and paste your OpenAI API key. It is encrypted on your
+2. Open **Settings** from the menu-bar/tray icon and paste your OpenAI API key. It is encrypted on your
    machine before it's stored and never shown again.
 3. On macOS, use **Settings → Permissions** to grant microphone, screen recording, accessibility,
    and input monitoring only when Buddy asks for each capability.
@@ -85,6 +85,7 @@ npm install
 npm run dev        # hot reload with a separate, persistent development profile
 npm run build      # typecheck + production build
 npm test           # vitest unit tests (coords, protocol, hotkey FSM, settings, playback, ...)
+npm run test:browser # Electron browser computer-use integration verification (no API key)
 npm run dist       # package current OS (macOS DMG+ZIP or Windows NSIS+portable)
 npm run dist:mac   # explicitly package macOS
 npm run dist:win   # explicitly package Windows
@@ -98,12 +99,11 @@ single-instance lock, and it keeps the panel visible while you work. The develop
 its own settings, but automatically imports `OPENAI_API_KEY` from the local user environment when
 available. Electron encrypts it into the dev profile using Keychain/DPAPI, and
 the plaintext is then removed from the app process. Quit the installed Buddy from its tray icon
-before testing the hotkey, otherwise both running copies can receive it. On Windows, the same
-command starts the optional iPhone audio bridge, waits for it to become healthy, and connects the
-development app to it; the printed setup URL is the page to open on the phone. The bridge stays up
-across Electron restarts and exits with the dev command. macOS uses its ordinary microphone path.
-Use `npm run dev:raw` only when you
-deliberately want Electron's default profile behavior without the managed iPhone bridge.
+before testing the hotkey, otherwise both running copies can receive it. Plain `npm run dev` uses
+the computer's microphone on every platform. The disposable bundled iPhone-audio QA bridge is
+Windows-only and starts only when `CLICKY_PHONE_AUDIO_AUTOSTART=1` is set; an explicitly managed
+bridge can instead be selected with `CLICKY_PHONE_AUDIO_URL=<url>`. Use `npm run dev:raw` only when
+you deliberately want Electron's default profile behavior.
 
 No API key needed for development — a local mock speaks the Realtime protocol subset:
 
@@ -130,8 +130,15 @@ Read `docs/ARCHITECTURE.md` first (scope, module ownership, IPC/coordinate contr
 
 ## Known MVP limitations
 
-- **Background work is read-only** — say "Buddy, agent ..." to delegate research; agents cannot
-  modify files, send messages, make purchases, or control other applications.
+- **Computer use is deliberately bounded** — a helper can use Buddy's dedicated browser only
+  when the foreground handoff grants browser access for that task. It cannot borrow the user's
+  normal browser profile, type credentials, accept OAuth grants, upload/download files, or bypass
+  the independent action reviewer and raise-hand approvals. Live-desktop mouse/keyboard use is a
+  separate Settings opt-in and every proposed action requires a one-use human approval.
+- **Buddy's browser is not a security sandbox** — it is a hardened, persistent Electron browser
+  profile (`persist:buddy`) that the user explicitly enrolls into sites. Private-network blocking
+  and renderer hardening are defense in depth, not an isolation boundary. Settings can sign out
+  individual enrolled sites, revoke remembered action scopes, or clear the whole profile.
 - **Fixed hotkey** (Control + left Option/Alt) — not remappable yet.
 - **Single voice pipeline** — mic capture and playback live in the (hidden) panel renderer; if
   that renderer is killed, voice drops until it auto-recovers.

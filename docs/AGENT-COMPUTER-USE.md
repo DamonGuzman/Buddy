@@ -1,9 +1,10 @@
-# Buddy for Windows — Agent Sandbox Design ("buddies use the computer")
+# Buddy — Browser and Computer Use Implementation
 
-> Design doc. Gives helper buddies (docs/AGENT-MODE.md, shipped M18) a computer of their own to
-> act with — an offscreen browser sandbox — governed by an **action-review agent** as the first
-> line of defense and **raise-hand** (human approval) as the absolute fallback. Depends on the
-> shipped agent runtime (`src/main/agents/`), the Sol computer-use operator
+> Implemented architecture and release contract. Gives helper buddies (docs/AGENT-MODE.md) a
+> computer of their own to
+> act with — a dedicated offscreen browser workspace — governed by an **action-review agent** as
+> the first line of defense and **raise-hand** (human approval) as the absolute fallback. Depends
+> on the shipped agent runtime (`src/main/agents/`), the Sol computer-use operator
 > (`src/main/computer/`), and Codex auth. Read `docs/ARCHITECTURE.md` first; this doc assumes it.
 
 > Posture change, made deliberately: AGENT-MODE §3.2 deferred "mouse-keyboard automation" hard.
@@ -16,12 +17,17 @@
 
 ## 0. Executive summary
 
-Helper buddies today are read-only (web_search / web_fetch / scratchpad / read_screen). The most
-valuable delegated work — "file this Linear ticket", "pull this week's numbers", anything behind a
-login — needs a browser the buddy can *drive*. Windows 11 Home offers no OS sandbox (no Windows
-Sandbox, no Hyper-V, no RDP host), but Electron gives us something better for this product: a
-**per-buddy hidden `BrowserWindow`** on a persistent "buddy work profile" partition, driven
-entirely through synthetic input.
+Research-only helpers remain read-only (web_search / web_fetch / scratchpad / read_screen). An
+explicitly browser-enabled handoff can additionally use a browser the buddy can _drive_. The
+implementation gives each such helper a **hidden
+`BrowserWindow`** on a persistent "buddy work profile" partition, driven entirely through
+synthetic input.
+
+This browser workspace is **not a security sandbox or an isolation boundary**. Electron renderer
+sandboxing and process hardening reduce renderer privileges, but the persistent profile
+deliberately shares enrolled sessions across buddies. Safety comes from the mechanically enforced
+action gate, independent review agent, explicit user enrollment, hard-denied actions, and
+raise-hand approval.
 
 ```
   buddy loop (Codex Responses, existing)
@@ -41,20 +47,19 @@ Five pillars, one line each:
 
 1. **Driver seam**: extract `ComputerDriver` from `operator.ts`; live-desktop and offscreen-browser
    implementations share the gate and the one-action-per-observation loop discipline.
-2. **Sandbox**: hidden `BrowserWindow`, `partition: 'persist:buddy'`, input via CDP
-   (`webContents.debugger`), capture via `capturePage()` — spike-verified on Electron 43 (§2.2).
+2. **Browser workspace**: hidden `BrowserWindow`, `partition: 'persist:buddy'`, focus-independent
+   renderer input, and capture via `capturePage()` (§2.2).
 3. **Gate**: mechanically unbypassable, placed between tool-call parse and input dispatch; a pure
    DOM-grounded trigger decides what needs review; only flagged actions pay reviewer latency.
-4. **Review agent**: judges *is this action a faithful step toward the user's stated task* from
+4. **Review agent**: judges _is this action a faithful step toward the user's stated task_ from
    ground truth (DOM hit-test, form payload, URL) + the buddy's claimed justification.
    Uncertain-alignment → deny (final); uncertain-consequence → escalate.
 5. **Approval memory**: user "always allow" grants persist across tasks as normalized action
    signatures. A grant answers the CONSEQUENCE question only — the reviewer's alignment check
    always still runs. Grants are listed and revocable in settings.
-
-Raise-hand stays scarce by design: it fires only on reviewer escalation, repeated denials, CAPTCHAs
-/ sign-in walls, and unresolvable hit-tests. When it fires for something visual, the card can show
-the buddy's (normally hidden) window so the user acts in place.
+   Raise-hand stays scarce by design: it fires only on reviewer escalation, repeated denials, CAPTCHAs
+   / sign-in walls, and unresolvable hit-tests. When it fires for something visual, the card can show
+   the buddy's (normally hidden) window so the user acts in place.
 
 ---
 
@@ -81,7 +86,11 @@ export interface ComputerDriver {
   inspect(target: DriverPoint): Promise<ElementFacts | null>;
   dispose(): Promise<void>;
 }
-export interface DriverPoint { screenIndex: number; x: number; y: number }
+export interface DriverPoint {
+  screenIndex: number;
+  x: number;
+  y: number;
+}
 ```
 
 - `LiveDesktopDriver` wraps the existing `WindowsInputController` daemon + `mapModelPoint` +
@@ -89,22 +98,26 @@ export interface DriverPoint { screenIndex: number; x: number; y: number }
 - `OffscreenBrowserDriver` is new (§2). One instance per buddy, owned by the agent, torn down by
   the agent's existing `AbortSignal` / terminal transition.
 - The **ActionGate (§4) sits inside the driver-consuming execute path**, not in any prompt: parsed
-  tool call → gate → (verdict) → driver method. A prompt-injected buddy can *want* anything; the
+  tool call → gate → (verdict) → driver method. A prompt-injected buddy can _want_ anything; the
   click does not physically happen until the gate passes it. One gate, both surfaces.
 
-## 2. The offscreen browser sandbox
+## 2. The offscreen browser workspace
 
 ### 2.1 Window + partition
 
 ```ts
 new BrowserWindow({
-  show: false,                       // never shown; never steals focus; no taskbar presence
-  width: 1024, height: 768, useContentSize: true,
+  show: false, // never shown; never steals focus; no taskbar presence
+  width: 1024,
+  height: 768,
+  useContentSize: true,
   skipTaskbar: true,
   webPreferences: {
-    partition: 'persist:buddy',      // the shared buddy work profile (§2.4)
-    backgroundThrottling: false,     // keep timers/paints honest while hidden
-    contextIsolation: true, nodeIntegration: false, sandbox: true,
+    partition: 'persist:buddy', // the shared buddy work profile (§2.4)
+    backgroundThrottling: false, // keep timers/paints honest while hidden
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
   },
 });
 ```
@@ -120,20 +133,23 @@ new BrowserWindow({
 Spike (`tools/spikes/offscreen-browser-spike.js`, run 2026-07-14 on Electron 43.1.0, Windows 11
 Home, 150% display) against a `show:false` window that was never shown:
 
-| Mechanism                                            | Result                                                      |
-| ---------------------------------------------------- | ----------------------------------------------------------- |
-| `capturePage()` while hidden                         | ✅ real painted pixels (color-sampled), repaints after input |
-| CDP click (`Input.dispatchMouseEvent`)               | ✅ with `isVisible()=false`, `isFocused()=false`             |
-| CDP typing (`Input.insertText`, `dispatchKeyEvent`)  | ✅ both land                                                 |
-| `elementFromPoint` via `executeJavaScript`           | ✅ returns the real element (tag/id/text/form membership)    |
-| `sendInputEvent` fallback                            | ⚠️ mouse works; **keyboard does NOT land without OS focus**  |
+| Mechanism                                           | Result                                                       |
+| --------------------------------------------------- | ------------------------------------------------------------ |
+| `capturePage()` while hidden                        | ✅ real painted pixels (color-sampled), repaints after input |
+| CDP click (`Input.dispatchMouseEvent`)              | ✅ with `isVisible()=false`, `isFocused()=false`             |
+| CDP typing (`Input.insertText`, `dispatchKeyEvent`) | ✅ both land                                                 |
+| `elementFromPoint` via `executeJavaScript`          | ✅ returns the real element (tag/id/text/form membership)    |
+| `sendInputEvent` fallback                           | ⚠️ mouse works; **keyboard does NOT land without OS focus**  |
 
-Decision: **the input path is `webContents.debugger` (CDP)** — built into Electron, no new
-dependency, no DevTools banner, works fully hidden. `sendInputEvent` is not used (the keyboard
-failure above). Click = `mousePressed`+`mouseReleased`; typing = `Input.insertText` (literal
-Unicode, IME-safe); chords/navigation = `Input.dispatchKeyEvent` pairs; scroll =
-`dispatchMouseEvent{type:'mouseWheel'}`. The debugger attaches once per window, detaches on
-dispose; a `debugger.on('detach')` restart mirrors the snapper-daemon lifecycle discipline.
+Decision: **keyboard/text/scroll use `webContents.debugger` (CDP)** — built into Electron, no new
+dependency, no DevTools banner, and fully hidden. Mouse clicks use Electron's renderer-targeted,
+focus-independent `webContents.sendInputEvent`: Electron 43 leaves CDP mouse-up promises pending
+when browser policy denies a popup, download, or navigation, while the spike verified the mouse
+`sendInputEvent` path works hidden. Its keyboard path remains forbidden because it does not land
+without OS focus. Typing = `Input.insertText` (literal Unicode, IME-safe); chords =
+`Input.dispatchKeyEvent`; scroll = `dispatchMouseEvent{type:'mouseWheel'}`. The debugger attaches
+once per window, detaches on dispose; a `debugger.on('detach')` restart mirrors the
+snapper-daemon lifecycle discipline.
 
 ### 2.3 Capture + coordinates
 
@@ -151,7 +167,7 @@ only on hotkey" privacy rule is about the USER'S monitors and is untouched by th
 ### 2.4 The buddy work profile (`persist:buddy`)
 
 Chosen posture: **shared persistent partition** — one work profile all buddies share, surviving
-restarts. We cannot (and should not) borrow the user's Chrome cookies; instead the user *enrolls*
+restarts. We cannot (and should not) borrow the user's Chrome cookies; instead the user _enrolls_
 sites deliberately:
 
 - Settings → "buddy's browser" → **opens a normal VISIBLE window on `persist:buddy`** where the
@@ -177,21 +193,21 @@ Codex loop drives its own window. Granted per-task (a research-only buddy gets n
 tool carries a **required `justification`** parameter (Damon's ruling: always present, evidence
 for the gate):
 
-| Tool                | Args (all with `justification: string` — one sentence, why this serves the task) | Gate exposure |
-| ------------------- | ------------------------------------------------------------------ | ------------------------ |
-| `browser_navigate`  | `url`                                                              | trigger on domain change |
-| `browser_click`     | `x, y, label, button?, count?` (pixels in the last screenshot)     | full trigger (§4.2)      |
-| `browser_type`      | `text` (into the focused field)                                    | password-field hard deny |
-| `browser_press_keys`| `keys[]` (chords; ENTER in a form field is trigger-equivalent to submit) | full trigger      |
-| `browser_scroll`    | `x, y, dy`                                                         | never flagged            |
-| `browser_screenshot`| —                                                                  | never flagged            |
+| Tool                 | Args (all with `justification: string` — one sentence, why this serves the task) | Gate exposure            |
+| -------------------- | -------------------------------------------------------------------------------- | ------------------------ |
+| `browser_navigate`   | `url`                                                                            | trigger on domain change |
+| `browser_click`      | `x, y, label, button?, count?` (pixels in the last screenshot)                   | full trigger (§4.2)      |
+| `browser_type`       | `text` (into the focused field)                                                  | password-field hard deny |
+| `browser_press_keys` | `keys[]` (chords; ENTER in a form field is trigger-equivalent to submit)         | full trigger             |
+| `browser_scroll`     | `x, y, dy`                                                                       | never flagged            |
+| `browser_screenshot` | —                                                                                | never flagged            |
 
 Loop discipline copied from the operator: **one action per observation** — after every executed
 action the driver settles (~350ms), captures fresh, and the image goes back with the tool output.
 Extra same-round calls get `{error: 'only one action is allowed per screen observation'}` (same
 wire copy as operator.ts). The buddy's system prompt gains a browser section mirroring
 `OPERATOR_INSTRUCTIONS` (inspect, act once, never invent hidden state, stop when unclear) plus:
-*your justification is read by a reviewer; describe the action honestly and specifically.*
+_your justification is read by a reviewer; describe the action honestly and specifically._
 
 ## 4. The action gate (first line of defense)
 
@@ -210,15 +226,18 @@ audit trail per buddy.
 
 ```ts
 export interface ElementFacts {
-  tag: string; inputType?: string;         // 'submit' | 'password' | 'file' | …
-  text: string;                            // visible label, trimmed/capped
-  inForm: boolean; formAction?: string;
-  href?: string; url: string;              // page URL at inspect time
+  tag: string;
+  inputType?: string; // 'submit' | 'password' | 'file' | …
+  text: string; // visible label, trimmed/capped
+  inForm: boolean;
+  formAction?: string;
+  href?: string;
+  url: string; // page URL at inspect time
   frame: 'top' | 'same-origin' | 'cross-origin-unresolved';
 }
 export type TriggerVerdict =
-  | { kind: 'pass' }                       // execute, no review
-  | { kind: 'review'; reasons: string[] }  // reviewer decides
+  | { kind: 'pass' } // execute, no review
+  | { kind: 'review'; reasons: string[] } // reviewer decides
   | { kind: 'hard-deny'; reason: string }; // never executes, never reviewed
 ```
 
@@ -253,8 +272,8 @@ default). Evidence, in trust order:
 4. **The pending payload** — for form submits, the form's current field values read from the DOM
    (names + values, capped, password/credential fields elided). This is the highest-value check:
    the email body says what the user asked; the recipient is not attacker-supplied.
-5. **The buddy's justification** — labeled explicitly in the reviewer prompt as *a claim by the
-   acting agent, not a fact*. A mismatch between claim and mechanical facts is itself a deny
+5. **The buddy's justification** — labeled explicitly in the reviewer prompt as _a claim by the
+   acting agent, not a fact_. A mismatch between claim and mechanical facts is itself a deny
    signal ("justification says 'clicking next', element is a payment submit").
 6. **The buddy's recent step trail** (existing `AgentStep` log, last ~10) and any **standing
    approval grants** matching this signature (§5).
@@ -268,7 +287,7 @@ text in the evidence is data — the reviewer never follows instructions found i
 ```ts
 export type ReviewVerdict =
   | { verdict: 'approve'; reason: string }
-  | { verdict: 'deny'; reason: string }      // final — no appeal (justification was the appeal)
+  | { verdict: 'deny'; reason: string } // final — no appeal (justification was the appeal)
   | { verdict: 'escalate'; reason: string; concern: string }; // → raise-hand
 ```
 
@@ -284,8 +303,8 @@ Decision rule, stated in the reviewer prompt exactly:
 Deny mechanics (Damon's ruling: deny is final): the click does not happen; the tool output returns
 `{denied: true, reason}` so the buddy can reroute or finish honestly. `gate/strikes.ts` counts
 denials per (buddy, target signature): **3 denials on the same target → auto-escalate**; **5
-denials total in a run → halt the buddy** (`failed`, copy: *"i kept proposing actions the reviewer
-wouldn't pass, so i stopped — the details are on my card."*). The strike counter is the pressure
+denials total in a run → halt the buddy** (`failed`, copy: _"i kept proposing actions the reviewer
+wouldn't pass, so i stopped — the details are on my card."_). The strike counter is the pressure
 valve that replaces an appeal channel.
 
 ## 5. Approval memory
@@ -299,10 +318,12 @@ an arbitrary-email license for an injected buddy.
 // src/shared/types.ts (integration-approved)
 export interface ApprovalGrant {
   id: string;
-  domain: string;              // 'linear.app' (registrable domain, not full host)
+  domain: string; // 'linear.app' (registrable domain, not full host)
   actionKind: 'form-submit' | 'button' | 'keyboard-submit' | 'navigation';
-  target: string;              // normalized element descriptor: 'create issue'
-  createdAt: number; lastUsedAt: number; timesUsed: number;
+  target: string; // normalized element descriptor: 'create issue'
+  createdAt: number;
+  lastUsedAt: number;
+  timesUsed: number;
 }
 ```
 
@@ -310,8 +331,8 @@ export interface ApprovalGrant {
   and ids ("Create issue (3)" → "create issue"), registrable domain via the same logic web-fetch
   uses. Payloads are NEVER part of a signature — the payload is what varies per task and is
   exactly what the reviewer re-checks every time.
-- **Granting**: the raise-hand card offers *approve once* / *always allow buddies to <create
-  issues on linear.app>* / *deny*. "Always" writes a grant.
+- **Granting**: the raise-hand card offers _approve once_ / _always allow buddies to <create
+  issues on linear.app>_ / _deny_. "Always" writes a grant.
 - **Within-task follow-through**: a raise-hand approval (either scope) also covers the immediate
   confirmation chain — subsequent flagged actions on the same domain within 60s or 3 actions,
   whichever first, carry the approval into the reviewer's evidence — so a site's "Are you sure?"
@@ -337,43 +358,56 @@ and unresolved-element actions on the live desktop. Mechanics:
 - Overlay: the buddy's helper sprite raises a tiny hand (amber "?" badge) — same self-dismissing
   sprite system as M19, but a waiting_approval sprite does NOT self-dismiss.
 - No response: parked buddies survive indefinitely within the app run; on quit they end
-  `cancelled` with copy *"i was waiting on your ok when the app closed."* Tray balloon on
+  `cancelled` with copy _"i was waiting on your ok when the app closed."_ Tray balloon on
   escalation (same nudge budget discipline as agent completion).
-- Voice: if a session is live, Buddy may say one line (*"quick check — the linear buddy wants to
-  submit the ticket, ok?"*) via the existing deliverAgentResult idle-turn machinery; never
+- Voice: if a session is live, Buddy may say one line (_"quick check — the linear buddy wants to
+  submit the ticket, ok?"_) via the existing deliverAgentResult idle-turn machinery; never
   interrupts mid-turn.
 
 ## 7. Shared types + IPC (integration-approved edits)
 
 `src/shared/types.ts`: `AgentStatus` gains `'waiting_approval'`; `AgentStep['kind']` gains
 `'browse' | 'action' | 'review'`; new `ApprovalGrant` (§5) and renderer-safe
-`ApprovalRequest { agentId, actionText, concern, screenshotPng: string, payloadDigest: string[] }`.
+`ApprovalRequest { agentId, approvalId, kind, userRequest, allowAlways, grantScope, allowTakeover,
+browserDomain, actionText, concern, screenshotPng: string, payloadDigest: string[] }`. `userRequest`
+is the exact non-page-derived authority anchor. `browserDomain` is gate-derived and switches to the
+destination domain when the action carries navigation authority. `grantScope` is either `null` or
+the gate's non-sensitive, normalized domain + action-kind + gate-derived target description; an
+absent scope mechanically disables standing consent.
 
 `src/shared/ipc.ts`:
 
 ```ts
-// Main → Panel
-'panel:approval': ApprovalRequest;              // raise-hand card data
+// Main → Panel (full snapshot; concurrent helpers may all be parked)
+'panel:approvals': ApprovalRequest[];
 // Renderer → Main (invoke)
-'approval:resolve': { args: [agentId: string, verdict: 'once' | 'always' | 'deny']; result: void };
-'approval:show-window': { args: [agentId: string]; result: void };  // "let me do it"
-'approval:hide-window': { args: [agentId: string]; result: void };  // "done"
+'approval:resolve': { args: [agentId: string, approvalId: string, verdict: 'once' | 'always' | 'deny']; result: void };
+'approval:show-window': { args: [agentId: string, approvalId: string]; result: void }; // "let me do it"
+'approval:hide-window': { args: [agentId: string, approvalId: string]; result: void }; // "done"
+'approvals:list': { args: []; result: ApprovalRequest[] };
 'grants:list':   { args: []; result: ApprovalGrant[] };
 'grants:revoke': { args: [id: string]; result: void };
-'buddy-browser:open-enroll': { args: []; result: void };            // settings sign-in window
+'buddy-browser:open-enroll': { args: [url: string]; result: void };
+'buddy-browser:list-enrolled-sites': { args: []; result: EnrolledSite[] };
+'buddy-browser:sign-out-site': { args: [domain: string]; result: void };
+'buddy-browser:clear': { args: []; result: void };
 ```
 
 Screenshot bytes cross to the renderer ONLY inside `ApprovalRequest` (the user must see what they
 are approving); everything else stays `AgentSummary`-shaped.
 
-## 8. QA plan
+## 8. Release verification
 
-- **Unit (vitest)**: `gate/trigger.ts` (element-fact table → verdicts, incl. password hard-deny,
+- **Unit (`npm test`)**: `gate/trigger.ts` (element-fact table → verdicts, incl. password hard-deny,
   ENTER-in-form, cross-origin-unresolved), `gate/signature.ts` normalization, strike counting,
   grant matching, within-task follow-through expiry, capture-ratio math.
-- **Driver integration**: an Electron-spawned test (the spike, hardened) run under
-  `npm run eval`-style tooling against local `data:`/localhost pages: hidden capture, CDP click,
-  insertText, hit-test through shadow DOM and a same-origin iframe.
+- **Driver/runtime integration (`npm run test:browser`)**: an Electron-spawned local fixture covers
+  hidden painted capture, renderer mouse input, CDP text/keyboard/scroll, DOM inspection through
+  shadow DOM and same/cross-origin frames, authenticated exact-IP proxying, rebinding/private-range
+  denial, popup/download/permission/dialog/file-chooser/audio denial, beforeunload containment,
+  navigation policy, enrollment persistence, disposal, and a composed AgentRunner → capability
+  approval → independent review → human approval → real OffscreenBrowserDriver action → fresh
+  capture flow.
 - **Mock scenarios** (extend `mock-backend.ts` + debug server): clean browse-and-submit with
   auto-approve; a deny → reroute; 3-strike escalate; an escalate → 'always' grant → next run
   auto-approves; a prompt-injected page instructing the buddy to email an attacker (asserts: gate
@@ -381,24 +415,24 @@ are approving); everything else stays `AgentSummary`-shaped.
 - **Debug server**: `POST /gate/assess` (drive the trigger+reviewer directly),
   `GET /grants`, `POST /agents/:id/approve|deny`.
 
-## 9. Build plan + effort (~13–16 eng-days, three phases)
+## 9. Implemented module map
 
-**Phase A — sandbox + gate-as-escalate (~6d).** Trust arrives before autonomy: every flagged
-action raise-hands; no reviewer yet.
-- Driver seam extraction from operator.ts (byte-identical live behavior) — 1d
-- `OffscreenBrowserDriver` (window/partition/CDP/capture/inspect) — 2d
-- Browser tools + loop integration + budgets (§3, §2.5) — 1.5d
-- Trigger layer + `waiting_approval` + raise-hand card + IPC — 1.5d
-
-**Phase B — the review agent (~4d).** Escalations become rare.
-- Reviewer (evidence assembly, marked screenshot, payload read, strict-JSON call, fail-closed) — 2d
-- Deny semantics + strikes + journal audit trail — 1d
-- Mock scenarios incl. injection + reviewer-timeout — 1d
-
-**Phase C — approval memory + profile polish (~3.5d).**
-- Signatures, grant store, reviewer integration, follow-through window — 1.5d
-- Settings: enroll window, enrolled-sites list, grants list/revoke — 1.5d
-- Overlay raised-hand sprite state + voice one-liner — 0.5d
+- `src/main/computer/driver.ts`, `live-desktop-driver.ts`, `live-desktop-evidence.ts`,
+  `native-receiver.ts`, `browser-driver.ts`, `browser-profile.ts`, and `browser-proxy.ts`: shared
+  actuation contract, native AX/UIA receiver freshness, two surfaces, persistent profile,
+  authenticated exact-IP network proxy, and window policy.
+- `src/main/agents/browser-runtime.ts`, `tools/browser.ts`, `history.ts`, and `run-budget.ts`:
+  browser-enabled helper loop, one action per observation, bounded replay, cancellation, and
+  approval parking.
+- `src/main/agents/gate/`: mechanical trigger, independent reviewer, immutable ActionGate,
+  redaction, strikes, persistent grants, bounded follow-through, and outcome journal.
+- `src/main/agents/approvals.ts`, `computer-use-runtime.ts`, and
+  `src/main/windows/buddy-browser.ts`: transactional approval coordination, profile/takeover
+  lifecycle, enrollment, power/shutdown handling, and production composition.
+- `src/renderer/panel/` and `src/renderer/overlay/`: reload-safe approval queue, informed standing
+  scope, enrolled-site/grant management, and persistent raised-hand state.
+- `tools/browser-computer-use-e2e/`, `tools/mock-agent-browser/`, and focused Vitest suites:
+  deterministic safety stories plus real Electron integration.
 
 ## 10. Top risks + mitigations
 
@@ -418,15 +452,23 @@ action raise-hands; no reviewer yet.
    assessments against a labeled set); fail-closed on reviewer error; the decision rule is in the
    prompt verbatim so it is testable copy, not vibes.
 
-## 11. Open questions to resolve at build time
+## 11. Fixed implementation decisions
 
-1. **Reviewer model/tier** — default plan is `gpt-5.6-sol`, effort low, priority tier (operator's
-   config); validate its deny/escalate calibration on the mock scenario set before Phase B ships.
-2. **Registrable-domain extraction** — reuse whatever web-fetch settled on vs. a tiny PSL subset;
-   grants and trigger domain-checks must agree on one definition.
-3. **Payload elision rules** — which form fields are read for evidence vs. elided (password obvious;
-   what about card-number-shaped values in arbitrary inputs — likely elide by shape, reuse the
-   session-recorder redaction patterns).
-4. **Browser-task budgets** — 40 steps / 10 min are guesses; tune against real tasks in Phase A.
-5. **Multi-buddy same-site writes** — two buddies acting on one enrolled site concurrently share
-   cookies (one login session). Likely fine for v1; revisit if sites fight concurrent sessions.
+1. The independent reviewer uses `gpt-5.6-sol`, low effort, priority tier, with a strict forced
+   verdict schema and fail-closed transport behavior.
+2. Domain/signature normalization uses `tldts`; model labels never create grant scope.
+3. Credential and secret-shaped fields and proposed typed values are mechanically denied or
+   redacted before reviewer, renderer, or journal boundaries.
+4. Browser-enabled helpers are bounded to 40 model rounds and ten minutes of active runtime;
+   local human-approval parking pauses the clock but still occupies a concurrency slot.
+5. The shared persistent profile permits concurrent helpers. Per-action DOM/URL/payload
+   reinspection and exact navigation capabilities prevent one helper from reusing another's
+   approval; site sign-out, clear, lock, suspend, and shutdown cancel affected runs first.
+6. No persistent browser surface is created or read before the user grants the run's browser
+   capability. Every subsequent observation-producing tool starts a new one-action boundary.
+7. Browser and `web_fetch` traffic resolve and validate every redirect hop, reject mixed or
+   non-global address sets, and connect the exact validated IP while preserving HTTP Host and TLS
+   identity. The browser's loopback proxy is authenticated with per-instance random credentials.
+8. Live keyboard actions require the same native focused receiver before approval and immediately
+   before dispatch. Live clicks require a dense, quantized local-crop digest; unstable evidence is
+   retried only within a fixed bound and then fails closed.

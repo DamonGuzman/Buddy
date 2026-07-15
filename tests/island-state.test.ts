@@ -39,6 +39,17 @@ describe('resolveIslandActivity', () => {
     ).toBe('speaking');
   });
 
+  it('surfaces waiting approvals ahead of ordinary helper work', () => {
+    expect(
+      resolveIslandActivity({
+        assistantState: 'idle',
+        capturing: false,
+        agents: [agent({ id: 'working' }), agent({ id: 'waiting', status: 'waiting_approval' })],
+        revealNewResult: false,
+      }),
+    ).toEqual({ kind: 'approval', label: 'a helper needs your ok', count: 1 });
+  });
+
   it('collapses unseen results to a persistent dot after the reveal', () => {
     const agents = [agent({ status: 'done', unseen: true })];
     expect(

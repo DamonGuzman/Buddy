@@ -4,14 +4,12 @@
  *
  *  1. Dev runner: spawn electron-vite dev/--watch against the "Buddy Dev"
  *     profile, importing the local OPENAI_API_KEY (env or HKCU registry).
- *  2. iPhone audio bridge supervision — DEV MODE ONLY. Packaged builds are
- *     supervised in-process by src/main/phone-audio-bridge-supervisor.ts;
- *     this script only covers `npm run dev`, where that supervisor does not
- *     autostart.
+ *  2. Optional iPhone audio bridge supervision — DEV MODE ONLY and enabled
+ *     explicitly with CLICKY_PHONE_AUDIO_AUTOSTART=1. Packaged builds use the
+ *     same exact opt-in through src/main/phone-audio-bridge-supervisor.ts.
  *
- * Escape hatch: set CLICKY_PHONE_AUDIO_URL to an explicitly EMPTY value to
- * skip the bridge entirely — a broken bridge then cannot block dev work that
- * never touches phone audio (src/main treats '' as phone-audio disabled).
+ * CLICKY_PHONE_AUDIO_URL=<url> connects to an externally managed bridge on
+ * any platform. With neither flag, Buddy uses the normal panel microphone.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -63,7 +61,6 @@ const appData =
     : (process.env.APPDATA ?? join(process.env.USERPROFILE ?? process.cwd(), 'AppData', 'Roaming'));
 const devUserData = join(appData, 'Buddy Dev');
 const activeDevUserData = process.env.CLICKY_USER_DATA ?? devUserData;
-const usePhoneBridge = process.platform === 'win32' && process.env.CLICKY_SKIP_PHONE_AUDIO !== '1';
 
 function readLocalApiKey() {
   const processKey = process.env.OPENAI_API_KEY?.trim() ?? '';
@@ -206,31 +203,38 @@ function watchBuddyBridgeConnection() {
 
 async function main() {
   const explicitPhoneAudioUrl = process.env.CLICKY_PHONE_AUDIO_URL;
-  const phoneAudioUrl = explicitPhoneAudioUrl ?? bridgeSocketUrl;
+  const trimmedExplicitPhoneAudioUrl = explicitPhoneAudioUrl?.trim() ?? '';
+  const autostartPhoneBridge = process.env.CLICKY_PHONE_AUDIO_AUTOSTART === '1';
 
   if (cliArgs.some((arg) => ['--help', '-h', '--version', '-v'].includes(arg))) {
-    spawnElectron(usePhoneBridge ? phoneAudioUrl : '');
+    spawnElectron(trimmedExplicitPhoneAudioUrl);
     return;
   }
 
-  // The optional iPhone-audio bridge is Windows-only. macOS uses the
-  // renderer's ordinary microphone path and must not try to launch PowerShell.
-  if (!usePhoneBridge) {
+  // An explicit URL always denotes an externally managed bridge. Do not
+  // launch a second local server even when autostart is also set.
+  if (trimmedExplicitPhoneAudioUrl !== '') {
+    spawnElectron(trimmedExplicitPhoneAudioUrl);
+    return;
+  }
+
+  // The default production/development path is always the panel mic.
+  if (!autostartPhoneBridge) {
     spawnElectron('');
     return;
   }
 
-  // Escape hatch: an explicitly empty CLICKY_PHONE_AUDIO_URL disables phone
-  // audio in the app, so skip bridge supervision instead of failing dev on it.
-  if (explicitPhoneAudioUrl !== undefined && explicitPhoneAudioUrl.trim() === '') {
-    console.log('[dev] CLICKY_PHONE_AUDIO_URL is empty; skipping the iPhone audio bridge');
-    spawnElectron(phoneAudioUrl);
-    return;
+  // The bundled harness invokes PowerShell and is intentionally Windows-only.
+  if (process.platform !== 'win32') {
+    throw new Error(
+      `CLICKY_PHONE_AUDIO_AUTOSTART=1 is supported only on Windows (current platform: ${process.platform}); ` +
+        'set CLICKY_PHONE_AUDIO_URL to use an externally managed bridge',
+    );
   }
 
   if (!(await ensureBridgeHealthy())) return;
 
-  spawnElectron(phoneAudioUrl);
+  spawnElectron(bridgeSocketUrl);
   watchBuddyBridgeConnection();
 }
 

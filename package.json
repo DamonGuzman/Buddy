@@ -12,6 +12,7 @@
     "typecheck": "node node_modules/build-typescript/lib/tsc.js --noEmit -p tsconfig.node.json --composite false && node node_modules/build-typescript/lib/tsc.js --noEmit -p tsconfig.web.json --composite false",
     "build": "node build/build-mac-native.mjs && npm run typecheck && electron-vite build",
     "test": "vitest run",
+    "test:browser": "node tools/browser-computer-use-e2e/run.mjs",
     "test:uia:win": "vitest run tests/windows-uia-e2e.test.ts",
     "mock": "node tools/mock-realtime/index.js",
     "phone-audio": "node tools/phone-audio-bridge/start.mjs",
@@ -31,6 +32,7 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "tldts": "^7.4.8",
     "uiohook-napi": "^1.5.5",
     "ws": "^8.21.0"
   },

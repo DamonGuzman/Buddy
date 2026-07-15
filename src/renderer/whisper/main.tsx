@@ -13,6 +13,7 @@ import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { clicky } from './clicky';
 import type { AssistantState, Settings, TranscriptEntry } from '../../shared/types';
+import { saveWhisperSettings, WHISPER_SETTINGS_SAVE_ERROR } from './settings-save';
 import './whisper.css';
 
 /** Turns kept in the reply stack (the session journal is the full record). */
@@ -29,6 +30,8 @@ function App(): React.JSX.Element {
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [state, setState] = useState<AssistantState>('idle');
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [savingVoice, setSavingVoice] = useState(false);
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stackRef = useRef<HTMLDivElement | null>(null);
@@ -82,6 +85,19 @@ function App(): React.JSX.Element {
   const voiceMuted = settings?.voiceMuted ?? false;
   const noKey = settings !== null && !settings.apiKeyPresent;
 
+  const toggleVoice = async (): Promise<void> => {
+    if (savingVoice) return;
+    setSavingVoice(true);
+    const saved = await saveWhisperSettings(clicky.setSettings, { voiceMuted: !voiceMuted });
+    setSavingVoice(false);
+    if (saved === null) {
+      setSettingsError(WHISPER_SETTINGS_SAVE_ERROR);
+      return;
+    }
+    setSettings(saved);
+    setSettingsError(null);
+  };
+
   return (
     <div className="whisper" data-state={state}>
       <div className="stack" ref={stackRef}>
@@ -109,15 +125,22 @@ function App(): React.JSX.Element {
           onKeyDown={onKeyDown}
         />
       </div>
+      {settingsError ? (
+        <div className="settings-error" role="alert">
+          {settingsError}
+        </div>
+      ) : null}
       <div className="foot">
         <span className="hint">enter to send · esc to tuck away</span>
         <button
           type="button"
           className="quiet"
           data-muted={voiceMuted ? '' : undefined}
-          onClick={() => void clicky.setSettings({ voiceMuted: !voiceMuted })}
+          disabled={savingVoice}
+          aria-busy={savingVoice}
+          onClick={() => void toggleVoice()}
         >
-          {voiceMuted ? 'voice off · text replies' : 'voice on'}
+          {savingVoice ? 'saving…' : voiceMuted ? 'voice off · text replies' : 'voice on'}
         </button>
       </div>
     </div>

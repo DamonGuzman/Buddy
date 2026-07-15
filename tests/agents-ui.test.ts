@@ -106,6 +106,32 @@ describe('selectHelpers', () => {
     expect(selectHelpers([overdue], NOW, 'held').shown.map((a) => a.id)).toEqual(['held']);
   });
 
+  it('keeps a waiting-approval helper active indefinitely', () => {
+    const waiting = agent({
+      id: 'needs-ok',
+      status: 'waiting_approval',
+      createdAt: NOW - FINISHED_LINGER_MS * 10,
+      unseen: false,
+    });
+    expect(selectHelpers([waiting], NOW).shown.map((item) => item.id)).toEqual(['needs-ok']);
+    expect(helperPhase(waiting, NOW)).toBe('active');
+    expect(nextHelperTransition([waiting], NOW)).toBeNull();
+  });
+
+  it('keeps waiting approvals visible ahead of the overflow fold', () => {
+    const view = selectHelpers(
+      [
+        agent({ id: 'old-1', createdAt: NOW - 40_000 }),
+        agent({ id: 'old-2', createdAt: NOW - 30_000 }),
+        agent({ id: 'old-3', createdAt: NOW - 20_000 }),
+        agent({ id: 'needs-ok', status: 'waiting_approval', createdAt: NOW - 10_000 }),
+      ],
+      NOW,
+    );
+    expect(view.shown.map((item) => item.id)).toContain('needs-ok');
+    expect(view.overflow.map((item) => item.id)).not.toContain('needs-ok');
+  });
+
   it('folds everything past MAX_HELPER_SPRITES into overflow', () => {
     const agents = [
       agent({ id: 'r1', createdAt: NOW - 40_000 }),
@@ -331,6 +357,18 @@ describe('helperStatus (non-technical copy)', () => {
     expect(helperStatus(agent({ status: 'timed_out' })).pill).toBe('ran long');
     expect(helperStatus(agent({ status: 'queued' })).kind).toBe('waiting');
   });
+
+  it('waiting approval stays amber and asks for a choice', () => {
+    expect(helperStatus(agent({ status: 'waiting_approval' }))).toEqual({
+      pill: 'needs your ok',
+      kind: 'approval',
+      line: 'i paused before doing something that needs your choice',
+      cta: 'click to review this action',
+    });
+    expect(elapsedPhrase(agent({ status: 'waiting_approval' }), NOW)).toBe(
+      'waiting for your choice',
+    );
+  });
 });
 
 describe('elapsedPhrase / sourcesPhrase / truncate', () => {
@@ -425,6 +463,7 @@ describe('expanded card view-model (M22 click -> full status)', () => {
   it('expandedFindings: finished runs only, full output over spoken summary', () => {
     expect(expandedFindings(agent({ output: 'notes' }))).toBeNull(); // running
     expect(expandedFindings(agent({ status: 'queued', output: 'notes' }))).toBeNull();
+    expect(expandedFindings(agent({ status: 'waiting_approval', output: 'notes' }))).toBeNull();
     expect(
       expandedFindings(agent({ status: 'done', summary: 'short', output: 'the full story' })),
     ).toBe('the full story');
