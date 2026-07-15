@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "node tools/dev.mjs",
     "dev:raw": "electron-vite dev --watch",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json --composite false && tsc --noEmit -p tsconfig.web.json --composite false",
+    "typecheck": "node node_modules/build-typescript/lib/tsc.js --noEmit -p tsconfig.node.json --composite false && node node_modules/build-typescript/lib/tsc.js --noEmit -p tsconfig.web.json --composite false",
     "build": "node build/build-mac-native.mjs && npm run typecheck && electron-vite build",
     "test": "vitest run",
     "test:uia:win": "vitest run tests/windows-uia-e2e.test.ts",
@@ -25,7 +25,6 @@
     "dist:win": "npm run build && electron-builder --win --publish never",
     "dist:mac": "node tools/dist.mjs",
     "dist:release:mac": "BUDDY_RELEASE=1 node tools/dist.mjs",
-    "postinstall": "node tools/lint-ts-shim.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -67,10 +66,10 @@
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.2",
     "tw-animate-css": "^1.4.0",
-    "typescript": "^7.0.2",
+    "build-typescript": "npm:typescript@^7.0.2",
+    "typescript": "^5.9.0",
     "typescript-eslint": "^8.64.0",
     "vite": "^7.3.6",
-    "vitest": "^4.1.10",
-    "tseslint-ts": "npm:typescript@^5.9.0"
+    "vitest": "^4.1.10"
   }
 }
