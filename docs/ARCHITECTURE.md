@@ -82,7 +82,8 @@ typed action** and is always signposted by a visible indicator.
   view opened from the tray's Settings item (plus first-run / actionable-error showOnce).
   Transcript, composer, and agents view are deleted — the whisper composer, caption bubbles,
   and overlay helper sprites carry those jobs. Tray click now toggles the whisper; a second
-  app launch and overlay agent-clicks summon the whisper too. Internal `panel:*` channel and
+  app launch summons it too. Clicking a helper sprite expands its card in place to the agent's
+  full status (M22, docs/AGENT-MODE.md §5.5). Internal `panel:*` channel and
   file names remain for wire/history stability and now denote this window.
 - **Whisper renderer** (M20): ~340×244 transparent frameless composer anchored beside the buddy's
   rest spot — the text channel for can't-talk environments. Summoned by a hotkey TAP (release
@@ -124,7 +125,8 @@ src/
                      read state, trigger pointer, dump last capture metadata
   renderer/
     overlay/         buddy canvas/DOM, bezier animation, caption bubble, indicators,
-                     agent helper sprites + hover card (M19, docs/AGENT-MODE.md §5.5)
+                     agent helper sprites + hover card + click-to-expand full status
+                     (M19/M22, docs/AGENT-MODE.md §5.5)
     panel/           M21: settings-only React app + the hidden audio engines
                      (the chat panel UI — transcript/composer/agents — is deleted)
     whisper/         M20 floating composer (reply stack + input + quiet-mode toggle)

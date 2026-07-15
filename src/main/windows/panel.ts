@@ -35,6 +35,7 @@ import {
 } from './harden';
 import { wireCaptureTest } from './panel-capture-test';
 import type { PanelCaptureTestOptions } from './panel-capture-test';
+import { positionBuddyPanel } from './buddy-panel-position';
 
 const MARGIN = 12;
 
@@ -74,6 +75,11 @@ export function showPanelOnce(reason = 'first-run'): void {
  */
 export function togglePanel(): void {
   activePanel?.toggle();
+}
+
+/** Open Settings beside a right-clicked Buddy without toggle semantics. */
+export function showPanelNearBuddy(anchor: Rectangle): void {
+  activePanel?.showNearBuddy(anchor);
 }
 
 export class PanelManager {
@@ -149,13 +155,22 @@ export class PanelManager {
   }
 
   show(anchor?: Rectangle): void {
+    this.present(anchor, false);
+  }
+
+  /** Show Settings beside an explicit Buddy context-click. */
+  showNearBuddy(anchor: Rectangle): void {
+    this.present(anchor, true);
+  }
+
+  private present(anchor: Rectangle | undefined, besideBuddy: boolean): void {
     this.ignoreBlurUntil = 0;
     this.pendingInactiveShow = false;
     const win = this.ensureWindow();
-    this.positionNearTray(win, anchor);
+    this.positionWindow(win, anchor, besideBuddy);
     win.show();
-    this.positionNearTray(win, anchor);
-    this.stabilizePosition(win, anchor);
+    this.positionWindow(win, anchor, besideBuddy);
+    this.stabilizePosition(win, anchor, besideBuddy);
     win.focus();
     this.reassertTopmost(win);
   }
@@ -331,12 +346,25 @@ export class PanelManager {
     this.reassertTopmost(win);
   }
 
-  private stabilizePosition(win: BrowserWindow, anchor?: Rectangle): void {
+  private stabilizePosition(win: BrowserWindow, anchor?: Rectangle, besideBuddy = false): void {
     for (const delay of [100, 400, 1_000]) {
       setTimeout(() => {
-        if (!win.isDestroyed() && win.isVisible()) this.positionNearTray(win, anchor);
+        if (!win.isDestroyed() && win.isVisible()) this.positionWindow(win, anchor, besideBuddy);
       }, delay);
     }
+  }
+
+  private positionWindow(win: BrowserWindow, anchor?: Rectangle, besideBuddy = false): void {
+    if (besideBuddy && anchor) {
+      const display = screen.getDisplayMatching(anchor);
+      const position = positionBuddyPanel(anchor, display.workArea, {
+        width: PANEL_WIDTH,
+        height: PANEL_HEIGHT,
+      });
+      win.setPosition(position.x, position.y);
+      return;
+    }
+    this.positionNearTray(win, anchor);
   }
 
   private positionNearTray(win: BrowserWindow, anchor?: Rectangle): void {

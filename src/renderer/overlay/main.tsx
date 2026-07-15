@@ -122,6 +122,10 @@ function App(): React.JSX.Element {
   // M19 agent-helper state (mirrors of HelperHoverController — one clock).
   const [helperView, setHelperView] = useState<HelperView>({ shown: [], overflow: [] });
   const [helperHover, setHelperHover] = useState<string | null>(null);
+  // M22: helper whose card is click-expanded to its full status (ref mirror
+  // so the mount-effect controller callbacks see the current value).
+  const [helperExpanded, setHelperExpanded] = useState<string | null>(null);
+  const helperExpandedRef = useRef<string | null>(null);
   const [cluster, setCluster] = useState<ClusterGeom | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -215,11 +219,31 @@ function App(): React.JSX.Element {
       hoverEligible: () => hoverCtrl.isEligible,
       cardRect: () => cardRectRef.current,
       applyAux: (aux) => hoverCtrl.setAux(aux),
-      onView: setHelperView,
+      onView: (view) => {
+        setHelperView(view);
+        // M22: the expanded agent vanished from the cluster (e.g. cancelled).
+        const id = helperExpandedRef.current;
+        if (id !== null && ![...view.shown, ...view.overflow].some((a) => a.id === id)) {
+          clearHelperExpanded();
+        }
+      },
       onCluster: setCluster,
-      onHover: setHelperHover,
+      onHover: (key) => {
+        setHelperHover(key);
+        // M22: the hover machine owns card lifetime — a full hover release
+        // (cursor left the merged region / interaction disabled) closes the
+        // expanded full-status card with it.
+        if (key === null) clearHelperExpanded();
+      },
       onNow: setNowTick,
     });
+
+    function clearHelperExpanded(): void {
+      if (helperExpandedRef.current === null) return;
+      helperExpandedRef.current = null;
+      setHelperExpanded(null);
+      helpers.setPinned(null);
+    }
 
     const hoverCtrl = new HoverDragController({
       clock,
@@ -237,6 +261,7 @@ function App(): React.JSX.Element {
       }),
       sendHover: (evt) => clicky.sendHover(evt),
       sendBuddyClick: () => clicky.sendBuddyClick(),
+      sendBuddySettings: () => clicky.sendBuddySettings(),
       sendBuddyMove: (rest) => clicky.sendBuddyMove(rest),
       bumpActivity,
       updatePlacement,
@@ -365,13 +390,18 @@ function App(): React.JSX.Element {
       if (e.relatedTarget === null) hoverCtrl.onCursorLeftWindow();
     };
     const onMouseDown = (e: MouseEvent): void => {
-      if (hoverCtrl.onMouseDown(e.clientX, e.clientY, e.button)) e.preventDefault();
+      const contextClick = clicky.isMacOS && e.button === 0 && e.ctrlKey;
+      if (hoverCtrl.onMouseDown(e.clientX, e.clientY, e.button, contextClick)) e.preventDefault();
     };
     const onMouseUp = (e: MouseEvent): void => hoverCtrl.onMouseUp(e.button);
+    const onContextMenu = (e: MouseEvent): void => {
+      if (hoverCtrl.onContextMenu(e.clientX, e.clientY)) e.preventDefault();
+    };
     window.addEventListener('mousemove', onMouseMove, { passive: true });
     window.addEventListener('mouseout', onMouseOut, { passive: true });
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('contextmenu', onContextMenu);
     // M20: main-side cursor feed — Windows' forward:true mousemove delivery
     // proved unreliable, so main streams cursor positions while this window
     // hosts the buddy at rest. Same HoverMachine entry points as real events;
@@ -422,6 +452,7 @@ function App(): React.JSX.Element {
       window.removeEventListener('mouseout', onMouseOut);
       window.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('contextmenu', onContextMenu);
       offCursor(); // M20 cursor feed
       // M19 agent-helper teardown.
       offAgents();
@@ -449,14 +480,23 @@ function App(): React.JSX.Element {
       cardRectRef.current = null;
     }
     helpersRef.current?.syncAux();
-  }, [helperHover, helperView, cluster]);
+  }, [helperHover, helperExpanded, helperView, cluster]);
 
-  // M19: tick the card's elapsed phrase while one is open.
+  // M19: tick the card's elapsed/time-ago phrases while one is open.
   useEffect(() => {
     if (helperHover === null) return;
     const t = setInterval(() => setNowTick(Date.now()), 1000);
     return () => clearInterval(t);
   }, [helperHover]);
+
+  // M22: a click toggles the helper's card between hover-summary and full
+  // status. Handled entirely in the overlay — no window is summoned.
+  const toggleHelperExpanded = (id: string): void => {
+    const next = helperExpandedRef.current === id ? null : id;
+    helperExpandedRef.current = next;
+    setHelperExpanded(next);
+    helpersRef.current?.setPinned(next);
+  };
 
   // M15: state-aware hover hint copy (null = suppressed: non-idle states,
   // captions in progress — an error caption is never replaced). The clock and
@@ -553,9 +593,10 @@ function App(): React.JSX.Element {
           visible={buddyVisible && mode === 'rest' && !dragging}
           interactive={interactive}
           hoveredKey={helperHover}
+          expandedKey={helperExpanded}
           now={nowTick}
           cardRef={cardRef}
-          onAgentClick={(id) => clicky.sendAgentClick(id)}
+          onAgentClick={toggleHelperExpanded}
           onAgentCancel={(id) => clicky.sendAgentCancel(id)}
         />
       )}

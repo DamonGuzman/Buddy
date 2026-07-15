@@ -144,6 +144,8 @@ export interface SessionEventMap {
   realtime_error: Error;
   pointer_dispatched: { turnId: string | undefined; command: PointerCommand };
   assistant_state_changed: { previous: AssistantState; next: AssistantState };
+  /** The state machine's watchdog force-landed a leaked thinking/speaking. */
+  assistant_state_watchdog: { stuck: AssistantState };
   transcript_upsert: { turnId: string | undefined; entry: TranscriptEntry };
   // App bootstrap / OS lifecycle (index.ts).
   phone_audio_bridge_status: PhoneAudioBridgeStatus;

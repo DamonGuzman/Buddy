@@ -22,6 +22,14 @@ export const AUDIO_BYTES_PER_MS = (AUDIO_SAMPLE_RATE * AUDIO_BYTES_PER_SAMPLE) /
 export const IDLE_GRACE_MS = 300;
 /** Error state auto-recovers to idle after this long. */
 export const ERROR_RECOVERY_MS = 4_000;
+/**
+ * State-machine safety net: 'thinking'/'speaking' held this long with no open
+ * response and no foreground work is a leak (lost response.done, dropped
+ * socket without an error event) — force-land back to the base state. Kept
+ * far above any legitimate wait (captures take ~2s; real long turns keep
+ * pendingResponses > 0 or an active text run, which re-arms the watchdog).
+ */
+export const STUCK_STATE_RECOVERY_MS = 20_000;
 /** Transcript ring buffer size (also what GET /transcript returns). */
 export const TRANSCRIPT_LIMIT = 50;
 /** Pointer commands kept for the debug harness. */

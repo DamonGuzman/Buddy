@@ -229,14 +229,14 @@ describe('hintText', () => {
   it('idle default copy uses the lowercased hotkey label and teaches the tap', () => {
     expect(hintText(base)).toEqual({
       text: 'hold ctrl+alt (left alt) and talk to me',
-      sub: 'or tap it to type',
+      sub: 'tap the hotkey to type · right-click me for settings',
     });
   });
 
   it('uses toggle copy in full realtime mode (typing goes via the buddy click)', () => {
     expect(hintText({ ...base, fullRealtimeMode: true })).toEqual({
       text: 'press ctrl+alt (left alt) to start realtime mode',
-      sub: 'or click me to type',
+      sub: 'click me to type · right-click me for settings',
     });
   });
 
@@ -253,7 +253,9 @@ describe('hintText', () => {
   });
 
   it('switches to the click invitation once the dwell flip is armed (M20: whisper)', () => {
-    expect(hintText({ ...base, interactive: true })?.sub).toBe('click me to type instead');
+    expect(hintText({ ...base, interactive: true })?.sub).toBe(
+      'click me to type · right-click me for settings',
+    );
   });
 });
 

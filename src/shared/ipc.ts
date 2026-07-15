@@ -148,8 +148,10 @@ export interface RendererSendEvents {
   // M15 additions: buddy hover.
   /** Hover state machine events: dwell (make interactive) / exit / status. */
   'overlay:hover': OverlayHoverEvent;
-  /** The buddy was clicked while interactive -> main toggles the panel. */
+  /** The buddy was clicked while interactive -> main toggles the whisper. */
   'overlay:buddy-click': null;
+  /** The buddy was right-clicked while interactive -> main opens Settings. */
+  'overlay:buddy-settings': null;
   /** Drag-reposition finished: persist this rest fraction for this overlay. */
   'overlay:buddy-move': BuddyRestFraction;
   // M19 additions: agent helpers on the overlay.
@@ -231,6 +233,8 @@ export type Unsubscribe = () => void;
 export interface OverlayApi {
   /** Which display this overlay covers (from ?screenIndex=N). */
   readonly screenIndex: number;
+  /** Platform seam for native Control-click context-menu semantics. */
+  readonly isMacOS: boolean;
   onPointer(cb: (cmd: PointerCommand) => void): Unsubscribe;
   onAssistantState(cb: (state: AssistantState) => void): Unsubscribe;
   onCaption(cb: (update: CaptionUpdate) => void): Unsubscribe;
@@ -245,8 +249,10 @@ export interface OverlayApi {
   getDisplaySurface(): Promise<OverlayDisplaySurface>;
   /** Fire-and-forget hover events (dwell/exit/status). */
   sendHover(evt: OverlayHoverEvent): void;
-  /** The buddy was clicked while interactive (main toggles the panel). */
+  /** The buddy was clicked while interactive (main toggles the whisper). */
   sendBuddyClick(): void;
+  /** The buddy was right-clicked while interactive (main opens Settings). */
+  sendBuddySettings(): void;
   /** Drag finished: persist the new rest fraction for this overlay. */
   sendBuddyMove(rest: BuddyRestFraction): void;
 

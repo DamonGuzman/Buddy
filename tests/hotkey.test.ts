@@ -33,7 +33,7 @@ interface Harness {
   taps: number;
   down(code: number): void;
   up(code: number): void;
-  click(button: number): void;
+  click(button: number, ctrlKey?: boolean): void;
 }
 
 function makeHarness(maxHoldMs?: number): Harness {
@@ -47,7 +47,7 @@ function makeHarness(maxHoldMs?: number): Harness {
     taps: 0,
     down: (code) => hook.emit('keydown', { keycode: code }),
     up: (code) => hook.emit('keyup', { keycode: code }),
-    click: (button) => hook.emit('click', { button }),
+    click: (button, ctrlKey = false) => hook.emit('click', { button, ctrlKey }),
   };
   hotkey.on('hold-start', () => events.push('start'));
   hotkey.on('hold-end', () => events.push('end'));
@@ -93,11 +93,13 @@ describe('hold-to-talk state machine', () => {
 describe('global primary click', () => {
   it('emits only for the left/primary mouse button', () => {
     const h = makeHarness();
-    let clicks = 0;
-    h.hotkey.on('primary-click', () => clicks++);
+    const clicks: boolean[] = [];
+    h.hotkey.on('primary-click', (ctrlKey) => clicks.push(ctrlKey));
+    h.click(3);
     h.click(2);
     h.click(1);
-    expect(clicks).toBe(1);
+    h.click(1, true);
+    expect(clicks).toEqual([false, true]);
   });
 });
 

@@ -9,7 +9,7 @@
  * "sources" or status codes. Lowercase, warm, matches the persona.
  */
 
-import type { AgentSummary, Rect } from '../../shared/types';
+import type { AgentStep, AgentSummary, Rect } from '../../shared/types';
 import { AUX_PAD, dist, insideRect, padRect } from './hover';
 import type { Vec } from './hover';
 
@@ -35,6 +35,16 @@ export const FINISHED_LINGER_MS = 10_000;
 export const HELPER_DEPART_MS = 650;
 /** Agent card width (must keep the merged hover region under main's cap). */
 export const AGENT_CARD_W = 248;
+/**
+ * Click-to-expand full-status card width. Region math: buddy half-footprint
+ * (36) + AGENT_CARD_GAP (70) + width + AUX_PAD (10) must stay under
+ * REGION_CAP (398) -> width <= 282.
+ */
+export const AGENT_CARD_EXPANDED_W = 264;
+/** Most recent activity rows shown on the expanded card. */
+export const EXPANDED_STEPS_MAX = 6;
+/** Findings text cap on the expanded card (bounds the DOM, card scrolls). */
+export const EXPANDED_FINDINGS_MAX = 1500;
 /** Horizontal gap between the buddy center and the card's near edge. */
 export const AGENT_CARD_GAP = 70;
 /** Hovered key for the overflow pebble (never collides with agent ids). */
@@ -350,4 +360,69 @@ export function sourcesPhrase(agent: AgentSummary): string | null {
 export function truncate(text: string, max: number): string {
   const t = text.trim().replace(/\s+/g, ' ');
   return t.length <= max ? t : `${t.slice(0, max - 1).trimEnd()}…`;
+}
+
+// ---------------------------------------------------------------------------
+// Expanded card (click a helper -> its full status, M22)
+// ---------------------------------------------------------------------------
+
+/** Last `max` activity steps, oldest first (reads top-to-bottom). */
+export function recentSteps(agent: AgentSummary, max = EXPANDED_STEPS_MAX): AgentStep[] {
+  return agent.steps.slice(-max);
+}
+
+/** 'just now' / 'a minute ago' / '4 minutes ago' / 'a while ago'. */
+export function timeAgoPhrase(at: number, now: number): string {
+  const ms = Math.max(0, now - at);
+  if (ms < 45_000) return 'just now';
+  if (ms < 90_000) return 'a minute ago';
+  if (ms < 60 * 60_000) return `${Math.round(ms / 60_000)} minutes ago`;
+  return 'a while ago';
+}
+
+/** Deduped source hostnames ('rtings.com'), capped for the expanded card. */
+export function sourceHosts(
+  agent: AgentSummary,
+  max = 5,
+): { hosts: string[]; more: number } {
+  const hosts: string[] = [];
+  for (const url of agent.sources ?? []) {
+    let host: string;
+    try {
+      host = new URL(url).hostname.replace(/^www\./, '');
+    } catch {
+      host = truncate(url, 40);
+    }
+    if (host !== '' && !hosts.includes(host)) hosts.push(host);
+  }
+  return { hosts: hosts.slice(0, max), more: Math.max(0, hosts.length - max) };
+}
+
+/** Like truncate(), but preserves line breaks (findings are multi-line). */
+export function clip(text: string, max: number): string {
+  const t = text.trim();
+  return t.length <= max ? t : `${t.slice(0, max - 1).trimEnd()}…`;
+}
+
+/** Light-markdown findings -> plain text (headings, emphasis, links, bullets). */
+export function plainText(md: string): string {
+  return md
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^[-*]\s+/gm, '• ')
+    .trim();
+}
+
+/**
+ * Full findings text for the expanded card, or null: finished runs only
+ * (while running, the activity log is the story), full output preferred
+ * over the short spoken summary.
+ */
+export function expandedFindings(agent: AgentSummary): string | null {
+  if (agent.status === 'queued' || agent.status === 'running') return null;
+  const text = agent.output ?? agent.summary;
+  if (text === undefined || text.trim() === '') return null;
+  return clip(plainText(text), EXPANDED_FINDINGS_MAX);
 }

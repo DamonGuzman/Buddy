@@ -30,6 +30,7 @@ const pageSearch =
 
 const api: OverlayApi = {
   screenIndex: parseOverlayParams(pageSearch).screenIndex,
+  isMacOS: process.platform === 'darwin',
   onPointer: (cb) => subscribe('overlay:pointer', cb),
   onAssistantState: (cb) => subscribe('overlay:assistant-state', cb),
   onCaption: (cb) => subscribe('overlay:caption', cb),
@@ -43,6 +44,7 @@ const api: OverlayApi = {
   getDisplaySurface: () => ipcRenderer.invoke('overlay:get-display-surface'),
   sendHover: (evt) => ipcRenderer.send('overlay:hover', evt),
   sendBuddyClick: () => ipcRenderer.send('overlay:buddy-click', null),
+  sendBuddySettings: () => ipcRenderer.send('overlay:buddy-settings', null),
   sendBuddyMove: (rest) => ipcRenderer.send('overlay:buddy-move', rest),
   // M20 addition: main-side cursor feed (forward:true fallback).
   onCursor: (cb) => subscribe('overlay:cursor', cb),

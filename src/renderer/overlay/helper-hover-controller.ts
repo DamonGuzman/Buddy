@@ -68,6 +68,13 @@ export class HelperHoverController {
   private hovered: string | null = null;
   /** Key a grace timer will commit (null = pending hide); see timers 'grace'. */
   private pending: string | null = null;
+  /**
+   * M22: agent whose full-status card is expanded (clicked). Pinned like the
+   * hovered helper — exempt from the linger clock so the card the user is
+   * reading never vanishes, even when it was opened from the overflow card
+   * (where `hovered` is OVERFLOW_KEY, not the agent id).
+   */
+  private pinned: string | null = null;
 
   constructor(private readonly ports: HelperHoverPorts) {}
 
@@ -82,11 +89,18 @@ export class HelperHoverController {
     if (this.agents.length === 0 && list.length > 0) this.setAgents(list);
   }
 
+  /** M22: pin/unpin the expanded full-status card's agent (null = none). */
+  setPinned(id: string | null): void {
+    if (id === this.pinned) return;
+    this.pinned = id;
+    this.recompute();
+  }
+
   /** Re-derive visible helpers + slot geometry (agents / anchor changed). */
   recompute(): void {
     const now = this.ports.clock();
     this.ports.onNow(now);
-    this.view = selectHelpers(this.agents, now, this.hovered ?? undefined);
+    this.view = selectHelpers(this.agents, now, this.keepKey());
     this.ports.onView(this.view);
     const count = this.view.shown.length + (this.view.overflow.length > 0 ? 1 : 0);
     if (count === 0) {
@@ -168,6 +182,11 @@ export class HelperHoverController {
 
   // ---------------------------------------------------------------- internals
 
+  /** Linger-clock exemption: the pinned (expanded) helper wins over hover. */
+  private keepKey(): string | undefined {
+    return this.pinned ?? this.hovered ?? undefined;
+  }
+
   /** Cluster anchor = the buddy REST spot; content extends toward the roomy
    *  side of the screen (same edge thresholds as bubble placement). */
   private clusterGeom(): ClusterGeom {
@@ -200,7 +219,7 @@ export class HelperHoverController {
     const next =
       delayOverrideMs !== undefined
         ? now + delayOverrideMs
-        : nextHelperTransition(this.agents, now, this.hovered ?? undefined);
+        : nextHelperTransition(this.agents, now, this.keepKey());
     if (next === null) return;
     this.ports.timers.set('sweep', Math.max(SWEEP_MIN_DELAY_MS, next - now + SWEEP_SLACK_MS), () =>
       this.recompute(),

@@ -37,8 +37,85 @@
   transform: translate3d(-50%, 0, 0) scale(1);
   opacity: 1;
 }
+/* Notch surface: the bar splits into two wings that flank the physical notch —
+   orb on the left, label on the right — instead of hanging below it. The root
+   becomes a full-width, untransformed anchor (a transform here would become
+   the containing block and break the wings' 50%-based math). */
 .buddy-island[data-surface='notch'] {
+  left: 0;
+  right: 0;
   top: 0;
+  transform: none;
+  transition: opacity 180ms ease;
+}
+/* Wings bubble OUT of the notch: they scale horizontally from their inner
+   (notch-side) edge with a springy overshoot, as if the notch itself grows.
+   Never slide from the top edge — that reads as a foreign window, not part
+   of the hardware. */
+.buddy-island-wing {
+  position: absolute;
+  top: 0;
+  height: var(--island-notch-height, 32px);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  min-width: 46px;
+  color: rgba(255, 255, 255, 0.92);
+  /* pure black so the wings read as one shape with the physical notch */
+  background: #000;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  transform: scaleX(0);
+  transition: transform 420ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.buddy-island[data-visible] .buddy-island-wing {
+  transform: scaleX(1);
+}
+/* content fades in a beat after the wing has grown (hides the scale squish) */
+.buddy-island-wing > * {
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+.buddy-island[data-visible] .buddy-island-wing > * {
+  opacity: 1;
+  transition: opacity 220ms ease 150ms;
+}
+/* AppKit only reports the notch's rectangular bounding box (safeAreaInsets +
+   auxiliaryTop*Area) — the physical cutout is a rounded shape inside it, so
+   live menu-bar pixels survive at its corners and would show as a color gap
+   against the wings' flat edges. Painting the whole box black merges wings
+   and cutout into one continuous shape. */
+.buddy-island-notch-cover {
+  position: absolute;
+  top: 0;
+  left: calc(50% - var(--island-notch-width, 0px) / 2 - 1px);
+  width: calc(var(--island-notch-width, 0px) + 2px);
+  height: var(--island-notch-height, 32px);
+  background: #000;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+/* the 1px under-lap into the notch hides sub-pixel seams at the join */
+.buddy-island-wing[data-side='left'] {
+  right: calc(50% + var(--island-notch-width, 0px) / 2 - 1px);
+  justify-content: flex-end;
+  padding: 0 10px 0 15px;
+  border-radius: 0 0 0 18px;
+  transform-origin: 100% 50%;
+}
+.buddy-island-wing[data-side='right'] {
+  left: calc(50% + var(--island-notch-width, 0px) / 2 - 1px);
+  padding: 0 15px 0 10px;
+  border-radius: 0 0 18px 0;
+  transform-origin: 0 50%;
+}
+/* persistent result dot: only the orb wing stays; the label wing bubbles
+   back into the notch (higher specificity than the [data-visible] reveal) */
+.buddy-island[data-surface='notch'][data-kind='result-dot'] .buddy-island-wing[data-side='right'] {
+  transform: scaleX(0);
+  transition-timing-function: cubic-bezier(0.55, 0, 0.8, 0.6);
+}
+.buddy-island[data-surface='notch'][data-kind='result-dot'] .buddy-island-wing[data-side='right'] > * {
+  opacity: 0;
+  transition: opacity 140ms ease;
 }
 .buddy-island-shell {
   min-width: 194px;
@@ -62,21 +139,10 @@
     min-width 320ms cubic-bezier(0.2, 0.9, 0.2, 1),
     border-radius 320ms ease;
 }
-.buddy-island[data-surface='notch'] .buddy-island-shell {
-  min-width: max(218px, calc(var(--island-notch-width, 0px) + 38px));
-  height: calc(var(--island-notch-height, 32px) + 25px);
-  padding-top: var(--island-notch-height, 32px);
-  border-radius: 0 0 22px 22px;
-  border-top: 0;
-}
 .buddy-island[data-kind='result-dot'] .buddy-island-shell {
   min-width: 38px;
   width: 38px;
   padding: 0;
-}
-.buddy-island[data-surface='notch'][data-kind='result-dot'] .buddy-island-shell {
-  min-width: max(154px, calc(var(--island-notch-width, 0px) + 26px));
-  width: auto;
 }
 .buddy-island-label {
   font-size: 12.5px;
@@ -96,11 +162,16 @@
   background: linear-gradient(145deg, #68c0ff, #2b6ef2);
   box-shadow: 0 0 12px rgba(78, 158, 255, 0.5);
 }
+/* The level bars are STATIC by default — an animated waveform is a voice
+   claim, so it runs only while buddy is actually listening or speaking. */
 .buddy-island-orb span {
   width: 2px;
   height: 5px;
   border-radius: 2px;
   background: white;
+}
+.buddy-island[data-kind='listening'] .buddy-island-orb span,
+.buddy-island[data-kind='speaking'] .buddy-island-orb span {
   animation: island-level 700ms ease-in-out infinite alternate;
 }
 .buddy-island-orb span:nth-child(2) {
@@ -138,8 +209,11 @@
 
 @media (prefers-reduced-motion: reduce) {
   .buddy-island,
-  .buddy-island-shell {
+  .buddy-island-shell,
+  .buddy-island-wing,
+  .buddy-island-wing > * {
     transition-duration: 1ms;
+    transition-delay: 0ms;
   }
   .buddy-island-orb span {
     animation: none;
@@ -1048,6 +1122,60 @@
 .agent-card-stop:hover {
   color: #fda4af;
   border-color: rgba(244, 63, 94, 0.5);
+}
+
+/* M22: click-to-expand full status. Taller + scrollable; height stays under
+   the merged-region cap (REGION_CAP math in agents-ui.ts). */
+.agent-card[data-expanded] {
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.agent-card::-webkit-scrollbar {
+  width: 8px;
+}
+.agent-card::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+}
+.agent-card::-webkit-scrollbar-track {
+  background: transparent;
+}
+.agent-card-section {
+  margin-top: 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.6px;
+  color: rgba(243, 244, 246, 0.5);
+}
+.agent-step {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 3px;
+}
+.agent-step-label {
+  flex: 1;
+  min-width: 0;
+  color: rgba(243, 244, 246, 0.82);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-step-time {
+  flex: none;
+  font-size: 10.5px;
+  color: rgba(243, 244, 246, 0.45);
+}
+.agent-card-findings {
+  margin-top: 3px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: rgba(243, 244, 246, 0.85);
+}
+.agent-card-hosts {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: rgba(243, 244, 246, 0.7);
 }
 
 /* working ellipsis inside the card line (reuses the think-dot rhythm) */

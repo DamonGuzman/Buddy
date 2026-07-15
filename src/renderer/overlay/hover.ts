@@ -301,14 +301,13 @@ export function hintText(input: HintTextInput): { text: string; sub?: string } |
     : recent
       ? `want more? hold ${hk} and ask me anything`
       : `hold ${hk} and talk to me`;
-  // M20 discoverability: the sub always teaches the text path — the whisper
-  // is invisible until found. Realtime mode has no hotkey tap (the press
-  // toggles the session), so there the buddy click is the only door.
+  // The sub teaches both of Buddy's direct gestures. Realtime mode has no
+  // hotkey tap (the press toggles the session), so Buddy is the text door.
   const sub = input.interactive
-    ? 'click me to type instead'
+    ? 'click me to type · right-click me for settings'
     : input.fullRealtimeMode
-      ? 'or click me to type'
-      : 'or tap it to type';
+      ? 'click me to type · right-click me for settings'
+      : 'tap the hotkey to type · right-click me for settings';
   return { text, sub };
 }
 

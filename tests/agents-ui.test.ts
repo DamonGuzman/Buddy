@@ -6,8 +6,11 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  AGENT_CARD_EXPANDED_W,
+  AGENT_CARD_GAP,
   CARD_HIDE_DELAY_MS,
   CARD_SHOW_DELAY_MS,
+  EXPANDED_STEPS_MAX,
   FINISHED_LINGER_MS,
   HELPER_ARC_RADIUS,
   HELPER_DEPART_MS,
@@ -15,8 +18,10 @@ import {
   HELPER_TINTS,
   MAX_HELPER_SPRITES,
   OVERFLOW_KEY,
+  clip,
   desiredHelperHover,
   elapsedPhrase,
+  expandedFindings,
   helperHoverStep,
   helperPhase,
   helperSlotViews,
@@ -24,8 +29,12 @@ import {
   helperStatus,
   helperTint,
   nextHelperTransition,
+  plainText,
+  recentSteps,
   selectHelpers,
+  sourceHosts,
   sourcesPhrase,
+  timeAgoPhrase,
   truncate,
 } from '../src/renderer/overlay/agents-ui';
 import type { HelperSlot } from '../src/renderer/overlay/agents-ui';
@@ -356,5 +365,75 @@ describe('elapsedPhrase / sourcesPhrase / truncate', () => {
   it('truncate collapses whitespace and appends an ellipsis', () => {
     expect(truncate('  hello   world  ', 20)).toBe('hello world');
     expect(truncate('abcdefghij', 5)).toBe('abcd…');
+  });
+});
+
+describe('expanded card view-model (M22 click -> full status)', () => {
+  it('recentSteps keeps the last N, oldest first', () => {
+    const steps = Array.from({ length: 9 }, (_, i) => ({
+      kind: 'note' as const,
+      label: `step ${i}`,
+      at: NOW - (9 - i) * 1000,
+    }));
+    const out = recentSteps(agent({ steps }));
+    expect(out).toHaveLength(EXPANDED_STEPS_MAX);
+    expect(out[0]?.label).toBe('step 3');
+    expect(out[out.length - 1]?.label).toBe('step 8');
+  });
+
+  it('timeAgoPhrase speaks in plain words', () => {
+    expect(timeAgoPhrase(NOW - 10_000, NOW)).toBe('just now');
+    expect(timeAgoPhrase(NOW - 60_000, NOW)).toBe('a minute ago');
+    expect(timeAgoPhrase(NOW - 4 * 60_000, NOW)).toBe('4 minutes ago');
+    expect(timeAgoPhrase(NOW - 2 * 60 * 60_000, NOW)).toBe('a while ago');
+    expect(timeAgoPhrase(NOW + 5_000, NOW)).toBe('just now'); // clock skew
+  });
+
+  it('sourceHosts dedupes hostnames, strips www, and caps the list', () => {
+    const { hosts, more } = sourceHosts(
+      agent({
+        sources: [
+          'https://www.rtings.com/monitor/reviews/best',
+          'https://rtings.com/other-page',
+          'https://displayninja.com/x',
+          'not a url',
+        ],
+      }),
+    );
+    expect(hosts).toEqual(['rtings.com', 'displayninja.com', 'not a url']);
+    expect(more).toBe(0);
+  });
+
+  it('sourceHosts reports the overflow count past the cap', () => {
+    const sources = Array.from({ length: 8 }, (_, i) => `https://site${i}.com/a`);
+    const { hosts, more } = sourceHosts(agent({ sources }));
+    expect(hosts).toHaveLength(5);
+    expect(more).toBe(3);
+  });
+
+  it('clip preserves line breaks (unlike truncate)', () => {
+    expect(clip('one\ntwo\nthree', 100)).toBe('one\ntwo\nthree');
+    expect(clip('abcdefghij', 5)).toBe('abcd…');
+  });
+
+  it('plainText strips light markdown down to readable text', () => {
+    expect(plainText('# heading\n**bold** and *soft*\n- item\n[link](https://x.com)')).toBe(
+      'heading\nbold and soft\n• item\nlink',
+    );
+  });
+
+  it('expandedFindings: finished runs only, full output over spoken summary', () => {
+    expect(expandedFindings(agent({ output: 'notes' }))).toBeNull(); // running
+    expect(expandedFindings(agent({ status: 'queued', output: 'notes' }))).toBeNull();
+    expect(
+      expandedFindings(agent({ status: 'done', summary: 'short', output: 'the full story' })),
+    ).toBe('the full story');
+    expect(expandedFindings(agent({ status: 'done', summary: 'short' }))).toBe('short');
+    expect(expandedFindings(agent({ status: 'failed' }))).toBeNull();
+  });
+
+  it('the expanded card geometry stays under the merged-region cap', () => {
+    // buddy half-footprint + gap + card + pad must fit REGION_CAP (398).
+    expect(36 + AGENT_CARD_GAP + AGENT_CARD_EXPANDED_W + AUX_PAD).toBeLessThanOrEqual(398);
   });
 });

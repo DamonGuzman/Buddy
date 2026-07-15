@@ -585,12 +585,9 @@ function registerRendererEvents({ conversation, whisper, agents }: Services): vo
   onRendererEvent('audio:playback-ring', (ring) => {
     conversation.handlePlaybackRing(ring);
   });
-  // M21: a helper sprite / agent card click summons the whisper (the panel's
-  // agents view is gone; the hover card + buddy's own words carry results).
-  onRendererEvent('overlay:agent-click', (payload) => {
-    if (validAgentId(payload) === null) return;
-    whisper.show();
-  });
+  // M22: helper sprite / agent card clicks are handled inside the overlay
+  // (the card expands to the helper's full status); the 'overlay:agent-click'
+  // channel stays in the frozen contract but nothing sends it anymore.
   onRendererEvent('overlay:agent-cancel', (payload) => {
     const id = validAgentId(payload);
     if (id !== null) agents.cancel(id);
@@ -632,8 +629,10 @@ function wireHotkey({ hotkey, settings, conversation, whisper, overlays }: Servi
   hotkey.on('tap', () => {
     if (!settings.get().fullRealtimeMode) whisper.toggle();
   });
-  hotkey.on('primary-click', () => {
-    if (process.platform === 'darwin') overlays.openWhisperIfBuddyClicked();
+  hotkey.on('primary-click', (ctrlKey) => {
+    if (process.platform === 'darwin' && !ctrlKey && !overlays.isBuddyInteractive()) {
+      overlays.openWhisperIfBuddyClicked();
+    }
   });
   // F1 fix (C1): forced release (max-hold watchdog / lock / suspend) cancels
   // the hold — mic released, held audio cleared, NO turn committed.

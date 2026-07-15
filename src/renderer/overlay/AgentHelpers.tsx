@@ -2,8 +2,10 @@
  * M19 agent helpers: presentational components for the overlay's background-
  * agent representation. Each running agent is a tiny pastel "helper buddy"
  * that pops out of the mascot into a small arc beside it; hovering one shows
- * a warm, plain-language agent card. More than MAX_HELPER_SPRITES agents fold
- * into a "+N" pebble whose card lists everyone.
+ * a warm, plain-language agent card, and clicking it (M22) expands the card
+ * into the helper's full status — activity log, findings, places checked.
+ * More than MAX_HELPER_SPRITES agents fold into a "+N" pebble whose card
+ * lists everyone.
  *
  * Pure view: all state (which agents, which is hovered, anchor, orientation)
  * comes in as props from main.tsx; view-model logic lives in agents-ui.ts.
@@ -13,15 +15,20 @@
 
 import { useEffect, useState } from 'react';
 import {
+  AGENT_CARD_EXPANDED_W,
   AGENT_CARD_GAP,
   AGENT_CARD_W,
   OVERFLOW_KEY,
   elapsedPhrase,
+  expandedFindings,
   helperPhase,
   helperSlots,
   helperStatus,
   helperTint,
+  recentSteps,
+  sourceHosts,
   sourcesPhrase,
+  timeAgoPhrase,
   truncate,
 } from './agents-ui';
 import type { HelperView } from './agents-ui';
@@ -43,6 +50,8 @@ export interface AgentClusterProps {
   interactive: boolean;
   /** Hovered helper: an agent id, OVERFLOW_KEY, or null. */
   hoveredKey: string | null;
+  /** M22: agent whose card is click-expanded to its full status, or null. */
+  expandedKey: string | null;
   /** Clock for elapsed phrases (ticked by main.tsx while a card is open). */
   now: number;
   /** Measured by main.tsx to grow the interactive hover region. */
@@ -59,6 +68,7 @@ export function AgentCluster({
   visible,
   interactive,
   hoveredKey,
+  expandedKey,
   now,
   cardRef,
   onAgentClick,
@@ -66,10 +76,17 @@ export function AgentCluster({
 }: AgentClusterProps): React.JSX.Element {
   const slotCount = view.shown.length + (view.overflow.length > 0 ? 1 : 0);
   const slots = helperSlots(slotCount, dir, vdir);
+  const all = [...view.shown, ...view.overflow];
+  // M22: an expanded (clicked) card wins over the plain hover card — it may
+  // belong to an overflow agent while `hoveredKey` is the pebble.
+  const expandedAgent =
+    expandedKey !== null ? (all.find((a) => a.id === expandedKey) ?? null) : null;
   const hoveredAgent =
-    hoveredKey !== null && hoveredKey !== OVERFLOW_KEY
-      ? ([...view.shown, ...view.overflow].find((a) => a.id === hoveredKey) ?? null)
+    expandedAgent === null && hoveredKey !== null && hoveredKey !== OVERFLOW_KEY
+      ? (all.find((a) => a.id === hoveredKey) ?? null)
       : null;
+  const cardAgent = expandedAgent ?? hoveredAgent;
+  const keepKey = expandedKey ?? hoveredKey ?? undefined;
 
   return (
     <div
@@ -84,8 +101,8 @@ export function AgentCluster({
           agent={agent}
           slot={slots[i] ?? { x: 0, y: 0 }}
           index={i}
-          hovered={hoveredKey === agent.id}
-          departing={helperPhase(agent, now, hoveredKey ?? undefined) === 'departing'}
+          hovered={hoveredKey === agent.id || expandedKey === agent.id}
+          departing={helperPhase(agent, now, keepKey) === 'departing'}
           onClick={onAgentClick}
         />
       ))}
@@ -96,9 +113,10 @@ export function AgentCluster({
           hovered={hoveredKey === OVERFLOW_KEY}
         />
       )}
-      {hoveredAgent !== null && (
+      {cardAgent !== null && (
         <AgentCard
-          agent={hoveredAgent}
+          agent={cardAgent}
+          expanded={expandedAgent !== null}
           dir={dir}
           vdir={vdir}
           now={now}
@@ -108,7 +126,7 @@ export function AgentCluster({
           onCancel={onAgentCancel}
         />
       )}
-      {hoveredKey === OVERFLOW_KEY && (
+      {expandedAgent === null && hoveredKey === OVERFLOW_KEY && (
         <OverflowCard
           agents={view.overflow}
           dir={dir}
@@ -232,9 +250,9 @@ function OverflowPebble({
 // ---------------------------------------------------------------------------
 
 /** Anchor the card on the screen-center side of the cluster. */
-function cardStyle(dir: 1 | -1, vdir: 1 | -1): React.CSSProperties {
+function cardStyle(dir: 1 | -1, vdir: 1 | -1, expanded = false): React.CSSProperties {
   return {
-    width: AGENT_CARD_W,
+    width: expanded ? AGENT_CARD_EXPANDED_W : AGENT_CARD_W,
     ...(dir === 1 ? { left: AGENT_CARD_GAP } : { right: AGENT_CARD_GAP }),
     ...(vdir === -1 ? { bottom: -14 } : { top: -14 }),
   };
@@ -242,6 +260,7 @@ function cardStyle(dir: 1 | -1, vdir: 1 | -1): React.CSSProperties {
 
 function AgentCard({
   agent,
+  expanded,
   dir,
   vdir,
   now,
@@ -251,6 +270,8 @@ function AgentCard({
   onCancel,
 }: {
   agent: AgentSummary;
+  /** M22: full-status view (clicked) — activity log, findings, sources. */
+  expanded: boolean;
   dir: 1 | -1;
   vdir: 1 | -1;
   now: number;
@@ -262,11 +283,16 @@ function AgentCard({
   const tint = helperTint(agent.id);
   const status = helperStatus(agent);
   const sources = sourcesPhrase(agent);
+  const findings = expanded ? expandedFindings(agent) : null;
+  // The full findings replace the one-line recap; trouble lines stay.
+  const showLine = !(expanded && status.kind === 'done' && findings !== null);
+  const cta = expanded ? 'click to tuck this away' : status.cta;
   return (
     <div
       ref={cardRef}
       className="agent-card"
-      style={cardStyle(dir, vdir)}
+      data-expanded={expanded ? '' : undefined}
+      style={cardStyle(dir, vdir, expanded)}
       onClick={() => onClick(agent.id)}
     >
       <div className="agent-card-head">
@@ -276,24 +302,27 @@ function AgentCard({
           {status.pill}
         </span>
       </div>
-      <div className="agent-card-task">“{truncate(agent.task, 110)}”</div>
-      <div className="agent-card-line">
-        {status.kind === 'working' && (
-          <span className="agent-card-dots">
-            <span />
-            <span />
-            <span />
-          </span>
-        )}
-        {status.line}
-      </div>
+      <div className="agent-card-task">“{truncate(agent.task, expanded ? 200 : 110)}”</div>
+      {showLine && (
+        <div className="agent-card-line">
+          {status.kind === 'working' && (
+            <span className="agent-card-dots">
+              <span />
+              <span />
+              <span />
+            </span>
+          )}
+          {status.line}
+        </div>
+      )}
+      {expanded && <ExpandedDetail agent={agent} findings={findings} now={now} />}
       <div className="agent-card-meta">
         {elapsedPhrase(agent, now)}
-        {sources !== null && ` · ${sources}`}
+        {!expanded && sources !== null && ` · ${sources}`}
       </div>
-      {(status.cta !== null || agent.status === 'running') && (
+      {(cta !== null || agent.status === 'running') && (
         <div className="agent-card-actions">
-          {status.cta !== null && <span className="agent-card-cta">{status.cta}</span>}
+          {cta !== null && <span className="agent-card-cta">{cta}</span>}
           {agent.status === 'running' && interactive && (
             <span
               className="agent-card-stop"
@@ -308,6 +337,50 @@ function AgentCard({
         </div>
       )}
     </div>
+  );
+}
+
+/** M22: the expanded card's body — everything the buddy knows about the run. */
+function ExpandedDetail({
+  agent,
+  findings,
+  now,
+}: {
+  agent: AgentSummary;
+  findings: string | null;
+  now: number;
+}): React.JSX.Element {
+  const steps = recentSteps(agent);
+  const { hosts, more } = sourceHosts(agent);
+  return (
+    <>
+      {steps.length > 0 && (
+        <div className="agent-card-detail">
+          <div className="agent-card-section">what i’ve been up to</div>
+          {steps.map((step, i) => (
+            <div key={`${step.at}-${i}`} className="agent-step">
+              <span className="agent-step-label">{truncate(step.label, 64)}</span>
+              <span className="agent-step-time">{timeAgoPhrase(step.at, now)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {findings !== null && (
+        <div className="agent-card-detail">
+          <div className="agent-card-section">what i found</div>
+          <div className="agent-card-findings">{findings}</div>
+        </div>
+      )}
+      {hosts.length > 0 && (
+        <div className="agent-card-detail">
+          <div className="agent-card-section">places i checked</div>
+          <div className="agent-card-hosts">
+            {hosts.join(' · ')}
+            {more > 0 && ` · +${more} more`}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -343,9 +416,9 @@ function OverflowCard({
         );
       })}
       {agents.length > rows.length && (
-        <div className="agent-card-meta">…and {agents.length - rows.length} more in the panel</div>
+        <div className="agent-card-meta">…and {agents.length - rows.length} more</div>
       )}
-      <div className="agent-card-cta">click one to see it in the panel</div>
+      <div className="agent-card-cta">click one for the whole story</div>
     </div>
   );
 }

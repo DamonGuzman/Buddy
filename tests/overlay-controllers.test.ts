@@ -562,6 +562,21 @@ describe('HelperHoverController', () => {
     expect(h.out.cluster).toBeNull();
     expect(h.out.aux).toBeNull();
   });
+
+  it('a pinned (expanded) helper is exempt from the linger clock until unpinned', async () => {
+    const h = helperHarness();
+    const done = agent({ id: 'd', status: 'done', unseen: true, finishedAt: NOW0 - 1_000 });
+    h.ctrl.setAgents([done]);
+    // Pinned via the expanded card (hover may sit on the overflow pebble or
+    // elsewhere) — the helper must survive well past its linger window.
+    h.ctrl.setPinned('d');
+    await h.time.advance(FINISHED_LINGER_MS * 2);
+    expect(h.out.view.shown.map((a) => a.id)).toEqual(['d']);
+    // Unpinning retires the (long overdue) helper on the next recompute.
+    h.ctrl.setPinned(null);
+    expect(h.out.view.shown).toEqual([]);
+    expect(h.out.cluster).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -574,6 +589,7 @@ function hoverHarness(): {
   runFrames: () => void;
   moves: Array<{ xFrac: number; yFrac: number }>;
   clicks: () => number;
+  settingsClicks: () => number;
   buddy: () => Vec;
 } {
   const time = new FakeTime();
@@ -587,6 +603,7 @@ function hoverHarness(): {
   };
   let buddy: Vec = { x: 500, y: 500 };
   let clicks = 0;
+  let settingsClicks = 0;
   const frames: Array<() => void> = [];
   let frameSeq = 0;
   const ports: HoverDragPorts = {
@@ -609,6 +626,7 @@ function hoverHarness(): {
     gateInput: () => gate,
     sendHover: (evt) => sent.push(evt),
     sendBuddyClick: () => (clicks += 1),
+    sendBuddySettings: () => (settingsClicks += 1),
     sendBuddyMove: (rest) => moves.push(rest),
     bumpActivity: () => {},
     updatePlacement: () => {},
@@ -630,6 +648,7 @@ function hoverHarness(): {
     },
     moves,
     clicks: () => clicks,
+    settingsClicks: () => settingsClicks,
     buddy: () => buddy,
   };
 }
@@ -697,6 +716,27 @@ describe('HoverDragController (overlay:hover emission order)', () => {
     h.ctrl.setInteractiveFromMain(true);
     expect(h.ctrl.onMouseDown(700, 700, 0)).toBe(false);
     expect(h.ctrl.onMouseDown(505, 503, 1)).toBe(false);
+  });
+
+  it('handles Buddy context menus only while its narrow region is interactive', () => {
+    const h = hoverHarness();
+    expect(h.ctrl.onContextMenu(505, 503)).toBe(false);
+    h.ctrl.setInteractiveFromMain(true);
+    expect(h.ctrl.onContextMenu(700, 700)).toBe(false);
+    expect(h.ctrl.onContextMenu(505, 503)).toBe(true);
+    // The full padded interactive region is actionable, not a swallowed ring.
+    expect(h.ctrl.onContextMenu(530, 500)).toBe(true);
+    expect(h.settingsClicks()).toBe(2);
+  });
+
+  it('does not arm a primary click for a macOS Control-click', () => {
+    const h = hoverHarness();
+    h.ctrl.setInteractiveFromMain(true);
+    expect(h.ctrl.onMouseDown(505, 503, 0, true)).toBe(true);
+    h.ctrl.onMouseUp(0);
+    expect(h.clicks()).toBe(0);
+    expect(h.ctrl.onContextMenu(505, 503)).toBe(true);
+    expect(h.settingsClicks()).toBe(1);
   });
 
   it('disabling the gate releases interactive and drops helper hover', async () => {

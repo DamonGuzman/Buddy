@@ -66,6 +66,8 @@ export class CodexTextTurnRunner {
   /** Plan-usage telemetry of the most recent text turn (debug surface). */
   private usedPercent: CodexUsedPercent | null = null;
   private toolPromises: Promise<void>[] = [];
+  /** In-flight run() calls — the state watchdog's foreground-work probe. */
+  private activeRuns = 0;
 
   constructor(private readonly deps: CodexTextTurnDeps) {}
 
@@ -98,6 +100,11 @@ export class CodexTextTurnRunner {
     return this.usedPercent;
   }
 
+  /** True while a text turn is running (keeps 'thinking' legitimate). */
+  isRunning(): boolean {
+    return this.activeRuns > 0;
+  }
+
   /** Async tool output (use_computer) the turn must drain before settling. */
   trackToolPromise(pending: Promise<void>): void {
     this.toolPromises.push(pending);
@@ -115,6 +122,22 @@ export class CodexTextTurnRunner {
    * turn ran to completion (the caller then knows the answer was delivered).
    */
   async run(
+    text: string,
+    captures: CaptureResult[],
+    contextText: string,
+    token: number,
+    turn: TurnTimings,
+    auth: ChatGptCodexAuthSource,
+  ): Promise<boolean> {
+    this.activeRuns += 1;
+    try {
+      return await this.runTurn(text, captures, contextText, token, turn, auth);
+    } finally {
+      this.activeRuns -= 1;
+    }
+  }
+
+  private async runTurn(
     text: string,
     captures: CaptureResult[],
     contextText: string,

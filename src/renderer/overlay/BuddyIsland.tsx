@@ -48,6 +48,14 @@ export function BuddyIsland(props: BuddyIslandProps): React.JSX.Element | null {
     '--island-menu-height': `${props.surface.menuBarHeight}px`,
   } as CSSProperties;
 
+  const orb = (
+    <span className="buddy-island-orb">
+      <span />
+      <span />
+      <span />
+    </span>
+  );
+
   return (
     <div
       className="buddy-island"
@@ -57,16 +65,29 @@ export function BuddyIsland(props: BuddyIslandProps): React.JSX.Element | null {
       style={style}
       aria-hidden="true"
     >
-      <div className="buddy-island-shell">
-        <span className="buddy-island-orb">
-          <span />
-          <span />
-          <span />
-        </span>
-        {activity?.kind !== 'result-dot' && (
-          <span className="buddy-island-label">{activity?.label}</span>
-        )}
-      </div>
+      {props.surface.kind === 'notch' ? (
+        // Two wings flank the physical notch: orb left, label right. Both stay
+        // mounted so state changes animate; CSS retracts the label wing when
+        // the activity collapses to the persistent result dot. The cover paints
+        // the notch bounding box black so the cutout's rounded corners never
+        // show a seam against the wings' flat edges.
+        <>
+          <div className="buddy-island-notch-cover" />
+          <div className="buddy-island-wing" data-side="left">
+            {orb}
+          </div>
+          <div className="buddy-island-wing" data-side="right">
+            <span className="buddy-island-label">{activity?.label}</span>
+          </div>
+        </>
+      ) : (
+        <div className="buddy-island-shell">
+          {orb}
+          {activity?.kind !== 'result-dot' && (
+            <span className="buddy-island-label">{activity?.label}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

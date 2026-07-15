@@ -73,6 +73,7 @@ import { errorMessage } from '../util/guards';
 import type { PhoneAudioTransport } from '../phone-audio-bridge';
 import { AgentContinuations } from './agent-continuations';
 import { AgentTools } from './agent-tools';
+import { AssistantStateMachine } from './assistant-state';
 import type { AudioTransport } from './audio-transport';
 import { panelAudioTransport, phoneAudioTransport } from './audio-transport';
 import { CodexTextTurnRunner } from './codex-text-turn';
@@ -81,8 +82,6 @@ import { ComputerUseRunner } from './computer-use';
 import {
   AUDIO_BYTES_PER_MS,
   CAPTURE_FAILED_CONTEXT,
-  ERROR_RECOVERY_MS,
-  IDLE_GRACE_MS,
   MIN_COMMIT_AUDIO_MS,
   MIN_HOLD_MS,
   TRANSCRIPT_LIMIT,
@@ -161,7 +160,12 @@ export class Conversation {
   private sessionVoice: string;
   private sessionFullRealtimeMode: boolean;
 
-  private state: AssistantState = 'idle';
+  /**
+   * The ONE owner of AssistantState. Call sites dispatch semantic events
+   * (what happened); the machine's transition table decides what shows.
+   * See src/main/conversation/assistant-state.ts.
+   */
+  private readonly machine: AssistantStateMachine;
 
   // Voice turn state.
   private holding = false;
@@ -234,9 +238,6 @@ export class Conversation {
   private chunksOut = 0;
   private captureIndicatorActive = false;
 
-  private errorTimer: NodeJS.Timeout | null = null;
-  private idleTimer: NodeJS.Timeout | null = null;
-
   constructor(deps: ConversationDeps) {
     this.settings = deps.settings;
     this.overlays = deps.overlays;
@@ -268,12 +269,28 @@ export class Conversation {
       this.panel.send('panel:transcript', entry);
     });
     this.telemetry = new TurnTelemetry(this.recorder);
+    this.machine = new AssistantStateMachine({
+      onChange: (previous, next) => {
+        this.recorder?.record('assistant_state_changed', { previous, next });
+        this.overlays.broadcast('overlay:assistant-state', next);
+        this.panel.send('panel:assistant-state', next);
+        if (next === 'idle') queueMicrotask(() => this.continuations.drain());
+      },
+      pendingResponses: () => this.pendingResponses,
+      hasForegroundWork: () => this.holding || this.codexText.isRunning(),
+      onWatchdogRecovery: (stuck) => {
+        console.warn(
+          `[conversation] state watchdog: '${stuck}' held with no open response — forcing base`,
+        );
+        this.recorder?.record('assistant_state_watchdog', { stuck });
+      },
+    });
     this.errors = new ErrorSurfacer({
       recorder: this.recorder,
       transcript: this.transcriptStore,
       overlays: this.overlays,
       settings: this.settings,
-      setErrorState: () => this.setState('error'),
+      setErrorState: () => this.machine.dispatch('error'),
     });
     this.codexText = new CodexTextTurnRunner({
       guard: this.guard,
@@ -286,9 +303,9 @@ export class Conversation {
       onFunctionCall: (call, captures, token) => this.onCodexFunctionCall(call, captures, token),
       surfacePlanLimitOnce: (token) => this.errors.surfacePlanLimitOnce(token),
       failTurn: (err) => this.failTurn(err),
-      setIdleUnlessError: () => {
-        if (this.state !== 'error') this.setState('idle');
-      },
+      // 'turn_settled' is ignored while an error flash shows; a clean finish
+      // starts the normal idle grace.
+      setIdleUnlessError: () => this.machine.dispatch('turn_settled'),
     });
     this.pointer = new PointerPipeline({
       overlays: this.overlays,
@@ -318,8 +335,8 @@ export class Conversation {
       closed: () => this.guard.closed,
       holding: () => this.holding,
       pendingResponses: () => this.pendingResponses,
-      assistantState: () => this.state,
-      setThinking: () => this.setState('thinking'),
+      assistantState: () => this.machine.current(),
+      setThinking: () => this.machine.dispatch('turn_committed'),
       injectVoiceReminder: (text, stillReady) =>
         this.session.injectUserAndRespond(text, stillReady),
       markSpoken: (id) => this.agents?.markSpoken(id),
@@ -338,7 +355,7 @@ export class Conversation {
         this.turnCaptures = [];
         const turn = this.telemetry.beginTurn('text');
         turn.tAsk = Date.now();
-        this.setState('thinking');
+        this.machine.dispatch('turn_committed');
         return { token, turn };
       },
       runCodexTextTurn: (text, token, turn, auth) =>
@@ -396,7 +413,7 @@ export class Conversation {
   // ---------------------------------------------------------------------
 
   assistantState(): AssistantState {
-    return this.state;
+    return this.machine.current();
   }
 
   sessionStatus(): SessionStatus {
@@ -477,14 +494,14 @@ export class Conversation {
     this.pendingFullRealtimeCapture = null;
     this.turnCaptures = [];
     this.errors.maybeSurfaceSettingsReset();
-    this.setState('thinking');
+    this.machine.dispatch('open_mic_on');
 
     try {
       await this.session.connect();
       if (this.guard.closed || !this.fullRealtimeActive || !this.guard.isCurrent(token)) return;
       this.acceptingAudio = true;
       this.audio.capture('start');
-      this.setState('listening');
+      this.machine.dispatch('open_mic_ready');
     } catch (err) {
       if (!this.guard.isCurrent(token)) return;
       this.deactivateFullRealtime();
@@ -505,7 +522,7 @@ export class Conversation {
     this.turnCaptures = [];
     if (this.pendingResponses > 0) this.cancelActiveResponse('flush');
     else this.stopResidualPlayback('flush');
-    this.setState('idle');
+    this.machine.dispatch('open_mic_off');
   }
 
   /**
@@ -527,7 +544,7 @@ export class Conversation {
     // rather than the cancelled one — a deliberate attribution tradeoff.
     const turn = this.telemetry.beginTurn('voice');
     turn.tHoldStart = this.holdStartedAt;
-    this.setState('listening');
+    this.machine.dispatch('hold_start');
     this.setCaptureIndicator(true);
     this.audio.capture('start');
     if (this.canReachServer()) {
@@ -618,7 +635,7 @@ export class Conversation {
       if (heldMs >= MIN_HOLD_MS && this.chunksThisHold === 0) {
         this.errors.surface(describeKind('mic_unavailable', this.errors.micErrorParams()));
       } else {
-        this.setState('idle');
+        this.machine.dispatch('hold_cancelled');
       }
       return;
     }
@@ -647,7 +664,7 @@ export class Conversation {
     this.session.clearAudio();
     this.pendingCaptures = null;
     this.telemetry.discardActiveTurn();
-    this.setState('idle');
+    this.machine.dispatch('hold_cancelled');
   }
 
   /** Mic PCM chunk from the panel renderer (ipcMain 'audio:chunk'). */
@@ -703,7 +720,7 @@ export class Conversation {
       streaming: false,
       timestamp: Date.now(),
     });
-    this.setState('thinking');
+    this.machine.dispatch('turn_committed');
 
     this.setCaptureIndicator(true);
     let captures: CaptureResult[] = [];
@@ -873,7 +890,7 @@ export class Conversation {
     this.pendingResponses = 0;
     this.session = this.buildSession();
     this.panel.send('panel:session-status', this.session.status());
-    if (this.state !== 'idle' && this.state !== 'error') this.setState('idle');
+    this.machine.dispatch('reset');
   }
 
   /**
@@ -890,10 +907,7 @@ export class Conversation {
   /** App shutdown. */
   close(): void {
     this.guard.close();
-    if (this.errorTimer !== null) clearTimeout(this.errorTimer);
-    if (this.idleTimer !== null) clearTimeout(this.idleTimer);
-    this.errorTimer = null;
-    this.idleTimer = null;
+    this.machine.dispose();
     this.pointer.dispose(); // M9: dispose native accessibility resources
     this.computerUse.dispose();
     this.codexText.cancelActive(); // M18: abort any in-flight text turn
@@ -906,7 +920,7 @@ export class Conversation {
     }
     this.session.close();
     this.recorder?.record('conversation_closed', {
-      state: this.state,
+      state: this.machine.current(),
       activeTurn: this.telemetry.active(),
       transcriptEntriesInMemory: this.transcriptStore.list().length,
     });
@@ -943,7 +957,7 @@ export class Conversation {
       contextText = this.noteCaptureFailed();
       // Capture failure is recoverable: keep the open-mic conversation live
       // and let the model answer this audio-only turn with explicit context.
-      this.setState('thinking');
+      this.machine.dispatch('turn_committed');
     }
 
     try {
@@ -959,7 +973,7 @@ export class Conversation {
 
   private async finishVoiceTurn(): Promise<void> {
     const token = this.guard.currentToken(); // F1 (M1)
-    this.setState('thinking');
+    this.machine.dispatch('turn_committed');
     const captures = (await (this.pendingCaptures ?? Promise.resolve([]))) ?? [];
     // F1 fix (M1): a new hold/ask started while captureAllDisplays() was
     // pending — this turn is superseded. Do NOT stomp the new turn's
@@ -984,7 +998,7 @@ export class Conversation {
       );
       this.session.clearAudio();
       this.telemetry.discardActiveTurn();
-      this.setState('idle');
+      this.machine.dispatch('hold_cancelled');
       return;
     }
     // F1 fix (m5): placeholder user bubble NOW, so the user's question can
@@ -1064,7 +1078,7 @@ export class Conversation {
   replayToPanel(): void {
     for (const entry of this.transcriptStore.list()) this.panel.send('panel:transcript', entry);
     this.panel.send('panel:session-status', this.session.status());
-    this.panel.send('panel:assistant-state', this.state);
+    this.panel.send('panel:assistant-state', this.machine.current());
   }
 
   private canReachServer(): boolean {
@@ -1198,14 +1212,14 @@ export class Conversation {
         return captures;
       });
     this.pendingFullRealtimeCapture = { token, itemId, promise };
-    this.setState('listening');
+    this.machine.dispatch('open_mic_ready');
   }
 
   private onSpeechStopped(): void {
     if (!this.fullRealtimeActive) return;
     const turn = this.telemetry.active();
     if (turn?.kind === 'voice') turn.tHoldEnd = Date.now();
-    this.setState('thinking');
+    this.machine.dispatch('turn_committed');
   }
 
   private onAudioCommitted(itemId: string): void {
@@ -1228,10 +1242,8 @@ export class Conversation {
       turnId: this.telemetry.active()?.turnId,
       pendingResponses: this.pendingResponses,
     });
-    if (this.idleTimer !== null) {
-      clearTimeout(this.idleTimer);
-      this.idleTimer = null;
-    }
+    // Keeps a pending idle grace from dropping the state mid-continuation.
+    this.machine.dispatch('response_pending');
   }
 
   private onUserTranscript(itemId: string, text: string): void {
@@ -1346,7 +1358,7 @@ export class Conversation {
     if (status === 'incomplete' && !this.guard.closed) {
       this.errors.surface(describeKind('response_incomplete'));
     }
-    this.scheduleIdle();
+    this.machine.dispatch('turn_settled');
   }
 
   private onSessionError(err: Error): void {
@@ -1368,35 +1380,16 @@ export class Conversation {
     this.errors.surface(classifyError(err, { model: this.sessionModel }));
   }
 
-  /** First transcript/audio activity of a response flips thinking -> speaking. */
+  /**
+   * First transcript/audio activity of a response flips thinking -> speaking
+   * (the machine's table guards everything else: no promotion while the user
+   * holds/talks, idle promotes back only while a response is truly open —
+   * F1 M5 — and stray post-settle activity re-arms the idle grace instead of
+   * stranding 'speaking').
+   */
   private noteResponseActivity(): void {
     this.guard.bumpEpoch();
-    if (this.idleTimer !== null) {
-      clearTimeout(this.idleTimer);
-      this.idleTimer = null;
-    }
-    if (this.holding) return;
-    if (this.state === 'thinking' || this.state === 'speaking') {
-      this.setState('speaking');
-    } else if (this.state === 'idle' && this.pendingResponses > 0) {
-      // F1 fix (M5): a follow-up response can start streaming after the
-      // buddy already dropped to idle — promote back to speaking.
-      this.setState('speaking');
-    }
-  }
-
-  /** ~300ms after the turn settles with no new activity: back to idle. */
-  private scheduleIdle(): void {
-    const epochAtDone = this.guard.epoch();
-    if (this.idleTimer !== null) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => {
-      this.idleTimer = null;
-      if (this.guard.closed || this.holding || this.guard.epoch() !== epochAtDone) return;
-      if (this.state === 'speaking' || this.state === 'thinking') {
-        // Open-mic turns return to listening; push-to-talk turns return idle.
-        this.setState(this.fullRealtimeActive ? 'listening' : 'idle');
-      }
-    }, IDLE_GRACE_MS);
+    this.machine.dispatch('response_activity');
   }
 
   // ---------------------------------------------------------------------
@@ -1471,28 +1464,6 @@ export class Conversation {
   // ---------------------------------------------------------------------
   // State + transcript plumbing
   // ---------------------------------------------------------------------
-
-  private setState(next: AssistantState): void {
-    if (this.errorTimer !== null) {
-      clearTimeout(this.errorTimer);
-      this.errorTimer = null;
-    }
-    if (this.state !== next) {
-      const previous = this.state;
-      this.state = next;
-      this.recorder?.record('assistant_state_changed', { previous, next });
-      this.overlays.broadcast('overlay:assistant-state', next);
-      this.panel.send('panel:assistant-state', next);
-    }
-    if (next === 'error') {
-      this.errorTimer = setTimeout(() => {
-        this.errorTimer = null;
-        if (!this.guard.closed && this.state === 'error') this.setState('idle');
-      }, ERROR_RECOVERY_MS);
-    } else if (next === 'idle') {
-      queueMicrotask(() => this.continuations.drain());
-    }
-  }
 
   private setCaptureIndicator(active: boolean): void {
     this.captureIndicatorActive = active;

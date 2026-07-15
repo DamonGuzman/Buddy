@@ -85,9 +85,14 @@ Relevant primary documentation:
 
 The Live Bar is rendered inside the existing per-display transparent overlay;
 it is not another native window. The overlay remains non-focusable and
-click-through. On a notched built-in display, AppKit safe-area geometry attaches
-the black status surface to the physical notch. On non-notched Macs and
-external displays it becomes a detached capsule below the menu bar. It is off
+click-through. On a notched built-in display, AppKit safe-area geometry places
+two black wings flush against the sides of the physical notch — the activity
+orb on the left, the status label on the right. AppKit only exposes the
+notch's rectangular bounding box (`safeAreaInsets` + `auxiliaryTop*Area`, no
+corner-radius API), and the physical cutout is rounded inside it, so a cover
+paints the whole box black to keep the wings and cutout visually seamless. On
+non-notched Macs and external displays it becomes a detached capsule below the
+menu bar. It is off
 on Windows for now; a tray/taskbar-native Windows surface can implement the
 same shared activity model later.
 

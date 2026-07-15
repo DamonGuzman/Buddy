@@ -45,7 +45,7 @@ export interface HotkeyEvents {
    */
   tap: [];
   /** Global primary-button click for click-through Buddy hit testing. */
-  'primary-click': [];
+  'primary-click': [ctrlKey: boolean];
   error: [Error];
 }
 
@@ -58,7 +58,7 @@ export interface HotkeyStatus {
 /** Minimal surface of uiohook-napi's uIOhook (injectable for unit tests). */
 export interface UiohookLike {
   on(event: 'keydown' | 'keyup', cb: (e: { keycode: number }) => void): unknown;
-  on(event: 'click', cb: (e: { button: unknown }) => void): unknown;
+  on(event: 'click', cb: (e: { button: unknown; ctrlKey?: boolean }) => void): unknown;
   start(): void;
   stop(): void;
 }
@@ -131,8 +131,8 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
           if (e.keycode === ALT_LEFT_KEYCODE) this.altDown = false;
           this.evaluate();
         });
-        hook.on('click', (e: { button: unknown }) => {
-          if (e.button === 1) this.emit('primary-click');
+        hook.on('click', (e: { button: unknown; ctrlKey?: boolean }) => {
+          if (e.button === 1) this.emit('primary-click', e.ctrlKey === true);
         });
         this.listenersAttached = true;
       }

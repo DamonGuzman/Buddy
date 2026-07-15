@@ -43,6 +43,7 @@ import type {
 import { bobIdleMsOverride } from '../env';
 import type { SettingsStore } from '../settings';
 import { toggleWhisper } from './whisper';
+import { showPanelNearBuddy } from './panel';
 import {
   createHardenedWindow,
   hardenedWebPreferences,
@@ -59,7 +60,7 @@ import { HoverController } from './hover-controller';
 import { listeningBlocksHover } from './hover-policy';
 import { markNativeWindowNonRude } from './non-rude';
 import { computePointerRouting, forwardingModeFor } from './pointer-routing';
-import { isBuddyClick } from './buddy-click';
+import { BUDDY_CLICK_RADIUS, isBuddyClick } from './buddy-click';
 import { resolveDisplaySurface } from './display-surface';
 import { coverMacDisplayWithWindow, getMacDisplaySurface } from './mac-screen-permission';
 import { offsetPointerForWindow } from './overlay-offset';
@@ -241,21 +242,51 @@ export class OverlayManager {
     return { x: Math.round(x), y: Math.round(y), workArea };
   }
 
-  /** Hit-test a global primary click while macOS keeps overlays unconditionally click-through. */
+  /** Hit-test a macOS primary click before the dwell interaction has armed. */
   openWhisperIfBuddyClicked(): boolean {
-    if (!this.buddyAtRest || this.buddyHostIndex === null || this.pushToTalkHoldActive()) {
-      return false;
-    }
+    const anchor = this.buddyAnchorIfClicked();
+    if (anchor === null) return false;
+    toggleWhisper();
+    return true;
+  }
+
+  /**
+   * Return Buddy's global-DIP footprint only when the current pointer click
+   * is eligible for a Buddy action. Shared by the macOS pre-dwell primary
+   * fallback and the cross-platform context-click Settings gesture.
+   */
+  buddyAnchorIfClicked(): Rectangle | null {
     for (const [displayId, entry] of this.overlays) {
-      if (entry.screenIndex !== this.buddyHostIndex || entry.win.isDestroyed()) continue;
+      const anchor = this.buddyAnchorForDisplay(displayId);
+      if (anchor === null) continue;
       const status = this.hoverStatusByDisplay.get(displayId);
-      if (!status || status.dragging) return false;
-      if (isBuddyClick(screen.getCursorScreenPoint(), entry.win.getBounds(), status.buddy)) {
-        toggleWhisper();
-        return true;
-      }
+      if (!status) return null;
+      const bounds = entry.win.getBounds();
+      if (!isBuddyClick(screen.getCursorScreenPoint(), bounds, status.buddy)) return null;
+      return anchor;
     }
-    return false;
+    return null;
+  }
+
+  private buddyAnchorForDisplay(displayId: number): Rectangle | null {
+    if (!this.buddyAtRest || this.buddyHostIndex === null || this.pushToTalkHoldActive())
+      return null;
+    const entry = this.overlays.get(displayId);
+    if (!entry || entry.win.isDestroyed() || entry.screenIndex !== this.buddyHostIndex) return null;
+    const status = this.hoverStatusByDisplay.get(displayId);
+    if (!status || status.dragging) return null;
+    const bounds = entry.win.getBounds();
+    return {
+      x: Math.round(bounds.x + status.buddy.x - BUDDY_CLICK_RADIUS),
+      y: Math.round(bounds.y + status.buddy.y - BUDDY_CLICK_RADIUS),
+      width: BUDDY_CLICK_RADIUS * 2,
+      height: BUDDY_CLICK_RADIUS * 2,
+    };
+  }
+
+  /** Whether Buddy's narrow dwell region currently owns mouse events. */
+  isBuddyInteractive(): boolean {
+    return this.hover.displayId !== null;
   }
 
   /**
@@ -600,6 +631,12 @@ export class OverlayManager {
     // M20: clicking the buddy summons the whisper composer (was: the panel —
     // the panel is retiring to a settings surface; the tray still opens it).
     ipcMain.on('overlay:buddy-click', () => toggleWhisper());
+    ipcMain.on('overlay:buddy-settings', (event) => {
+      const displayId = this.displayIdFor(event.sender);
+      if (displayId === null || !this.hover.isInteractive(displayId)) return;
+      const anchor = this.buddyAnchorForDisplay(displayId);
+      if (anchor !== null) showPanelNearBuddy(anchor);
+    });
     ipcMain.on('overlay:buddy-move', (event, rest: { xFrac: number; yFrac: number }) => {
       this.onBuddyMove(event.sender, rest);
     });
@@ -656,7 +693,6 @@ export class OverlayManager {
       return;
     }
     if (evt.kind === 'dwell' && evt.region && isFiniteRect(evt.region)) {
-      if (process.platform === 'darwin') return;
       // Suppress the interactive flip while the user is physically holding
       // push-to-talk, and never flip a
       // window that isn't hosting the buddy.

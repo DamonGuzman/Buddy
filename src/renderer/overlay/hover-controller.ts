@@ -65,6 +65,7 @@ export interface HoverDragPorts {
   gateInput(): HoverGateInput;
   sendHover(evt: OverlayHoverEvent): void;
   sendBuddyClick(): void;
+  sendBuddySettings(): void;
   sendBuddyMove(rest: BuddyRestFraction): void;
   bumpActivity(): void;
   updatePlacement(pos: Vec): void;
@@ -171,11 +172,11 @@ export class HoverDragController {
   }
 
   /** Returns true when the event was consumed (caller preventDefaults). */
-  onMouseDown(x: number, y: number, button: number): boolean {
+  onMouseDown(x: number, y: number, button: number, contextClick = false): boolean {
     if (!this.interactiveNow || button !== 0) return false;
+    if (contextClick) return this.isInsideBuddy(x, y);
     const buddy = this.ports.buddyPos();
-    const half = HOVER_RADIUS + REGION_PAD;
-    if (Math.abs(x - buddy.x) > half || Math.abs(y - buddy.y) > half) return false;
+    if (!this.isInsideBuddy(x, y)) return false;
     this.drag = { grabDx: buddy.x - x, grabDy: buddy.y - y, sx: x, sy: y, moved: false };
     return true;
   }
@@ -187,10 +188,18 @@ export class HoverDragController {
       this.endDrag();
     } else {
       this.drag = null;
-      // CLICK on the buddy -> main toggles the control panel.
+      // Primary click on Buddy summons the whisper composer.
       this.ports.sendBuddyClick();
       this.ports.bumpActivity();
     }
+  }
+
+  /** Returns true when Buddy owns and handles the native context menu. */
+  onContextMenu(x: number, y: number): boolean {
+    if (!this.interactiveNow || !this.isInsideBuddy(x, y)) return false;
+    this.ports.sendBuddySettings();
+    this.ports.bumpActivity();
+    return true;
   }
 
   // ------------------------------------------------------------ main events --
@@ -256,6 +265,12 @@ export class HoverDragController {
       this.hover.update(this.lastCursor, this.ports.buddyPos(), this.ports.clock()),
     );
     this.ports.helperHover.updateFromCursor();
+  }
+
+  private isInsideBuddy(x: number, y: number): boolean {
+    const buddy = this.ports.buddyPos();
+    const half = HOVER_RADIUS + REGION_PAD;
+    return Math.abs(x - buddy.x) <= half && Math.abs(y - buddy.y) <= half;
   }
 
   private endDrag(): void {

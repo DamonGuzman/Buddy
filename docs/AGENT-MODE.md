@@ -604,9 +604,18 @@ REST spot (the arc mirrors toward the roomy side of the screen). Implementation:
 - **Clicks ride the M15 dwell flip:** the hover machine's interactive region grows to a merged
   bounding box (buddy footprint + sprites + measured card rect, clamped under main's 400×400
   region cap) via `HoverMachine.setAux`; the safety property (instant click-through restore on
-  region exit) extends to the merged region. Clicking a sprite/card sends
-  `overlay:agent-click` → main shows the panel + `panel:show-agents` (the Agents view marks
-  results seen, which fades the sprites); a card "stop" affordance sends `overlay:agent-cancel`.
+  region exit) extends to the merged region. A card "stop" affordance sends
+  `overlay:agent-cancel`.
+- **Click → full status (M22):** clicking a sprite (or a row on the "+N" pebble's card) expands
+  the card in place into the helper's full status — the task, a recent activity log with
+  plain-word timestamps ("read rtings.com/… · just now"), the full findings for finished runs
+  ("what i found", light markdown flattened to text), and the places it checked (deduped
+  hostnames). The expanded card is wider/taller but still under the region cap, scrolls when
+  long, and a second click (or leaving it) tucks it away. The expanded helper is pinned exempt
+  from the linger clock (`HelperHoverController.setPinned`) so it never vanishes mid-read; card
+  lifetime is still owned by the hover machine. Handled entirely in the overlay — the old
+  `overlay:agent-click` send (which summoned the whisper) is retired; the channel stays in the
+  frozen contract but nothing sends it.
 - **IPC (integration-approved M19):** `overlay:agents` mirrors the same renderer-safe
   `AgentSummary[]` the panel gets (broadcast to all overlays; only the buddy-hosting overlay
   renders), `overlay:agent-click` / `overlay:agent-cancel` sends, `panel:show-agents` push, and
