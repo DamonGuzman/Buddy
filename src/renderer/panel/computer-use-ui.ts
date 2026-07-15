@@ -1,5 +1,45 @@
 import type { ApprovalGrant, ApprovalRequest } from '../../shared/types';
 
+export type ApprovalInteractionAction = 'once' | 'always' | 'deny' | 'takeover';
+
+interface ApprovalInteractionToken {
+  agentId: string;
+  approvalId: string;
+  action: ApprovalInteractionAction;
+}
+
+/**
+ * One-use synchronous interaction latch. A pointer/key press on approval A
+ * can never become a click for replacement approval B, and one press can
+ * never produce two decisions.
+ */
+export class ApprovalInteractionLatch {
+  private token: ApprovalInteractionToken | null = null;
+
+  arm(request: ApprovalRequest, action: ApprovalInteractionAction): void {
+    this.token = { agentId: request.agentId, approvalId: request.approvalId, action };
+  }
+
+  consume(request: ApprovalRequest, action: ApprovalInteractionAction): boolean {
+    const token = this.token;
+    this.token = null;
+    return (
+      token !== null &&
+      token.agentId === request.agentId &&
+      token.approvalId === request.approvalId &&
+      token.action === action
+    );
+  }
+}
+
+export function isExactApproval(
+  request: ApprovalRequest | undefined,
+  agentId: string,
+  approvalId: string,
+): request is ApprovalRequest {
+  return request?.agentId === agentId && request.approvalId === approvalId;
+}
+
 /** Keep approval screenshots renderer-safe regardless of whether main sends raw base64 or a data URL. */
 export function approvalScreenshotSrc(value: string): string | null {
   const screenshot = value.trim();

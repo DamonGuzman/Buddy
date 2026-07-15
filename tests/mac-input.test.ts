@@ -1,33 +1,18 @@
-import { EventEmitter } from 'node:events';
-import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { MacInputController } from '../src/main/computer/mac-input';
+import type { MacInputRequest } from '../src/main/windows/mac-screen-permission';
 import { inputPointFromDip } from '../src/main/computer/live-desktop-driver';
 import { operatorInstructions } from '../src/main/computer/operator';
 
-class FakeChild extends EventEmitter {
-  readonly stdout = new PassThrough();
-  readonly stderr = new PassThrough();
-  readonly kill = vi.fn(() => true);
-}
-
-function harness(options: { trusted?: boolean; timeoutMs?: number } = {}) {
-  const child = new FakeChild();
-  const calls: Array<{ executable: string; args: string[] }> = [];
+function harness(options: { trusted?: boolean; platform?: NodeJS.Platform } = {}) {
+  const requests: MacInputRequest[] = [];
+  const postInput = vi.fn((request: MacInputRequest) => requests.push(request));
   const controller = new MacInputController({
-    platform: 'darwin',
-    timeoutMs: options.timeoutMs ?? 500,
+    platform: options.platform ?? 'darwin',
     isTrustedAccessibilityClient: () => options.trusted ?? true,
-    spawnProcess: ((executable: string, args: string[]) => {
-      calls.push({ executable, args });
-      return child;
-    }) as never,
+    postInput,
   });
-  return { child, calls, controller };
-}
-
-function requestFrom(args: string[]): Record<string, unknown> {
-  return JSON.parse(args.at(-1) ?? '{}') as Record<string, unknown>;
+  return { requests, postInput, controller };
 }
 
 describe('MacInputController', () => {
@@ -41,22 +26,11 @@ describe('MacInputController', () => {
     expect(operatorInstructions('win32')).not.toContain('this is macOS');
   });
 
-  it('passes rounded click coordinates as a non-shell osascript argument', async () => {
-    const { child, calls, controller } = harness();
-    const result = controller.click(12.4, 19.6, 'right', 2);
-    child.emit('exit', 0, null);
-    await result;
+  it('posts rounded click coordinates through the in-process native bridge', async () => {
+    const { requests, controller } = harness();
+    await controller.click(12.4, 19.6, 'right', 2);
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.executable).toBe('/usr/bin/osascript');
-    expect(calls[0]?.args.slice(0, 3)).toEqual(['-l', 'JavaScript', '-e']);
-    expect(requestFrom(calls[0]?.args ?? [])).toEqual({
-      action: 'click',
-      x: 12,
-      y: 20,
-      button: 'right',
-      count: 2,
-    });
+    expect(requests).toEqual([{ action: 'click', x: 12, y: 20, button: 'right', count: 2 }]);
   });
 
   it.each([
@@ -81,38 +55,46 @@ describe('MacInputController', () => {
       { action: 'press_keys', keys: ['CMD', 'L'] },
     ],
   ] as const)('supports %s requests', async (_name, invoke, expected) => {
-    const { child, calls, controller } = harness();
-    const result = invoke(controller);
-    child.emit('exit', 0, null);
-    await result;
-    expect(requestFrom(calls[0]?.args ?? [])).toEqual(expected);
+    const { requests, controller } = harness();
+    await invoke(controller);
+    expect(requests).toEqual([expected]);
   });
 
   it('fails closed and prompts when Accessibility permission is missing', async () => {
-    const { calls, controller } = harness({ trusted: false });
+    const { postInput, controller } = harness({ trusted: false });
     await expect(controller.click(1, 2)).rejects.toThrow('Accessibility permission is required');
-    expect(calls).toHaveLength(0);
+    expect(postInput).not.toHaveBeenCalled();
   });
 
-  it('surfaces a bounded native error and can be disposed while an action is pending', async () => {
+  it('surfaces native bridge failures and refuses every action after disposal', async () => {
     const failed = harness();
-    const failure = failed.controller.pressKeys(['NOPE']);
-    failed.child.stderr.write('execution error: unsupported key: NOPE\n');
-    failed.child.emit('exit', 1, null);
-    await expect(failure).rejects.toThrow('unsupported key: NOPE');
+    failed.postInput.mockImplementationOnce(() => {
+      throw new Error('Buddy macOS input failed: input_post_permission_required');
+    });
+    await expect(failed.controller.typeText('blocked')).rejects.toThrow(
+      'input_post_permission_required',
+    );
 
-    const pending = harness();
-    const action = pending.controller.typeText('pending');
-    pending.controller.dispose();
-    await expect(action).rejects.toThrow('input controller stopped');
-    expect(pending.child.kill).toHaveBeenCalledOnce();
+    const disposed = harness();
+    disposed.controller.dispose();
+    await expect(disposed.controller.typeText('pending')).rejects.toThrow(
+      'input controller stopped',
+    );
+    expect(disposed.postInput).not.toHaveBeenCalled();
   });
 
-  it('validates action payloads before starting a process', () => {
-    const { controller, calls } = harness();
+  it('fails on unsupported platforms before reaching the bridge', async () => {
+    const { controller, postInput } = harness({ platform: 'linux' });
+    await expect(controller.move(1, 2)).rejects.toThrow('only available on macOS');
+    expect(postInput).not.toHaveBeenCalled();
+  });
+
+  it('validates action payloads before reaching the bridge', () => {
+    const { controller, postInput } = harness();
     expect(() => controller.click(Number.NaN, 0)).toThrow('x must be a finite number');
     expect(() => controller.click(0, 0, 'left', 3)).toThrow('click count');
+    expect(() => controller.typeText('')).toThrow('one to 10000');
     expect(() => controller.pressKeys([])).toThrow('one to eight');
-    expect(calls).toHaveLength(0);
+    expect(postInput).not.toHaveBeenCalled();
   });
 });

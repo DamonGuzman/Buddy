@@ -211,8 +211,8 @@ describe('debug server routing', () => {
         'GET /eval/ground-truth',
         'POST /grounding/query',
         'GET /hover/state',
-        'POST /agents/:id/approve',
-        'POST /agents/:id/deny',
+        'POST /approvals/:approvalId/approve',
+        'POST /approvals/:approvalId/deny',
       ],
     });
   });

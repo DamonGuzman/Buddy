@@ -981,11 +981,11 @@ function buildDebugSurface({
         agentId: input.agentId ?? null,
       }),
       listGrants: () => computerUseRuntime.controller.listGrants(),
-      resolveAgentApproval: async (agentId, verdict) => {
+      resolveAgentApproval: async (agentId, approvalId, verdict) => {
         const request = computerUseRuntime.controller
           .listApprovals()
-          .find((item) => item.agentId === agentId);
-        if (!request) return false;
+          .find((item) => item.approvalId === approvalId);
+        if (!request || request.agentId !== agentId) return false;
         await computerUseRuntime.controller.resolveApproval(
           request.agentId,
           request.approvalId,

@@ -14,7 +14,17 @@ interface MacPrivacyNative {
   queryAccessibility(requestJson: string): string;
   queryFocusedReceiver(): string;
   restoreFocusedReceiver(token: string): boolean;
+  prepareFocusedReceiverTypeText(requestJson: string): string;
+  verifyFocusedReceiverTypeText(proofToken: string): boolean;
+  postInput(requestJson: string): string;
 }
+
+export type MacInputRequest =
+  | { action: 'move'; x: number; y: number }
+  | { action: 'click'; x: number; y: number; button: 'left' | 'right' | 'middle'; count: 1 | 2 }
+  | { action: 'scroll'; deltaX: number; deltaY: number }
+  | { action: 'type_text'; text: string }
+  | { action: 'press_keys'; keys: string[] };
 
 export interface MacDisplaySurfaceNative {
   displayId: number;
@@ -220,6 +230,77 @@ export function restoreMacFocusedReceiver(token: string): boolean {
     );
     return false;
   }
+}
+
+/** Prepare an opaque native postcondition tied to the exact retained AX control. */
+export function prepareMacFocusedReceiverTypeText(
+  restoreToken: string,
+  text: string,
+): string | null {
+  if (process.platform !== 'darwin' || !restoreToken || text.length < 1 || text.length > 10_000)
+    return null;
+  try {
+    const raw = bridge()?.prepareFocusedReceiverTypeText(JSON.stringify({ restoreToken, text }));
+    if (typeof raw !== 'string') return null;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return parsed['ok'] === true &&
+      typeof parsed['proofToken'] === 'string' &&
+      parsed['proofToken'].length > 0
+      ? parsed['proofToken']
+      : null;
+  } catch (err) {
+    console.warn(
+      '[computer-use] macOS text postcondition preparation failed:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return null;
+  }
+}
+
+/** Verify an opaque native text postcondition; successful proofs are consumed. */
+export function verifyMacFocusedReceiverTypeText(proofToken: string): boolean {
+  if (process.platform !== 'darwin' || !proofToken) return false;
+  try {
+    return bridge()?.verifyFocusedReceiverTypeText(proofToken) ?? false;
+  } catch (err) {
+    console.warn(
+      '[computer-use] macOS text postcondition verification failed:',
+      err instanceof Error ? err.message : String(err),
+    );
+    return false;
+  }
+}
+
+/**
+ * Post input from Buddy's own signed process. This deliberately throws when
+ * the native bridge or either required macOS privacy authorization is absent;
+ * running input from a helper process would use the wrong TCC identity.
+ */
+export function postMacInput(request: MacInputRequest): void {
+  if (process.platform !== 'darwin') {
+    throw new Error('macOS input is only available on macOS');
+  }
+  const native = bridge();
+  if (native === null || typeof native.postInput !== 'function') {
+    throw new Error('Buddy macOS input bridge is unavailable');
+  }
+  const raw = native.postInput(JSON.stringify(request));
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('Buddy macOS input bridge returned an invalid response');
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error('Buddy macOS input bridge returned an invalid response');
+  }
+  const result = parsed as Record<string, unknown>;
+  if (result['ok'] === true) return;
+  const error =
+    typeof result['error'] === 'string' && result['error'].length > 0
+      ? result['error'].replace(/[^a-z0-9_:-]/gi, '').slice(0, 120)
+      : 'unknown_failure';
+  throw new Error(`Buddy macOS input failed: ${error}`);
 }
 
 /** Validate worker/native output before it enters the shared scorer. */

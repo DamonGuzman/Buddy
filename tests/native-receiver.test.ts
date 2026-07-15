@@ -67,10 +67,14 @@ describe('native keyboard receiver identity', () => {
 
   it('returns one canonical macOS identity through the injectable native seam', async () => {
     const restoreMac = vi.fn(() => true);
+    const prepareMacTypeText = vi.fn(() => 'opaque-proof');
+    const verifyMacTypeText = vi.fn(() => true);
     const provider = new PlatformNativeReceiverProvider({
       platform: 'darwin',
       queryMac: () => JSON.stringify(MAC_RECEIVER),
       restoreMac,
+      prepareMacTypeText,
+      verifyMacTypeText,
     });
 
     const identity = await provider.query();
@@ -82,7 +86,14 @@ describe('native keyboard receiver identity', () => {
     });
     await expect(provider.restore(identity ?? '')).resolves.toBe(true);
     expect(restoreMac).toHaveBeenCalledWith('mac-token-1');
+    await expect(provider.prepareTypeTextPostcondition(identity ?? '', 'hello')).resolves.toBe(
+      'opaque-proof',
+    );
+    expect(prepareMacTypeText).toHaveBeenCalledWith('mac-token-1', 'hello');
+    await expect(provider.verifyTypeTextPostcondition('opaque-proof')).resolves.toBe(true);
+    expect(verifyMacTypeText).toHaveBeenCalledWith('opaque-proof');
     await expect(provider.restore('unretained')).resolves.toBe(false);
+    await expect(provider.prepareTypeTextPostcondition('unretained', 'hello')).resolves.toBeNull();
   });
 
   it('fails macOS capture early when no exact retained restore token exists', async () => {
@@ -137,6 +148,35 @@ describe('native keyboard receiver identity', () => {
     });
     await expect(provider.restore(identity ?? '')).resolves.toBe(true);
     expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  it('binds Windows UIA text proof preparation to a retained canonical receiver', async () => {
+    const exec = vi.fn((_file, _args, _options, callback) => {
+      callback(null, JSON.stringify(WINDOWS_RECEIVER), '');
+    });
+    const windowsTypeTextProof = {
+      prepare: vi.fn(async () => 'windows-proof'),
+      verify: vi.fn(async () => true),
+    };
+    const provider = new PlatformNativeReceiverProvider({
+      platform: 'win32',
+      exec,
+      windowsTypeTextProof,
+    });
+    const identity = await provider.query();
+
+    await expect(provider.prepareTypeTextPostcondition(identity ?? '', 'hé😊')).resolves.toBe(
+      'windows-proof',
+    );
+    expect(windowsTypeTextProof.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platform: 'win32',
+        focus: expect.objectContaining({ runtimeId: [42, 813, 7, 9] }),
+      }),
+      'hé😊',
+    );
+    await expect(provider.verifyTypeTextPostcondition('windows-proof')).resolves.toBe(true);
+    expect(windowsTypeTextProof.verify).toHaveBeenCalledWith('windows-proof');
   });
 
   it('fails closed when Windows rejects exact receiver restoration', async () => {

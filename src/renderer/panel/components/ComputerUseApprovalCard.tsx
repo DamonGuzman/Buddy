@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { AlertTriangle, ExternalLink, Hand, ShieldCheck } from 'lucide-react';
 import {
+  ApprovalInteractionLatch,
+  type ApprovalInteractionAction,
   approvalAllowedByPreview,
   approvalPresentation,
   approvalScreenshotSrc,
@@ -16,9 +18,9 @@ interface ComputerUseApprovalCardProps {
   resolving: ApprovalVerdict | null;
   actingInPlace: boolean;
   error: string | null;
-  onResolve: (verdict: ApprovalVerdict) => void;
-  onShowBrowser: () => void;
-  onFinishInBrowser: () => void;
+  onResolve: (agentId: string, approvalId: string, verdict: ApprovalVerdict) => void;
+  onShowBrowser: (agentId: string, approvalId: string) => void;
+  onFinishInBrowser: (agentId: string, approvalId: string) => void;
 }
 
 export function ComputerUseApprovalCard({
@@ -36,6 +38,7 @@ export function ComputerUseApprovalCard({
   const requiresPreview = request.kind !== 'browser-capability';
   const grantScope = standingGrantScope(request);
   const busy = resolving !== null;
+  const [interaction] = useState(() => new ApprovalInteractionLatch());
   const [imageState, setImageState] = useState<{
     src: string | null;
     status: 'loading' | 'valid' | 'invalid';
@@ -43,6 +46,22 @@ export function ComputerUseApprovalCard({
   const previewStatus =
     screenshot === null ? 'invalid' : imageState.src === screenshot ? imageState.status : 'loading';
   const approvalEnabled = approvalAllowedByPreview(request, previewStatus === 'valid');
+  const armPointer =
+    (action: ApprovalInteractionAction) =>
+    (event: React.PointerEvent<HTMLButtonElement>): void => {
+      if (!event.isPrimary || event.button !== 0) return;
+      interaction.arm(request, action);
+    };
+  const armKeyboard =
+    (action: ApprovalInteractionAction) =>
+    (event: React.KeyboardEvent<HTMLButtonElement>): void => {
+      if (event.repeat || (event.key !== 'Enter' && event.key !== ' ')) return;
+      interaction.arm(request, action);
+    };
+  const consumeInteraction = (action: ApprovalInteractionAction, run: () => void): void => {
+    if (!interaction.consume(request, action)) return;
+    run();
+  };
 
   return (
     <section
@@ -151,7 +170,13 @@ export function ComputerUseApprovalCard({
             size="sm"
             variant="outline"
             disabled={busy || !approvalEnabled}
-            onClick={() => onResolve('once')}
+            onPointerDown={armPointer('once')}
+            onKeyDown={armKeyboard('once')}
+            onClick={() =>
+              consumeInteraction('once', () =>
+                onResolve(request.agentId, request.approvalId, 'once'),
+              )
+            }
           >
             {resolving === 'once' ? 'approving…' : presentation.approveLabel}
           </Button>
@@ -161,7 +186,13 @@ export function ComputerUseApprovalCard({
               size="sm"
               className="h-auto min-h-8 whitespace-normal py-1.5 text-center leading-tight"
               disabled={busy || !approvalEnabled}
-              onClick={() => onResolve('always')}
+              onPointerDown={armPointer('always')}
+              onKeyDown={armKeyboard('always')}
+              onClick={() =>
+                consumeInteraction('always', () =>
+                  onResolve(request.agentId, request.approvalId, 'always'),
+                )
+              }
             >
               {resolving === 'always' ? 'saving…' : `always allow ${grantScope}`}
             </Button>
@@ -171,7 +202,13 @@ export function ComputerUseApprovalCard({
             size="sm"
             variant="destructive"
             disabled={busy}
-            onClick={() => onResolve('deny')}
+            onPointerDown={armPointer('deny')}
+            onKeyDown={armKeyboard('deny')}
+            onClick={() =>
+              consumeInteraction('deny', () =>
+                onResolve(request.agentId, request.approvalId, 'deny'),
+              )
+            }
           >
             {resolving === 'deny' ? 'denying…' : 'deny'}
           </Button>
@@ -181,7 +218,15 @@ export function ComputerUseApprovalCard({
               size="sm"
               variant="ghost"
               disabled={busy}
-              onClick={actingInPlace ? onFinishInBrowser : onShowBrowser}
+              onPointerDown={armPointer('takeover')}
+              onKeyDown={armKeyboard('takeover')}
+              onClick={() =>
+                consumeInteraction('takeover', () =>
+                  actingInPlace
+                    ? onFinishInBrowser(request.agentId, request.approvalId)
+                    : onShowBrowser(request.agentId, request.approvalId),
+                )
+              }
             >
               <ExternalLink className="size-3.5" aria-hidden="true" />
               {actingInPlace ? 'done in browser' : 'let me do it'}

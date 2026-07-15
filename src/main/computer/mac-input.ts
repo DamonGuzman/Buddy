@@ -1,39 +1,26 @@
-import { spawn } from 'node:child_process';
-import type { ChildProcessByStdio } from 'node:child_process';
-import type { Readable } from 'node:stream';
 import { systemPreferences } from 'electron';
 import type { ComputerInputController, MouseButton } from './input-controller';
-import { MAC_INPUT_SCRIPT } from './mac-input-script';
-
-type InputChild = ChildProcessByStdio<null, Readable, Readable>;
-type SpawnInputProcess = (executable: string, args: string[]) => InputChild;
+import { postMacInput, type MacInputRequest } from '../windows/mac-screen-permission';
 
 export interface MacInputControllerOptions {
-  timeoutMs?: number;
   platform?: NodeJS.Platform;
   isTrustedAccessibilityClient?: (prompt: boolean) => boolean;
-  spawnProcess?: SpawnInputProcess;
+  postInput?: (request: MacInputRequest) => void;
 }
 
-/** Global input backed only by macOS's built-in CoreGraphics/JXA facilities. */
+/** Global input posted synchronously by Buddy's signed macOS process. */
 export class MacInputController implements ComputerInputController {
-  private readonly children = new Set<InputChild>();
-  private readonly stopChild = new Map<InputChild, (error: Error) => void>();
-  private readonly timeoutMs: number;
   private readonly platform: NodeJS.Platform;
   private readonly isTrusted: (prompt: boolean) => boolean;
-  private readonly spawnProcess: SpawnInputProcess;
+  private readonly postInput: (request: MacInputRequest) => void;
   private disposed = false;
 
   constructor(options: MacInputControllerOptions = {}) {
-    this.timeoutMs = options.timeoutMs ?? 5_000;
     this.platform = options.platform ?? process.platform;
     this.isTrusted =
       options.isTrustedAccessibilityClient ??
       ((prompt) => systemPreferences.isTrustedAccessibilityClient(prompt));
-    this.spawnProcess =
-      options.spawnProcess ??
-      ((executable, args) => spawn(executable, args, { stdio: ['ignore', 'pipe', 'pipe'] }));
+    this.postInput = options.postInput ?? postMacInput;
   }
 
   move(x: number, y: number): Promise<void> {
@@ -66,8 +53,8 @@ export class MacInputController implements ComputerInputController {
   }
 
   typeText(text: string): Promise<void> {
-    if (typeof text !== 'string' || text.length > 10_000) {
-      throw new Error('text must be at most 10000 characters');
+    if (typeof text !== 'string' || text.length < 1 || text.length > 10_000) {
+      throw new Error('text must contain one to 10000 characters');
     }
     return this.request({ action: 'type_text', text });
   }
@@ -86,19 +73,9 @@ export class MacInputController implements ComputerInputController {
 
   dispose(): void {
     this.disposed = true;
-    for (const child of this.children) {
-      try {
-        child.kill();
-      } catch {
-        /* already gone */
-      }
-      this.stopChild.get(child)?.(new Error('input controller stopped'));
-    }
-    this.children.clear();
-    this.stopChild.clear();
   }
 
-  private request(payload: Record<string, unknown>): Promise<void> {
+  private request(payload: MacInputRequest): Promise<void> {
     if (this.disposed) return Promise.reject(new Error('input controller stopped'));
     if (this.platform !== 'darwin') {
       return Promise.reject(new Error('macOS input is only available on macOS'));
@@ -110,68 +87,15 @@ export class MacInputController implements ComputerInputController {
         ),
       );
     }
-
-    return new Promise((resolve, reject) => {
-      let child: InputChild;
-      try {
-        child = this.spawnProcess('/usr/bin/osascript', [
-          '-l',
-          'JavaScript',
-          '-e',
-          MAC_INPUT_SCRIPT,
-          JSON.stringify(payload),
-        ]);
-      } catch (error) {
-        reject(asError(error));
-        return;
-      }
-      this.children.add(child);
-      let stderr = '';
-      let settled = false;
-      const finish = (error?: Error): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        this.children.delete(child);
-        this.stopChild.delete(child);
-        if (error) reject(error);
-        else resolve();
-      };
-      const timer = setTimeout(() => {
-        try {
-          child.kill();
-        } catch {
-          /* already gone */
-        }
-        finish(new Error('macOS input timed out'));
-      }, this.timeoutMs);
-      this.stopChild.set(child, finish);
-      child.stderr.setEncoding('utf8');
-      child.stderr.on('data', (chunk: string) => {
-        if (stderr.length < 2_000) stderr += chunk.slice(0, 2_000 - stderr.length);
-      });
-      child.on('error', (error) => finish(error));
-      child.on('exit', (code, signal) => {
-        if (code === 0) finish();
-        else {
-          const detail =
-            sanitizeError(stderr) ||
-            (signal ? `terminated by ${signal}` : `exited with code ${code}`);
-          finish(new Error(`macOS input failed: ${detail}`));
-        }
-      });
-    });
+    try {
+      this.postInput(payload);
+      return Promise.resolve();
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 }
 
 function requireCoordinate(value: number, name: string): void {
   if (!Number.isFinite(value)) throw new Error(`${name} must be a finite number`);
-}
-
-function sanitizeError(value: string): string {
-  return value.replace(/\s+/g, ' ').trim().slice(0, 300);
-}
-
-function asError(value: unknown): Error {
-  return value instanceof Error ? value : new Error(String(value));
 }

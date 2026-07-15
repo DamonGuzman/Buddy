@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clicky } from '../clicky';
-import { removeApprovalById } from '../computer-use-ui';
+import { isExactApproval, removeApprovalById } from '../computer-use-ui';
 import type { ApprovalRequest } from '../../../shared/types';
 
 export type ApprovalVerdict = 'once' | 'always' | 'deny';
@@ -12,15 +12,17 @@ export interface ComputerUseApprovalState {
   actingInPlace: boolean;
   error: string | null;
   grantsRevision: number;
-  resolve: (verdict: ApprovalVerdict) => Promise<void>;
-  showBrowser: () => Promise<void>;
-  finishInBrowser: () => Promise<void>;
+  resolve: (agentId: string, approvalId: string, verdict: ApprovalVerdict) => Promise<void>;
+  showBrowser: (agentId: string, approvalId: string) => Promise<void>;
+  finishInBrowser: (agentId: string, approvalId: string) => Promise<void>;
 }
 
 /** Own the pending raise-hand queue delivered to the always-alive panel renderer. */
 export function useComputerUseApproval(): ComputerUseApprovalState {
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const approvalsRef = useRef<ApprovalRequest[]>([]);
+  /** Synchronous per-approval latch; React's async disabled state is not a causality boundary. */
+  const resolvingApprovalRef = useRef<string | null>(null);
   const [resolving, setResolving] = useState<ApprovalVerdict | null>(null);
   const [actingInPlace, setActingInPlace] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +34,7 @@ export function useComputerUseApproval(): ComputerUseApprovalState {
     approvalsRef.current = requests;
     setApprovals(requests);
     if (previousHead !== nextHead) {
+      resolvingApprovalRef.current = null;
       setResolving(null);
       setActingInPlace(false);
       setError(null);
@@ -70,9 +73,14 @@ export function useComputerUseApproval(): ComputerUseApprovalState {
   }, [replaceApprovals]);
 
   const resolve = useCallback(
-    async (verdict: ApprovalVerdict): Promise<void> => {
+    async (agentId: string, approvalId: string, verdict: ApprovalVerdict): Promise<void> => {
       const request = approvalsRef.current[0];
-      if (request === undefined) return;
+      if (!isExactApproval(request, agentId, approvalId)) {
+        setError('that approval is no longer current. review the new request before choosing.');
+        return;
+      }
+      if (resolvingApprovalRef.current !== null) return;
+      resolvingApprovalRef.current = approvalId;
       setResolving(verdict);
       setError(null);
       try {
@@ -84,15 +92,21 @@ export function useComputerUseApproval(): ComputerUseApprovalState {
           setError("buddy couldn't record your choice. nothing happened — please try again.");
         }
       } finally {
-        setResolving(null);
+        if (resolvingApprovalRef.current === approvalId) {
+          resolvingApprovalRef.current = null;
+          if (approvalsRef.current[0]?.approvalId === approvalId) setResolving(null);
+        }
       }
     },
     [removeApproval],
   );
 
-  const showBrowser = useCallback(async (): Promise<void> => {
+  const showBrowser = useCallback(async (agentId: string, approvalId: string): Promise<void> => {
     const request = approvalsRef.current[0];
-    if (request === undefined) return;
+    if (!isExactApproval(request, agentId, approvalId)) {
+      setError('that approval is no longer current. review the new request before continuing.');
+      return;
+    }
     setError(null);
     try {
       await clicky.showApprovalWindow(request.agentId, request.approvalId);
@@ -106,20 +120,26 @@ export function useComputerUseApproval(): ComputerUseApprovalState {
     }
   }, []);
 
-  const finishInBrowser = useCallback(async (): Promise<void> => {
-    const request = approvalsRef.current[0];
-    if (request === undefined) return;
-    setError(null);
-    try {
-      await clicky.hideApprovalWindow(request.agentId, request.approvalId);
-      // "done" discards this proposal and resumes from a fresh observation.
-      removeApproval(request.approvalId);
-    } catch {
-      if (approvalsRef.current[0]?.approvalId === request.approvalId) {
-        setError("buddy couldn't take its browser back. leave it open and try again.");
+  const finishInBrowser = useCallback(
+    async (agentId: string, approvalId: string): Promise<void> => {
+      const request = approvalsRef.current[0];
+      if (!isExactApproval(request, agentId, approvalId)) {
+        setError('that approval is no longer current. review the new request before continuing.');
+        return;
       }
-    }
-  }, [removeApproval]);
+      setError(null);
+      try {
+        await clicky.hideApprovalWindow(request.agentId, request.approvalId);
+        // "done" discards this proposal and resumes from a fresh observation.
+        removeApproval(request.approvalId);
+      } catch {
+        if (approvalsRef.current[0]?.approvalId === request.approvalId) {
+          setError("buddy couldn't take its browser back. leave it open and try again.");
+        }
+      }
+    },
+    [removeApproval],
+  );
 
   return {
     approvals,

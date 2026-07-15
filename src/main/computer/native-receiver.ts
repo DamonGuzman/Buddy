@@ -1,16 +1,26 @@
 import { execFile } from 'node:child_process';
 import type { ExecFileException } from 'node:child_process';
 import {
+  prepareMacFocusedReceiverTypeText,
   queryMacFocusedReceiverRaw,
   restoreMacFocusedReceiver,
+  verifyMacFocusedReceiverTypeText,
 } from '../windows/mac-screen-permission';
+import {
+  WindowsReceiverProofDaemon,
+  type WindowsReceiverProofPort,
+} from './windows-receiver-proof';
 
 /** Includes cold PowerShell + UIAutomation assembly startup on supported Windows hosts. */
 const RECEIVER_TIMEOUT_MS = 2_000;
+const TYPE_TEXT_PROOF_TIMEOUT_MS = 750;
+const TYPE_TEXT_PROOF_POLL_MS = 25;
 
 export interface NativeReceiverProvider {
   query(): Promise<string | null>;
   restore(identity: string): Promise<boolean>;
+  prepareTypeTextPostcondition(identity: string, text: string): Promise<string | null>;
+  verifyTypeTextPostcondition(proofToken: string): Promise<boolean>;
 }
 
 interface RectIdentity {
@@ -18,6 +28,11 @@ interface RectIdentity {
   y: number;
   w: number;
   h: number;
+}
+
+export interface ReceiverFocusGeometry {
+  platform: 'darwin' | 'win32';
+  rect: RectIdentity;
 }
 
 export interface ReceiverIdentity {
@@ -46,6 +61,9 @@ export interface NativeReceiverProviderOptions {
   timeoutMs?: number;
   queryMac?: () => string | null;
   restoreMac?: (token: string) => boolean;
+  prepareMacTypeText?: (token: string, text: string) => string | null;
+  verifyMacTypeText?: (proofToken: string) => boolean;
+  windowsTypeTextProof?: WindowsReceiverProofPort;
   exec?: ExecReceiver;
 }
 
@@ -59,6 +77,9 @@ export class PlatformNativeReceiverProvider implements NativeReceiverProvider {
   private readonly timeoutMs: number;
   private readonly queryMac: () => string | null;
   private readonly restoreMac: (token: string) => boolean;
+  private readonly prepareMacTypeText: (token: string, text: string) => string | null;
+  private readonly verifyMacTypeText: (proofToken: string) => boolean;
+  private readonly windowsTypeTextProof: WindowsReceiverProofPort;
   private readonly exec: ExecReceiver;
   private readonly observations = new Map<string, RetainedObservation>();
 
@@ -67,6 +88,9 @@ export class PlatformNativeReceiverProvider implements NativeReceiverProvider {
     this.timeoutMs = options.timeoutMs ?? RECEIVER_TIMEOUT_MS;
     this.queryMac = options.queryMac ?? queryMacFocusedReceiverRaw;
     this.restoreMac = options.restoreMac ?? restoreMacFocusedReceiver;
+    this.prepareMacTypeText = options.prepareMacTypeText ?? prepareMacFocusedReceiverTypeText;
+    this.verifyMacTypeText = options.verifyMacTypeText ?? verifyMacFocusedReceiverTypeText;
+    this.windowsTypeTextProof = options.windowsTypeTextProof ?? new WindowsReceiverProofDaemon();
     this.exec = options.exec ?? execFile;
   }
 
@@ -107,6 +131,41 @@ export class PlatformNativeReceiverProvider implements NativeReceiverProvider {
     }
     if (restored) await delay(75);
     return restored;
+  }
+
+  async prepareTypeTextPostcondition(identity: string, text: string): Promise<string | null> {
+    const retained = this.observations.get(identity);
+    if (!retained || retained.identity.platform !== this.platform) return null;
+    if (this.platform === 'darwin') {
+      if (retained.macToken === null) return null;
+      return this.prepareMacTypeText(retained.macToken, text);
+    }
+    // Windows uses the UIA proof daemon below. Unsupported platforms are
+    // deliberately unavailable rather than trusting input-helper exit codes.
+    if (this.platform === 'win32')
+      return this.windowsTypeTextProof.prepare(retained.identity, text);
+    return null;
+  }
+
+  async verifyTypeTextPostcondition(proofToken: string): Promise<boolean> {
+    if (!proofToken) return false;
+    if (this.platform === 'darwin') {
+      const deadline = Date.now() + TYPE_TEXT_PROOF_TIMEOUT_MS;
+      do {
+        if (this.verifyMacTypeText(proofToken)) return true;
+        await delay(TYPE_TEXT_PROOF_POLL_MS);
+      } while (Date.now() < deadline);
+      return false;
+    }
+    if (this.platform === 'win32') {
+      const deadline = Date.now() + TYPE_TEXT_PROOF_TIMEOUT_MS;
+      do {
+        if (await this.windowsTypeTextProof.verify(proofToken)) return true;
+        await delay(TYPE_TEXT_PROOF_POLL_MS);
+      } while (Date.now() < deadline);
+      return false;
+    }
+    return false;
   }
 
   private remember(identity: string, observation: RetainedObservation): void {
@@ -172,8 +231,7 @@ export function parseWindowsReceiver(raw: unknown): ReceiverIdentity | null {
   const handle = boundedString(source['windowHandle'], 64);
   const role = boundedString(source['controlType'], 160);
   const runtimeId = integerArray(source['runtimeId'], 32);
-  if (!pid || !focusPid || !windowRect || !focusRect || !handle || !role || !runtimeId)
-    return null;
+  if (!pid || !focusPid || !windowRect || !focusRect || !handle || !role || !runtimeId) return null;
   return {
     platform: 'win32',
     pid,
@@ -192,6 +250,16 @@ export function parseWindowsReceiver(raw: unknown): ReceiverIdentity | null {
       rect: focusRect,
     },
   };
+}
+
+/** Geometry embedded in one canonical identity returned by this provider. */
+export function parseReceiverFocusGeometry(raw: unknown): ReceiverFocusGeometry | null {
+  const source = parseRecord(raw);
+  const platform = source?.['platform'];
+  const focus = record(source?.['focus']);
+  const focusRect = rect(record(focus?.['rect']));
+  if ((platform !== 'darwin' && platform !== 'win32') || focusRect === null) return null;
+  return { platform, rect: focusRect };
 }
 
 function canonicalReceiver(identity: ReceiverIdentity): string {

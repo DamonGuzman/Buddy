@@ -6,7 +6,10 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ApprovalGrant, DebugState } from '../src/shared/types';
 
-const control = vi.hoisted(() => ({ userDataPath: '' }));
+const control = vi.hoisted(() => ({
+  userDataPath: '',
+  currentApprovalId: 'current-approval',
+}));
 
 vi.mock('electron', () => ({
   app: {
@@ -27,7 +30,7 @@ const state = { appVersion: 'debug-test', assistantState: 'idle' } as unknown as
 const calls = {
   browserSpawns: [] as Array<{ task: string; scenario?: string }>,
   assessments: [] as unknown[],
-  approvals: [] as Array<{ agentId: string; verdict: string }>,
+  approvals: [] as Array<{ agentId: string; approvalId: string; verdict: string }>,
 };
 const grants: ApprovalGrant[] = [
   {
@@ -105,9 +108,9 @@ beforeAll(async () => {
         return { kind: 'denied', reason: 'fixture reviewer denial' };
       },
       listGrants: () => grants,
-      resolveAgentApproval: (agentId, verdict) => {
-        calls.approvals.push({ agentId, verdict });
-        return agentId === 'waiting-agent';
+      resolveAgentApproval: (agentId, approvalId, verdict) => {
+        calls.approvals.push({ agentId, approvalId, verdict });
+        return agentId === 'waiting-agent' && approvalId === control.currentApprovalId;
       },
     },
   });
@@ -185,28 +188,53 @@ describe('computer-use debug routes', () => {
     expect(listed).toEqual({ status: 200, json: grants });
   });
 
-  it('resolves once, always, and deny decisions by agent id', async () => {
-    expect(await request('POST', '/agents/waiting-agent/approve', { verdict: 'always' })).toEqual({
-      status: 200,
-      json: { ok: true, verdict: 'always' },
-    });
-    expect(await request('POST', '/agents/waiting-agent/approve')).toEqual({
-      status: 200,
-      json: { ok: true, verdict: 'once' },
-    });
-    expect(await request('POST', '/agents/waiting-agent/deny')).toEqual({
-      status: 200,
-      json: { ok: true, verdict: 'deny' },
-    });
+  it('resolves only an exact immutable agent/approval pair', async () => {
+    expect(
+      await request('POST', '/approvals/current-approval/approve', {
+        agentId: 'waiting-agent',
+        verdict: 'always',
+      }),
+    ).toEqual({ status: 200, json: { ok: true, verdict: 'always' } });
+    expect(
+      await request('POST', '/approvals/current-approval/approve', {
+        agentId: 'waiting-agent',
+      }),
+    ).toEqual({ status: 200, json: { ok: true, verdict: 'once' } });
+    expect(
+      await request('POST', '/approvals/current-approval/deny', {
+        agentId: 'waiting-agent',
+      }),
+    ).toEqual({ status: 200, json: { ok: true, verdict: 'deny' } });
     expect(calls.approvals).toEqual([
-      { agentId: 'waiting-agent', verdict: 'always' },
-      { agentId: 'waiting-agent', verdict: 'once' },
-      { agentId: 'waiting-agent', verdict: 'deny' },
+      { agentId: 'waiting-agent', approvalId: 'current-approval', verdict: 'always' },
+      { agentId: 'waiting-agent', approvalId: 'current-approval', verdict: 'once' },
+      { agentId: 'waiting-agent', approvalId: 'current-approval', verdict: 'deny' },
     ]);
   });
 
-  it('404s approval resolution when no action is pending', async () => {
-    const response = await request('POST', '/agents/not-waiting/deny');
+  it('rejects a stale approval id without falling forward to the current agent approval', async () => {
+    control.currentApprovalId = 'replacement-approval';
+    const response = await request('POST', '/approvals/stale-approval/deny', {
+      agentId: 'waiting-agent',
+    });
     expect(response).toEqual({ status: 404, json: { error: 'no pending approval' } });
+    expect(
+      await request('POST', '/approvals/replacement-approval/deny', {
+        agentId: 'waiting-agent',
+      }),
+    ).toEqual({ status: 200, json: { ok: true, verdict: 'deny' } });
+    control.currentApprovalId = 'current-approval';
+  });
+
+  it('requires the exact agent id alongside the approval id', async () => {
+    expect(await request('POST', '/approvals/current-approval/approve')).toEqual({
+      status: 400,
+      json: { error: 'exact agentId is required' },
+    });
+    expect(
+      await request('POST', '/approvals/current-approval/approve', {
+        agentId: 'replacement-agent',
+      }),
+    ).toEqual({ status: 404, json: { error: 'no pending approval' } });
   });
 });

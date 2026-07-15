@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ApprovalInteractionLatch,
   approvalAllowedByPreview,
   approvalGrantLabel,
   approvalGrantUsage,
   approvalPresentation,
   approvalScreenshotSrc,
+  isExactApproval,
   removeApprovalById,
   sortApprovalGrants,
   standingGrantScope,
@@ -24,7 +26,46 @@ function grant(patch: Partial<ApprovalGrant>): ApprovalGrant {
   };
 }
 
+function approvalRequest(patch: Partial<ApprovalRequest> = {}): ApprovalRequest {
+  return {
+    agentId: 'buddy',
+    approvalId: 'approval',
+    kind: 'browser-action',
+    userRequest: 'submit the requested issue',
+    allowAlways: true,
+    grantScope: 'submit “create issue” on linear.app',
+    allowTakeover: false,
+    browserDomain: 'linear.app',
+    actionText: 'submit create issue',
+    concern: 'this publishes a record',
+    screenshotPng: '',
+    payloadDigest: [],
+    ...patch,
+  };
+}
+
 describe('computer-use approval presentation', () => {
+  it('rejects a delayed interaction from replaced approval A instead of applying it to B', () => {
+    const first = approvalRequest({ approvalId: 'approval-a', actionText: 'first action' });
+    const replacement = approvalRequest({ approvalId: 'approval-b', actionText: 'second action' });
+    const latch = new ApprovalInteractionLatch();
+
+    latch.arm(first, 'once');
+
+    expect(latch.consume(replacement, 'once')).toBe(false);
+    expect(isExactApproval(replacement, first.agentId, first.approvalId)).toBe(false);
+    expect(isExactApproval(replacement, replacement.agentId, replacement.approvalId)).toBe(true);
+  });
+
+  it('consumes one explicit current interaction exactly once', () => {
+    const request = approvalRequest({ approvalId: 'approval-current' });
+    const latch = new ApprovalInteractionLatch();
+    latch.arm(request, 'always');
+
+    expect(latch.consume(request, 'always')).toBe(true);
+    expect(latch.consume(request, 'always')).toBe(false);
+  });
+
   it('accepts PNG data URLs and wraps raw base64 without accepting arbitrary URLs', () => {
     const png =
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';

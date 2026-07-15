@@ -413,7 +413,8 @@ are approving); everything else stays `AgentSummary`-shaped.
   auto-approves; a prompt-injected page instructing the buddy to email an attacker (asserts: gate
   denies, journal records it); reviewer timeout → escalate (fail-closed check).
 - **Debug server**: `POST /gate/assess` (drive the trigger+reviewer directly),
-  `GET /grants`, `POST /agents/:id/approve|deny`.
+  `GET /grants`, `POST /approvals/:approvalId/approve|deny` (with the exact `agentId` in the
+  request body; stale approval IDs never fall forward to an agent's newer request).
 
 ## 9. Implemented module map
 

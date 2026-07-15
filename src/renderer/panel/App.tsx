@@ -47,14 +47,21 @@ export function App(): React.JSX.Element {
         {currentApproval ? (
           <div className="min-h-0 flex-1 overflow-y-auto pb-4">
             <ComputerUseApprovalCard
+              key={currentApproval.approvalId}
               request={currentApproval}
               pendingCount={computerUse.approvals.length}
               resolving={computerUse.resolving}
               actingInPlace={computerUse.actingInPlace}
               error={computerUse.error}
-              onResolve={(verdict) => void computerUse.resolve(verdict)}
-              onShowBrowser={() => void computerUse.showBrowser()}
-              onFinishInBrowser={() => void computerUse.finishInBrowser()}
+              onResolve={(agentId, approvalId, verdict) =>
+                void computerUse.resolve(agentId, approvalId, verdict)
+              }
+              onShowBrowser={(agentId, approvalId) =>
+                void computerUse.showBrowser(agentId, approvalId)
+              }
+              onFinishInBrowser={(agentId, approvalId) =>
+                void computerUse.finishInBrowser(agentId, approvalId)
+              }
             />
           </div>
         ) : settings ? (

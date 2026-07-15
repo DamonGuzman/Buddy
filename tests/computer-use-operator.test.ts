@@ -8,7 +8,7 @@ import type {
   AgentApprovalResolution,
   AgentApprovalVerdict,
 } from '../src/main/agents/types';
-import { ActionGate } from '../src/main/agents/gate/action-gate';
+import { ActionGate, type ComputerActionOutcomeEntry } from '../src/main/agents/gate/action-gate';
 import type { WindowsInputController } from '../src/main/computer/windows-input';
 import type { ComputerDriver } from '../src/main/computer/driver';
 import type { LiveDesktopEvidencePort } from '../src/main/computer/live-desktop-evidence';
@@ -49,13 +49,17 @@ function response(events: unknown[]): Response {
   return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
-function liveGate(ids: string[] = ['approval-1']): AgentActionGatePort {
+function liveGate(
+  ids: string[] = ['approval-1'],
+  onMarkedScreenshot: (base64: string) => void = () => undefined,
+  onOutcome: (entry: ComputerActionOutcomeEntry) => void = () => undefined,
+): AgentActionGatePort {
   let index = 0;
   return new ActionGate<void>({
     reviewer: { review: vi.fn(async () => Promise.reject(new Error('live review must not run'))) },
     journal: {
       recordActionGateAssessment: vi.fn(),
-      recordComputerActionOutcome: vi.fn(),
+      recordComputerActionOutcome: vi.fn(onOutcome),
     },
     id: () => ids[index++] ?? `approval-${index}`,
     grantStore: {
@@ -73,10 +77,13 @@ function liveGate(ids: string[] = ['approval-1']): AgentActionGatePort {
       recordExecutedAction: () => false,
       deactivate: () => undefined,
     },
-    markScreenshot: async (screenshot) => ({
-      jpegBase64: screenshot.base64,
-      pngBase64: 'bWFya2Vk',
-    }),
+    markScreenshot: async (screenshot) => {
+      onMarkedScreenshot(screenshot.base64);
+      return {
+        jpegBase64: screenshot.base64,
+        pngBase64: 'bWFya2Vk',
+      };
+    },
   });
 }
 
@@ -272,9 +279,19 @@ describe('ComputerUseOperator', () => {
       dispose: async () => undefined,
     };
     const seen: ApprovalRequest[] = [];
+    const receiverVisualPolicies: Array<boolean | undefined> = [];
+    const fingerprint: LiveDesktopEvidencePort['fingerprint'] = vi.fn(
+      async (_captures, _anchor, _requiresIdentity, _identity, requiresVisual) => {
+        receiverVisualPolicies.push(requiresVisual);
+        return 'stable-native-receiver';
+      },
+    );
     const safety = operatorSafety('once', (request) => seen.push(request), {
       receiverIdentity: async () => 'receiver-a',
-      fingerprint: async () => 'stable-native-receiver',
+      receiverCaptureScreenIndex: () => 0,
+      prepareTypeTextPostcondition: async () => 'proof-a',
+      verifyTypeTextPostcondition: async () => true,
+      fingerprint,
     });
     const operator = actionOperator(driver, safety, { name, args });
 
@@ -284,7 +301,46 @@ describe('ComputerUseOperator', () => {
     if (name === 'type_text') {
       expect(seen[0]?.payloadDigest).toEqual(['Proposed text: hello']);
     }
+    expect(receiverVisualPolicies.every((policy) => policy === (name === 'press_keys'))).toBe(true);
     expect(dispatch === 'typeText' ? typeText : pressKeys).toHaveBeenCalledOnce();
+  });
+
+  it('routes keyboard approval evidence to the exact receiver display', async () => {
+    const receiverCapture: CaptureResult = {
+      ...CAPTURE,
+      meta: {
+        ...CAPTURE.meta,
+        screenIndex: 1,
+        displayId: 2,
+        displayBounds: { x: -100, y: 0, width: 100, height: 100 },
+        isActive: false,
+      },
+      jpegBase64: 'cmVjZWl2ZXItc2NyZWVu',
+    };
+    const driver: ComputerDriver = {
+      capture: async () => [CAPTURE, receiverCapture],
+      click: async () => undefined,
+      typeText: async () => undefined,
+      pressKeys: async () => undefined,
+      inspect: async () => null,
+      inspectFocused: async () => null,
+      readPendingPayload: async () => [],
+      dispose: async () => undefined,
+    };
+    const marked: string[] = [];
+    const safety = operatorSafety('once', undefined, {
+      receiverIdentity: async () => 'receiver-screen1',
+      receiverCaptureScreenIndex: () => 1,
+      fingerprint: async () => 'stable-receiver-screen1',
+    });
+    safety.gate = liveGate(['approval-screen1'], (base64) => marked.push(base64));
+    const operator = actionOperator(driver, safety, {
+      name: 'press_keys',
+      args: { keys: ['ENTER'] },
+    });
+
+    await expect(operator.run('press enter')).resolves.toMatchObject({ ok: true, actions: 1 });
+    expect(marked).toEqual([receiverCapture.jpegBase64]);
   });
 
   it('hard-denies secret-shaped live text before human approval', async () => {
@@ -414,9 +470,10 @@ describe('ComputerUseOperator', () => {
   });
 
   it('discards keyboard input when the original native receiver is not restored', async () => {
-    let receiverQuery = 0;
+    let receiver = 'focus-field-a';
     const evidence: LiveDesktopEvidencePort = {
-      receiverIdentity: vi.fn(async () => (++receiverQuery <= 2 ? 'focus-field-a' : 'buddy-panel')),
+      receiverIdentity: vi.fn(async () => receiver),
+      receiverCaptureScreenIndex: () => 0,
       fingerprint: vi.fn(async () => 'stable-visual-state'),
     };
     const typeText = vi.fn(async () => undefined);
@@ -433,7 +490,14 @@ describe('ComputerUseOperator', () => {
     const approvalIds: string[] = [];
     const operator = actionOperator(
       driver,
-      operatorSafety('once', (request) => approvalIds.push(request.approvalId), evidence),
+      operatorSafety(
+        'once',
+        (request) => {
+          approvalIds.push(request.approvalId);
+          receiver = 'buddy-panel';
+        },
+        evidence,
+      ),
       {
         name: 'type_text',
         args: { text: 'hello' },
@@ -460,6 +524,9 @@ describe('ComputerUseOperator', () => {
     const evidence: LiveDesktopEvidencePort = {
       receiverIdentity: vi.fn(async () => receiver),
       restoreReceiverIdentity,
+      receiverCaptureScreenIndex: () => 0,
+      prepareTypeTextPostcondition: async () => 'proof-target-field',
+      verifyTypeTextPostcondition: async () => true,
       fingerprint: vi.fn(async () => 'stable-visual-state'),
     };
     const typeText = vi.fn(async () => undefined);
@@ -491,12 +558,101 @@ describe('ComputerUseOperator', () => {
     expect(typeText).toHaveBeenCalledWith('hello');
   });
 
+  it('does not dispatch text when a private receiver-bound postcondition cannot be armed', async () => {
+    const typeText = vi.fn(async () => undefined);
+    const outcomes: ComputerActionOutcomeEntry[] = [];
+    const evidence: LiveDesktopEvidencePort = {
+      receiverIdentity: async () => 'target-field',
+      receiverCaptureScreenIndex: () => 0,
+      prepareTypeTextPostcondition: vi.fn(async () => null),
+      verifyTypeTextPostcondition: vi.fn(async () => true),
+      fingerprint: async () => 'stable-receiver',
+    };
+    const safety = operatorSafety('once', undefined, evidence);
+    safety.gate = liveGate(
+      ['approval-proof'],
+      () => undefined,
+      (entry) => outcomes.push(entry),
+    );
+    const operator = actionOperator(
+      {
+        capture: async () => [CAPTURE],
+        click: async () => undefined,
+        typeText,
+        pressKeys: async () => undefined,
+        inspect: async () => null,
+        inspectFocused: async () => null,
+        readPendingPayload: async () => [],
+        dispose: async () => undefined,
+      },
+      safety,
+      { name: 'type_text', args: { text: 'hello' } },
+    );
+
+    await expect(operator.run('type hello')).resolves.toMatchObject({
+      ok: false,
+      actions: 0,
+      summary:
+        'literal text input is unavailable because its exact receiver-bound result cannot be verified; no text was sent',
+    });
+    expect(typeText).not.toHaveBeenCalled();
+    expect(outcomes.map((entry) => entry.type)).toEqual(['computer_action_failed']);
+  });
+
+  it('journals text as failed when native input returns without the intended edit landing', async () => {
+    const typeText = vi.fn(async () => undefined);
+    const outcomes: ComputerActionOutcomeEntry[] = [];
+    const prepareTypeTextPostcondition = vi.fn(async () => 'opaque-proof');
+    const verifyTypeTextPostcondition = vi.fn(async (proof: string) => {
+      expect(proof).toBe('opaque-proof');
+      return false;
+    });
+    const safety = operatorSafety('once', undefined, {
+      receiverIdentity: async () => 'target-field',
+      receiverCaptureScreenIndex: () => 0,
+      prepareTypeTextPostcondition,
+      verifyTypeTextPostcondition,
+      fingerprint: async () => 'stable-receiver',
+    });
+    safety.gate = liveGate(
+      ['approval-proof'],
+      () => undefined,
+      (entry) => outcomes.push(entry),
+    );
+    const operator = actionOperator(
+      {
+        capture: async () => [CAPTURE],
+        click: async () => undefined,
+        typeText,
+        pressKeys: async () => undefined,
+        inspect: async () => null,
+        inspectFocused: async () => null,
+        readPendingPayload: async () => [],
+        dispose: async () => undefined,
+      },
+      safety,
+      { name: 'type_text', args: { text: 'hello' } },
+    );
+
+    await expect(operator.run('type hello')).resolves.toMatchObject({
+      ok: false,
+      actions: 0,
+      summary:
+        'the exact focused control did not confirm the intended text edit, so the action failed closed',
+    });
+    expect(prepareTypeTextPostcondition).toHaveBeenCalledWith('target-field', 'hello');
+    expect(typeText).toHaveBeenCalledWith('hello');
+    expect(verifyTypeTextPostcondition).toHaveBeenCalledOnce();
+    expect(outcomes.map((entry) => entry.type)).toEqual(['computer_action_failed']);
+  });
+
   it('does not trust a successful restore call without an exact receiver re-query match', async () => {
     let receiver = 'target-field';
     const restoreReceiverIdentity = vi.fn(async () => true);
     const evidence: LiveDesktopEvidencePort = {
       receiverIdentity: vi.fn(async () => receiver),
       restoreReceiverIdentity,
+      receiverCaptureScreenIndex: () => 0,
       fingerprint: vi.fn(async () => 'stable-visual-state'),
     };
     const typeText = vi.fn(async () => undefined);
@@ -711,8 +867,9 @@ describe('parseTypeTextArgs', () => {
     expect(parseTypeTextArgs({ text: 'x'.repeat(10_000) }).ok).toBe(true);
   });
 
-  it('rejects non-strings and over-long text', () => {
-    const error = 'text must be at most 10000 characters';
+  it('rejects empty, non-string, and over-long text', () => {
+    const error = 'text must contain 1 to 10000 characters';
+    expect(parseTypeTextArgs({ text: '' })).toEqual({ ok: false, error });
     expect(parseTypeTextArgs({ text: 42 })).toEqual({ ok: false, error });
     expect(parseTypeTextArgs({})).toEqual({ ok: false, error });
     expect(parseTypeTextArgs({ text: 'x'.repeat(10_001) })).toEqual({ ok: false, error });

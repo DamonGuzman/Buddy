@@ -84,6 +84,7 @@ export interface ComputerUseDebugDeps {
   listGrants(): ApprovalGrant[] | Promise<ApprovalGrant[]>;
   resolveAgentApproval(
     agentId: string,
+    approvalId: string,
     verdict: 'once' | 'always' | 'deny',
   ): boolean | Promise<boolean>;
 }
@@ -180,7 +181,10 @@ const ROUTES: Record<string, RouteHandler> = {
   ...HOVER_ROUTES,
 };
 
-const DYNAMIC_ROUTES = ['POST /agents/:id/approve', 'POST /agents/:id/deny'] as const;
+const DYNAMIC_ROUTES = [
+  'POST /approvals/:approvalId/approve',
+  'POST /approvals/:approvalId/deny',
+] as const;
 
 /**
  * Start the debug server. Returns null when CLICKY_DEBUG !== '1', or when
@@ -218,12 +222,15 @@ export function startDebugServer(deps: ComputerUseDebugServerDeps): Server | nul
     const handler = ROUTES[`${req.method ?? 'GET'} ${path}`];
     if (!handler) {
       const approvalRoute =
-        req.method === 'POST' ? /^\/agents\/([^/]+)\/(approve|deny)$/.exec(path) : null;
+        req.method === 'POST' ? /^\/approvals\/([^/]+)\/(approve|deny)$/.exec(path) : null;
       if (approvalRoute) {
-        const encodedAgentId = approvalRoute[1];
+        const encodedApprovalId = approvalRoute[1];
         const routeAction = approvalRoute[2];
-        if (encodedAgentId !== undefined && (routeAction === 'approve' || routeAction === 'deny')) {
-          void resolveDebugApproval(deps, req, res, encodedAgentId, routeAction).catch(
+        if (
+          encodedApprovalId !== undefined &&
+          (routeAction === 'approve' || routeAction === 'deny')
+        ) {
+          void resolveDebugApproval(deps, req, res, encodedApprovalId, routeAction).catch(
             (err: unknown) => sendJson(res, 500, { error: String(err) }),
           );
         }
@@ -253,26 +260,28 @@ async function resolveDebugApproval(
   deps: ComputerUseDebugServerDeps,
   req: Parameters<RouteHandler>[1],
   res: Parameters<RouteHandler>[2],
-  encodedAgentId: string,
+  encodedApprovalId: string,
   action: 'approve' | 'deny',
 ): Promise<void> {
   if (!deps.computerUse) return sendJson(res, 503, { error: 'computer-use approvals not wired' });
-  let agentId: string;
+  let approvalId: string;
   try {
-    agentId = decodeURIComponent(encodedAgentId).trim();
+    approvalId = decodeURIComponent(encodedApprovalId).trim();
   } catch {
-    return sendJson(res, 400, { error: 'agent id is not valid URL encoding' });
+    return sendJson(res, 400, { error: 'approval id is not valid URL encoding' });
   }
-  if (!agentId) return sendJson(res, 400, { error: 'agent id is required' });
+  if (!approvalId) return sendJson(res, 400, { error: 'approval id is required' });
+  const body = asRecord(await readJsonBody(req));
+  const agentId = typeof body?.['agentId'] === 'string' ? body['agentId'].trim() : '';
+  if (!agentId) return sendJson(res, 400, { error: 'exact agentId is required' });
   let verdict: 'once' | 'always' | 'deny' = 'deny';
   if (action === 'approve') {
-    const body = asRecord(await readJsonBody(req));
     const requested = body?.['verdict'] ?? 'once';
     if (requested !== 'once' && requested !== 'always')
       return sendJson(res, 400, { error: "approve verdict must be 'once' or 'always'" });
     verdict = requested;
   }
-  const resolved = await deps.computerUse.resolveAgentApproval(agentId, verdict);
+  const resolved = await deps.computerUse.resolveAgentApproval(agentId, approvalId, verdict);
   sendJson(
     res,
     resolved ? 200 : 404,

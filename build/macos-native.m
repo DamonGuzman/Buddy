@@ -1,6 +1,7 @@
 #import <AppKit/AppKit.h>
 #import <ApplicationServices/ApplicationServices.h>
 #import <CoreGraphics/CoreGraphics.h>
+#import <CommonCrypto/CommonDigest.h>
 #import <objc/runtime.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -213,6 +214,40 @@ static NSString *best_ax_name(AXUIElementRef element) {
 static NSMutableDictionary<NSString *, BuddyFocusedReceiver *> *focused_receiver_tokens;
 static NSMutableArray<NSString *> *focused_receiver_order;
 
+@interface BuddyTypeTextProof : NSObject
+@property(nonatomic, strong, readonly) BuddyFocusedReceiver *receiver;
+@property(nonatomic, copy, readonly) NSData *expectedDigest;
+@property(nonatomic, assign, readonly) NSUInteger expectedLength;
+@property(nonatomic, assign, readonly) NSUInteger insertionEnd;
+@property(nonatomic, assign, readonly) CFAbsoluteTime expiresAt;
+- (instancetype)initWithReceiver:(BuddyFocusedReceiver *)receiver
+                   expectedDigest:(NSData *)expectedDigest
+                   expectedLength:(NSUInteger)expectedLength
+                     insertionEnd:(NSUInteger)insertionEnd
+                        expiresAt:(CFAbsoluteTime)expiresAt;
+@end
+
+@implementation BuddyTypeTextProof
+- (instancetype)initWithReceiver:(BuddyFocusedReceiver *)receiver
+                   expectedDigest:(NSData *)expectedDigest
+                   expectedLength:(NSUInteger)expectedLength
+                     insertionEnd:(NSUInteger)insertionEnd
+                        expiresAt:(CFAbsoluteTime)expiresAt {
+  self = [super init];
+  if (self != nil) {
+    _receiver = receiver;
+    _expectedDigest = [expectedDigest copy];
+    _expectedLength = expectedLength;
+    _insertionEnd = insertionEnd;
+    _expiresAt = expiresAt;
+  }
+  return self;
+}
+@end
+
+static NSMutableDictionary<NSString *, BuddyTypeTextProof *> *type_text_proof_tokens;
+static NSMutableArray<NSString *> *type_text_proof_order;
+
 static NSString *retain_focused_receiver(
   AXUIElementRef app,
   AXUIElementRef window,
@@ -235,6 +270,137 @@ static NSString *retain_focused_receiver(
     }
     return token;
   }
+}
+
+static bool current_focus_matches_receiver(
+  BuddyFocusedReceiver *receiver,
+  AXUIElementRef *matched_focus
+) {
+  if (receiver == nil || receiver.pid <= 0 || !AXIsProcessTrusted()) return false;
+  NSRunningApplication *frontmost = NSWorkspace.sharedWorkspace.frontmostApplication;
+  if (frontmost == nil || frontmost.processIdentifier != receiver.pid) return false;
+  AXUIElementSetMessagingTimeout(receiver.app, 0.15);
+  CFTypeRef window_value = NULL;
+  CFTypeRef focus_value = NULL;
+  AXError window_error = AXUIElementCopyAttributeValue(
+    receiver.app, kAXFocusedWindowAttribute, &window_value
+  );
+  AXError focus_error = AXUIElementCopyAttributeValue(
+    receiver.app, kAXFocusedUIElementAttribute, &focus_value
+  );
+  bool matches = window_error == kAXErrorSuccess && focus_error == kAXErrorSuccess &&
+    window_value != NULL && focus_value != NULL &&
+    CFGetTypeID(window_value) == AXUIElementGetTypeID() &&
+    CFGetTypeID(focus_value) == AXUIElementGetTypeID() &&
+    CFEqual(window_value, receiver.window) && CFEqual(focus_value, receiver.focus);
+  if (window_value != NULL) CFRelease(window_value);
+  if (!matches) {
+    if (focus_value != NULL) CFRelease(focus_value);
+    return false;
+  }
+  if (matched_focus != NULL) {
+    *matched_focus = (AXUIElementRef)focus_value;
+  } else {
+    CFRelease(focus_value);
+  }
+  return true;
+}
+
+static bool copy_focused_text_state(
+  AXUIElementRef focus,
+  NSString **value,
+  CFRange *selection
+) {
+  CFTypeRef value_attribute = NULL;
+  CFTypeRef selection_attribute = NULL;
+  AXError value_error = AXUIElementCopyAttributeValue(
+    focus, kAXValueAttribute, &value_attribute
+  );
+  AXError selection_error = AXUIElementCopyAttributeValue(
+    focus, kAXSelectedTextRangeAttribute, &selection_attribute
+  );
+  bool valid = value_error == kAXErrorSuccess && selection_error == kAXErrorSuccess &&
+    value_attribute != NULL && selection_attribute != NULL &&
+    CFGetTypeID(value_attribute) == CFStringGetTypeID() &&
+    CFGetTypeID(selection_attribute) == AXValueGetTypeID() &&
+    AXValueGetType((AXValueRef)selection_attribute) == kAXValueCFRangeType &&
+    AXValueGetValue((AXValueRef)selection_attribute, kAXValueCFRangeType, selection);
+  if (valid) {
+    NSString *string = (__bridge NSString *)value_attribute;
+    valid = selection->location >= 0 && selection->length >= 0 &&
+      (NSUInteger)selection->location <= string.length &&
+      (NSUInteger)selection->length <= string.length - (NSUInteger)selection->location;
+    if (valid) *value = [string copy];
+  }
+  if (value_attribute != NULL) CFRelease(value_attribute);
+  if (selection_attribute != NULL) CFRelease(selection_attribute);
+  return valid;
+}
+
+static void remove_expired_type_text_proofs(CFAbsoluteTime now) {
+  for (NSInteger index = (NSInteger)type_text_proof_order.count - 1; index >= 0; index--) {
+    NSString *token = type_text_proof_order[(NSUInteger)index];
+    BuddyTypeTextProof *proof = type_text_proof_tokens[token];
+    if (proof == nil || proof.expiresAt <= now) {
+      [type_text_proof_order removeObjectAtIndex:(NSUInteger)index];
+      [type_text_proof_tokens removeObjectForKey:token];
+    }
+  }
+}
+
+static void remove_type_text_proof(NSString *token, BuddyTypeTextProof *proof) {
+  @synchronized([BuddyTypeTextProof class]) {
+    if (type_text_proof_tokens[token] != proof) return;
+    [type_text_proof_tokens removeObjectForKey:token];
+    [type_text_proof_order removeObject:token];
+  }
+}
+
+static NSString *retain_type_text_proof(
+  BuddyFocusedReceiver *receiver,
+  NSData *expected_digest,
+  NSUInteger expected_length,
+  NSUInteger insertion_end
+) {
+  @synchronized([BuddyTypeTextProof class]) {
+    if (type_text_proof_tokens == nil) {
+      type_text_proof_tokens = [NSMutableDictionary dictionary];
+      type_text_proof_order = [NSMutableArray array];
+    }
+    remove_expired_type_text_proofs(CFAbsoluteTimeGetCurrent());
+    NSString *token = NSUUID.UUID.UUIDString;
+    type_text_proof_tokens[token] = [[BuddyTypeTextProof alloc]
+      initWithReceiver:receiver
+      expectedDigest:expected_digest
+      expectedLength:expected_length
+      insertionEnd:insertion_end
+      expiresAt:CFAbsoluteTimeGetCurrent() + 2.0];
+    [type_text_proof_order addObject:token];
+    while (type_text_proof_order.count > 32) {
+      NSString *expired = type_text_proof_order.firstObject;
+      [type_text_proof_order removeObjectAtIndex:0];
+      [type_text_proof_tokens removeObjectForKey:expired];
+    }
+    return token;
+  }
+}
+
+static NSData *digest_utf16_string(NSString *value) {
+  CC_SHA256_CTX context;
+  if (CC_SHA256_Init(&context) != 1) return nil;
+  UniChar buffer[1024];
+  NSUInteger offset = 0;
+  while (offset < value.length) {
+    NSUInteger length = MIN((NSUInteger)1024, value.length - offset);
+    [value getCharacters:buffer range:NSMakeRange(offset, length)];
+    if (CC_SHA256_Update(&context, buffer, (CC_LONG)(length * sizeof(UniChar))) != 1) {
+      return nil;
+    }
+    offset += length;
+  }
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+  if (CC_SHA256_Final(digest, &context) != 1) return nil;
+  return [NSData dataWithBytes:digest length:sizeof(digest)];
 }
 
 /** Bounded native identity of the receiver that would get keyboard input. */
@@ -352,6 +518,129 @@ static napi_value restore_focused_receiver(napi_env env, napi_callback_info info
     AXUIElementPerformAction(receiver.window, kAXRaiseAction);
     AXUIElementSetAttributeValue(receiver.app, kAXFocusedWindowAttribute, receiver.window);
     AXUIElementSetAttributeValue(receiver.app, kAXFocusedUIElementAttribute, receiver.focus);
+    napi_get_boolean(env, true, &result);
+    return result;
+  }
+}
+
+/** Prepare an opaque, receiver-bound postcondition for a text insertion. */
+static napi_value prepare_focused_receiver_type_text(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1] = { NULL };
+  size_t input_length = 0;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != 0 || argc < 1 ||
+      napi_get_value_string_utf8(env, argv[0], NULL, 0, &input_length) != 0 ||
+      input_length == 0 || input_length > 65536) {
+    return json_string(env, @{ @"ok": @NO, @"error": @"invalid_request" });
+  }
+  char *input_buffer = calloc(input_length + 1, 1);
+  if (input_buffer == NULL ||
+      napi_get_value_string_utf8(env, argv[0], input_buffer, input_length + 1, &input_length) != 0) {
+    free(input_buffer);
+    return json_string(env, @{ @"ok": @NO, @"error": @"invalid_request" });
+  }
+  @autoreleasepool {
+    NSData *data = [NSData dataWithBytesNoCopy:input_buffer length:input_length freeWhenDone:YES];
+    id parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (![parsed isKindOfClass:NSDictionary.class]) {
+      return json_string(env, @{ @"ok": @NO, @"error": @"invalid_request" });
+    }
+    NSDictionary *request = parsed;
+    NSString *restore_token = request[@"restoreToken"];
+    NSString *text = request[@"text"];
+    if (![restore_token isKindOfClass:NSString.class] || restore_token.length == 0 ||
+        restore_token.length > 128 || ![text isKindOfClass:NSString.class] ||
+        text.length == 0 || text.length > 10000) {
+      return json_string(env, @{ @"ok": @NO, @"error": @"invalid_request" });
+    }
+    BuddyFocusedReceiver *receiver = nil;
+    @synchronized([BuddyFocusedReceiver class]) {
+      receiver = focused_receiver_tokens[restore_token];
+    }
+    AXUIElementRef focus = NULL;
+    if (!current_focus_matches_receiver(receiver, &focus)) {
+      return json_string(env, @{ @"ok": @NO, @"error": @"receiver_mismatch" });
+    }
+    NSString *current_value = nil;
+    CFRange selection = CFRangeMake(0, 0);
+    bool has_state = copy_focused_text_state(focus, &current_value, &selection);
+    CFRelease(focus);
+    if (!has_state) {
+      return json_string(env, @{ @"ok": @NO, @"error": @"text_state_unavailable" });
+    }
+    // Bound transient memory while handling documents whose AXValue may expose
+    // their entire contents. The proof itself stores only a one-way digest.
+    if (current_value.length > 1000000 || current_value.length + text.length > 1000000) {
+      return json_string(env, @{ @"ok": @NO, @"error": @"text_state_too_large" });
+    }
+    NSRange replacement = NSMakeRange(
+      (NSUInteger)selection.location, (NSUInteger)selection.length
+    );
+    NSString *expected = [current_value stringByReplacingCharactersInRange:replacement
+                                                                 withString:text];
+    NSUInteger insertion_end = (NSUInteger)selection.location + text.length;
+    NSData *expected_digest = digest_utf16_string(expected);
+    if (expected_digest == nil) {
+      return json_string(env, @{ @"ok": @NO, @"error": @"digest_failed" });
+    }
+    NSString *proof_token = retain_type_text_proof(
+      receiver, expected_digest, expected.length, insertion_end
+    );
+    return json_string(env, @{ @"ok": @YES, @"proofToken": proof_token });
+  }
+}
+
+/** Verify and consume a successful opaque text-insertion postcondition. */
+static napi_value verify_focused_receiver_type_text(napi_env env, napi_callback_info info) {
+  napi_value result = NULL;
+  napi_get_boolean(env, false, &result);
+  size_t argc = 1;
+  napi_value argv[1] = { NULL };
+  size_t token_length = 0;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != 0 || argc < 1 ||
+      napi_get_value_string_utf8(env, argv[0], NULL, 0, &token_length) != 0 ||
+      token_length == 0 || token_length > 128) {
+    return result;
+  }
+  char token_buffer[129] = { 0 };
+  if (napi_get_value_string_utf8(
+        env, argv[0], token_buffer, sizeof(token_buffer), &token_length
+      ) != 0) {
+    return result;
+  }
+  @autoreleasepool {
+    NSString *token = [[NSString alloc] initWithBytes:token_buffer
+                                               length:token_length
+                                             encoding:NSUTF8StringEncoding];
+    BuddyTypeTextProof *proof = nil;
+    @synchronized([BuddyTypeTextProof class]) {
+      if (type_text_proof_tokens == nil) return result;
+      remove_expired_type_text_proofs(CFAbsoluteTimeGetCurrent());
+      proof = type_text_proof_tokens[token];
+    }
+    if (proof == nil) return result;
+    AXUIElementRef focus = NULL;
+    if (!current_focus_matches_receiver(proof.receiver, &focus)) {
+      remove_type_text_proof(token, proof);
+      return result;
+    }
+    NSString *current_value = nil;
+    CFRange selection = CFRangeMake(0, 0);
+    bool has_state = copy_focused_text_state(focus, &current_value, &selection);
+    CFRelease(focus);
+    if (!has_state) {
+      remove_type_text_proof(token, proof);
+      return result;
+    }
+    NSData *current_digest = current_value.length == proof.expectedLength
+      ? digest_utf16_string(current_value)
+      : nil;
+    bool verified = current_digest != nil &&
+      [current_digest isEqualToData:proof.expectedDigest] &&
+      selection.location >= 0 && (NSUInteger)selection.location == proof.insertionEnd &&
+      selection.length == 0;
+    if (!verified) return result;
+    remove_type_text_proof(token, proof);
     napi_get_boolean(env, true, &result);
     return result;
   }
@@ -536,6 +825,274 @@ static napi_value request_listen_event_access(napi_env env, napi_callback_info i
   return result;
 }
 
+static NSDictionary *input_failure(NSString *error) {
+  return @{ @"ok": @NO, @"error": error };
+}
+
+static bool finite_number(id value, double *result) {
+  if (![value isKindOfClass:NSNumber.class]) return false;
+  double number = [value doubleValue];
+  if (!isfinite(number)) return false;
+  *result = number;
+  return true;
+}
+
+static CGEventRef create_mouse_event(
+  CGEventType type,
+  CGPoint point,
+  CGMouseButton button,
+  int64_t click_state
+) {
+  CGEventRef event = CGEventCreateMouseEvent(NULL, type, point, button);
+  if (event == NULL) return NULL;
+  if (click_state > 0) {
+    CGEventSetIntegerValueField(event, kCGMouseEventClickState, click_state);
+  }
+  return event;
+}
+
+static CGEventRef create_keyboard_event(CGKeyCode code, bool down, CGEventFlags flags) {
+  CGEventRef event = CGEventCreateKeyboardEvent(NULL, code, down);
+  if (event == NULL) return NULL;
+  CGEventSetFlags(event, flags);
+  return event;
+}
+
+static void release_events(CGEventRef *events, NSUInteger count) {
+  for (NSUInteger index = 0; index < count; index++) {
+    if (events[index] != NULL) CFRelease(events[index]);
+  }
+}
+
+static NSDictionary<NSString *, NSNumber *> *mac_key_codes(void) {
+  static NSDictionary<NSString *, NSNumber *> *codes;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    codes = @{
+      @"A": @0, @"S": @1, @"D": @2, @"F": @3, @"H": @4, @"G": @5,
+      @"Z": @6, @"X": @7, @"C": @8, @"V": @9, @"B": @11, @"Q": @12,
+      @"W": @13, @"E": @14, @"R": @15, @"Y": @16, @"T": @17,
+      @"1": @18, @"2": @19, @"3": @20, @"4": @21, @"6": @22, @"5": @23,
+      @"=": @24, @"9": @25, @"7": @26, @"-": @27, @"8": @28, @"0": @29,
+      @"]": @30, @"O": @31, @"U": @32, @"[": @33, @"I": @34, @"P": @35,
+      @"ENTER": @36, @"RETURN": @36, @"L": @37, @"J": @38, @"'": @39,
+      @"K": @40, @";": @41, @"\\": @42, @",": @43, @"/": @44, @"N": @45,
+      @"M": @46, @".": @47, @"TAB": @48, @"SPACE": @49, @"BACKSPACE": @51,
+      @"ESC": @53, @"ESCAPE": @53, @"CMD": @55, @"COMMAND": @55,
+      @"META": @55, @"WIN": @55, @"SHIFT": @56, @"CAPSLOCK": @57,
+      @"ALT": @58, @"OPTION": @58, @"CTRL": @59, @"CONTROL": @59,
+      @"RIGHTSHIFT": @60, @"RIGHTALT": @61, @"RIGHTOPTION": @61,
+      @"RIGHTCTRL": @62, @"RIGHTCONTROL": @62, @"FN": @63, @"F17": @64,
+      @"F18": @79, @"F19": @80, @"F20": @90, @"F5": @96, @"F6": @97,
+      @"F7": @98, @"F3": @99, @"F8": @100, @"F9": @101, @"F11": @103,
+      @"F13": @105, @"F16": @106, @"F14": @107, @"F10": @109,
+      @"F12": @111, @"F15": @113, @"HOME": @115, @"PAGEUP": @116,
+      @"DELETE": @117, @"F4": @118, @"END": @119, @"F2": @120,
+      @"PAGEDOWN": @121, @"F1": @122, @"LEFT": @123, @"RIGHT": @124,
+      @"DOWN": @125, @"UP": @126,
+    };
+  });
+  return codes;
+}
+
+static CGEventFlags modifier_flag(CGKeyCode code) {
+  switch (code) {
+    case 55: return kCGEventFlagMaskCommand;
+    case 56: case 60: return kCGEventFlagMaskShift;
+    case 58: case 61: return kCGEventFlagMaskAlternate;
+    case 59: case 62: return kCGEventFlagMaskControl;
+    default: return 0;
+  }
+}
+
+static NSDictionary *perform_input_request(NSDictionary *request) {
+  if (!AXIsProcessTrusted()) return input_failure(@"accessibility_permission_required");
+  if (!CGPreflightPostEventAccess()) return input_failure(@"input_post_permission_required");
+  NSString *action = request[@"action"];
+  if (![action isKindOfClass:NSString.class]) return input_failure(@"invalid_action");
+
+  if ([action isEqualToString:@"move"] || [action isEqualToString:@"click"]) {
+    double x = 0;
+    double y = 0;
+    if (!finite_number(request[@"x"], &x) || !finite_number(request[@"y"], &y)) {
+      return input_failure(@"invalid_coordinates");
+    }
+    CGPoint point = CGPointMake(round(x), round(y));
+    if ([action isEqualToString:@"move"]) {
+      CGEventRef event = create_mouse_event(
+        kCGEventMouseMoved, point, kCGMouseButtonLeft, 0
+      );
+      if (event == NULL) return input_failure(@"event_creation_failed");
+      CGEventPost(kCGHIDEventTap, event);
+      CFRelease(event);
+      return @{ @"ok": @YES };
+    }
+
+    NSString *button_name = request[@"button"];
+    NSNumber *count_number = request[@"count"];
+    NSInteger count = [count_number isKindOfClass:NSNumber.class] ? count_number.integerValue : 0;
+    CGMouseButton button;
+    CGEventType down;
+    CGEventType up;
+    if ([button_name isEqualToString:@"left"]) {
+      button = kCGMouseButtonLeft; down = kCGEventLeftMouseDown; up = kCGEventLeftMouseUp;
+    } else if ([button_name isEqualToString:@"right"]) {
+      button = kCGMouseButtonRight; down = kCGEventRightMouseDown; up = kCGEventRightMouseUp;
+    } else if ([button_name isEqualToString:@"middle"]) {
+      button = kCGMouseButtonCenter; down = kCGEventOtherMouseDown; up = kCGEventOtherMouseUp;
+    } else {
+      return input_failure(@"invalid_mouse_button");
+    }
+    if (count != 1 && count != 2) return input_failure(@"invalid_click_count");
+    CGEventRef events[5] = { NULL, NULL, NULL, NULL, NULL };
+    NSUInteger event_count = 1 + (NSUInteger)count * 2;
+    events[0] = create_mouse_event(kCGEventMouseMoved, point, button, 0);
+    for (NSInteger index = 0; index < count; index++) {
+      events[1 + (NSUInteger)index * 2] = create_mouse_event(down, point, button, index + 1);
+      events[2 + (NSUInteger)index * 2] = create_mouse_event(up, point, button, index + 1);
+    }
+    for (NSUInteger index = 0; index < event_count; index++) {
+      if (events[index] == NULL) {
+        release_events(events, event_count);
+        return input_failure(@"event_creation_failed");
+      }
+    }
+    for (NSUInteger index = 0; index < event_count; index++) {
+      CGEventPost(kCGHIDEventTap, events[index]);
+    }
+    release_events(events, event_count);
+    return @{ @"ok": @YES };
+  }
+
+  if ([action isEqualToString:@"scroll"]) {
+    double delta_x = 0;
+    double delta_y = 0;
+    if (!finite_number(request[@"deltaX"], &delta_x) ||
+        !finite_number(request[@"deltaY"], &delta_y)) {
+      return input_failure(@"invalid_scroll_delta");
+    }
+    CGEventRef event = CGEventCreateScrollWheelEvent(
+      NULL, kCGScrollEventUnitPixel, 2, (int32_t)round(delta_y), (int32_t)round(delta_x)
+    );
+    if (event == NULL) return input_failure(@"event_creation_failed");
+    CGEventPost(kCGHIDEventTap, event);
+    CFRelease(event);
+    return @{ @"ok": @YES };
+  }
+
+  if ([action isEqualToString:@"type_text"]) {
+    NSString *text = request[@"text"];
+    if (![text isKindOfClass:NSString.class] || text.length == 0 || text.length > 10000) {
+      return input_failure(@"invalid_text");
+    }
+    NSUInteger capacity = 2 * ((text.length + 18) / 19);
+    CGEventRef *events = calloc(capacity, sizeof(CGEventRef));
+    if (events == NULL) return input_failure(@"event_allocation_failed");
+    NSUInteger event_count = 0;
+    NSUInteger offset = 0;
+    while (offset < text.length) {
+      NSUInteger length = MIN((NSUInteger)20, text.length - offset);
+      if (offset + length < text.length && length > 0 &&
+          CFStringIsSurrogateHighCharacter([text characterAtIndex:offset + length - 1])) {
+        length -= 1;
+      }
+      if (length == 0) length = MIN((NSUInteger)2, text.length - offset);
+      UniChar characters[20];
+      [text getCharacters:characters range:NSMakeRange(offset, length)];
+      CGEventRef down = CGEventCreateKeyboardEvent(NULL, 0, true);
+      CGEventRef up = CGEventCreateKeyboardEvent(NULL, 0, false);
+      if (down == NULL || up == NULL) {
+        if (down != NULL) CFRelease(down);
+        if (up != NULL) CFRelease(up);
+        release_events(events, event_count);
+        free(events);
+        return input_failure(@"event_creation_failed");
+      }
+      CGEventKeyboardSetUnicodeString(down, length, characters);
+      CGEventKeyboardSetUnicodeString(up, length, characters);
+      events[event_count++] = down;
+      events[event_count++] = up;
+      offset += length;
+    }
+    for (NSUInteger index = 0; index < event_count; index++) {
+      CGEventPost(kCGHIDEventTap, events[index]);
+    }
+    release_events(events, event_count);
+    free(events);
+    return @{ @"ok": @YES };
+  }
+
+  if ([action isEqualToString:@"press_keys"]) {
+    NSArray *keys = request[@"keys"];
+    if (![keys isKindOfClass:NSArray.class] || keys.count < 1 || keys.count > 8) {
+      return input_failure(@"invalid_keys");
+    }
+    CGKeyCode codes[8];
+    for (NSUInteger index = 0; index < keys.count; index++) {
+      if (![keys[index] isKindOfClass:NSString.class]) return input_failure(@"invalid_keys");
+      NSString *name = [keys[index] stringByTrimmingCharactersInSet:
+        NSCharacterSet.whitespaceAndNewlineCharacterSet].uppercaseString;
+      NSNumber *code = mac_key_codes()[name];
+      if (code == nil) return input_failure([@"unsupported_key:" stringByAppendingString:name]);
+      codes[index] = (CGKeyCode)code.unsignedShortValue;
+    }
+    CGEventFlags flags = 0;
+    CGEventRef events[16] = {
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+    };
+    for (NSUInteger index = 0; index < keys.count; index++) {
+      flags |= modifier_flag(codes[index]);
+      events[index] = create_keyboard_event(codes[index], true, flags);
+    }
+    for (NSUInteger index = keys.count; index > 0; index--) {
+      CGKeyCode code = codes[index - 1];
+      events[keys.count + (keys.count - index)] = create_keyboard_event(code, false, flags);
+      flags &= ~modifier_flag(code);
+    }
+    NSUInteger event_count = keys.count * 2;
+    for (NSUInteger index = 0; index < event_count; index++) {
+      if (events[index] == NULL) {
+        release_events(events, event_count);
+        return input_failure(@"event_creation_failed");
+      }
+    }
+    for (NSUInteger index = 0; index < event_count; index++) {
+      CGEventPost(kCGHIDEventTap, events[index]);
+    }
+    release_events(events, event_count);
+    return @{ @"ok": @YES };
+  }
+
+  return input_failure(@"unknown_action");
+}
+
+/** Post global input from the signed Buddy process so TCC evaluates Buddy. */
+static napi_value post_input(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value argv[1] = { NULL };
+  size_t input_length = 0;
+  if (napi_get_cb_info(env, info, &argc, argv, NULL, NULL) != 0 || argc < 1 ||
+      napi_get_value_string_utf8(env, argv[0], NULL, 0, &input_length) != 0 ||
+      input_length == 0 || input_length > 65536) {
+    return json_string(env, input_failure(@"invalid_request"));
+  }
+  char *input_buffer = calloc(input_length + 1, 1);
+  if (input_buffer == NULL ||
+      napi_get_value_string_utf8(env, argv[0], input_buffer, input_length + 1, &input_length) != 0) {
+    free(input_buffer);
+    return json_string(env, input_failure(@"invalid_request"));
+  }
+  @autoreleasepool {
+    NSData *data = [NSData dataWithBytesNoCopy:input_buffer length:input_length freeWhenDone:YES];
+    id request = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (![request isKindOfClass:NSDictionary.class]) {
+      return json_string(env, input_failure(@"invalid_request"));
+    }
+    return json_string(env, perform_input_request(request));
+  }
+}
+
 static NSScreen *screen_for_display_id(double requested_id) {
   for (NSScreen *screen in NSScreen.screens) {
     NSNumber *screen_number = screen.deviceDescription[@"NSScreenNumber"];
@@ -704,6 +1261,9 @@ napi_value napi_register_module_v1(napi_env env, napi_value exports) {
     { "queryAccessibility", 18, query_accessibility },
     { "queryFocusedReceiver", 20, query_focused_receiver },
     { "restoreFocusedReceiver", 22, restore_focused_receiver },
+    { "prepareFocusedReceiverTypeText", 30, prepare_focused_receiver_type_text },
+    { "verifyFocusedReceiverTypeText", 29, verify_focused_receiver_type_text },
+    { "postInput", 9, post_input },
   };
 
   for (size_t i = 0; i < sizeof(functions) / sizeof(functions[0]); i++) {

@@ -151,8 +151,8 @@ export function parseTypeTextArgs(value: unknown): ParsedArgs<TypeTextArgs> {
   const args = asRecord(value);
   if (args === null) return { ok: false, error: 'arguments were not valid json' };
   const text = args['text'];
-  if (typeof text !== 'string' || text.length > MAX_TYPE_TEXT_CHARS)
-    return { ok: false, error: 'text must be at most 10000 characters' };
+  if (typeof text !== 'string' || text.length < 1 || text.length > MAX_TYPE_TEXT_CHARS)
+    return { ok: false, error: 'text must contain 1 to 10000 characters' };
   return { ok: true, value: { text } };
 }
 
@@ -330,7 +330,7 @@ export class ComputerUseOperator {
         const parsed = parseClickArgs(args);
         if (!parsed.ok) return { error: parsed.error };
         const click = parsed.value;
-        return this.executeGated(
+        return await this.executeGated(
           {
             kind: 'click',
             x: click.x,
@@ -360,7 +360,7 @@ export class ComputerUseOperator {
       if (call.name === 'type_text') {
         const parsed = parseTypeTextArgs(args);
         if (!parsed.ok) return { error: parsed.error };
-        return this.executeGated(
+        return await this.executeGated(
           {
             kind: 'type',
             text: parsed.value.text,
@@ -375,7 +375,7 @@ export class ComputerUseOperator {
       if (call.name === 'press_keys') {
         const parsed = parsePressKeysArgs(args);
         if (!parsed.ok) return { error: parsed.error };
-        return this.executeGated(
+        return await this.executeGated(
           {
             kind: 'press_keys',
             keys: parsed.value.keys,
@@ -404,12 +404,20 @@ export class ComputerUseOperator {
       (action.kind === 'type' || action.kind === 'press_keys') &&
       !(action.kind === 'type' && isSecretLikeValue(action.text));
     let expectedReceiverIdentity: string | null = null;
+    let receiverScreenIndex: number | null = null;
     if (requiresReceiverIdentity) {
       expectedReceiverIdentity = await this.gateDriver.queryReceiverIdentity();
       if (expectedReceiverIdentity === null) {
         return {
           error:
             'live keyboard input is unavailable because the native focused receiver cannot be verified',
+        };
+      }
+      receiverScreenIndex = this.gateDriver.receiverScreenIndex(expectedReceiverIdentity);
+      if (receiverScreenIndex === null) {
+        return {
+          error:
+            'live keyboard input is unavailable because the focused receiver cannot be mapped to one captured display',
         };
       }
     }
@@ -419,6 +427,8 @@ export class ComputerUseOperator {
         : this.lastClickTarget,
       requiresReceiverIdentity,
       expectedReceiverIdentity,
+      receiverScreenIndex,
+      action.kind === 'press_keys',
     );
     const actionAbort = new AbortController();
     const parentSignal = this.options.signal;
@@ -437,12 +447,33 @@ export class ComputerUseOperator {
       taskClaim,
       action,
       driver: this.gateDriver,
-      ...(screenIndex === undefined ? {} : { screenIndex }),
+      ...(action.kind === 'click'
+        ? { screenIndex: screenIndex ?? 0 }
+        : receiverScreenIndex === null
+          ? {}
+          : { screenIndex: receiverScreenIndex }),
       signal: actionAbort.signal,
     };
+    const verifiedDispatch =
+      action.kind === 'type' && requiresReceiverIdentity
+        ? async (): Promise<void> => {
+            const proofToken = await this.gateDriver.prepareTypeTextPostcondition(action.text);
+            if (proofToken === null) {
+              throw new Error(
+                'literal text input is unavailable because its exact receiver-bound result cannot be verified; no text was sent',
+              );
+            }
+            await dispatch();
+            if (!(await this.gateDriver.verifyTypeTextPostcondition(proofToken))) {
+              throw new Error(
+                'the exact focused control did not confirm the intended text edit, so the action failed closed',
+              );
+            }
+          }
+        : dispatch;
 
     try {
-      let result = await this.options.gate.execute(request, dispatch);
+      let result = await this.options.gate.execute(request, verifiedDispatch);
       if (result.kind !== 'escalated') return closedGateOutcome(result, success);
 
       let escalation = result;
@@ -527,6 +558,8 @@ class LiveActionGateDriver implements GateDriverPort {
   private anchor: { screenIndex: number; x: number; y: number } | null = null;
   private requiresReceiverIdentity = false;
   private expectedReceiverIdentity: string | null = null;
+  private receiverCaptureScreenIndex: number | null = null;
+  private requiresReceiverVisualEvidence = false;
 
   constructor(
     private readonly driver: ComputerDriver,
@@ -539,15 +572,23 @@ class LiveActionGateDriver implements GateDriverPort {
     anchor: { screenIndex: number; x: number; y: number } | null,
     requiresReceiverIdentity: boolean,
     expectedReceiverIdentity: string | null,
+    receiverCaptureScreenIndex: number | null,
+    requiresReceiverVisualEvidence: boolean,
   ): void {
     this.anchor = anchor;
     this.requiresReceiverIdentity = requiresReceiverIdentity;
     this.expectedReceiverIdentity = expectedReceiverIdentity;
+    this.receiverCaptureScreenIndex = receiverCaptureScreenIndex;
+    this.requiresReceiverVisualEvidence = requiresReceiverVisualEvidence;
     this.approvalEvidence = null;
   }
 
   async queryReceiverIdentity(): Promise<string | null> {
     return (await this.evidence.receiverIdentity?.()) ?? null;
+  }
+
+  receiverScreenIndex(identity: string): number | null {
+    return this.evidence.receiverCaptureScreenIndex?.(this.currentCaptures(), identity) ?? null;
   }
 
   async matchesExpectedReceiver(): Promise<boolean> {
@@ -561,6 +602,21 @@ class LiveActionGateDriver implements GateDriverPort {
     const restored =
       (await this.evidence.restoreReceiverIdentity?.(this.expectedReceiverIdentity)) ?? false;
     return restored && (await this.matchesExpectedReceiver());
+  }
+
+  async prepareTypeTextPostcondition(text: string): Promise<string | null> {
+    if (!this.requiresReceiverIdentity || this.expectedReceiverIdentity === null) return null;
+    // The native provider re-validates the retained receiver while taking its
+    // private before-state. No control value or selection crosses this port.
+    return (
+      (await this.evidence.prepareTypeTextPostcondition?.(this.expectedReceiverIdentity, text)) ??
+      null
+    );
+  }
+
+  async verifyTypeTextPostcondition(proofToken: string): Promise<boolean> {
+    if (!this.requiresReceiverIdentity || this.expectedReceiverIdentity === null) return false;
+    return (await this.evidence.verifyTypeTextPostcondition?.(proofToken)) ?? false;
   }
 
   async capture(): Promise<CaptureResult[]> {
@@ -583,27 +639,59 @@ class LiveActionGateDriver implements GateDriverPort {
     // Capture and query native focus inside every inspection. The approval
     // image, visual fingerprint, and keyboard receiver describe one bounded
     // pre-dispatch observation.
-    const captures = await this.driver.capture();
-    this.replaceCaptures(captures);
-    this.approvalEvidence = [...captures];
-    const facts =
-      target === null ? await this.driver.inspectFocused() : await this.driver.inspect(target);
-    const payloadFields = await this.driver.readPendingPayload(target);
-    const current = this.currentCaptures();
-    const receiverIdentity = this.requiresReceiverIdentity
+    const receiverBeforeCapture = this.requiresReceiverIdentity
       ? await this.queryReceiverIdentity()
       : null;
     if (
       this.requiresReceiverIdentity &&
-      (receiverIdentity === null || receiverIdentity !== this.expectedReceiverIdentity)
+      (receiverBeforeCapture === null || receiverBeforeCapture !== this.expectedReceiverIdentity)
     ) {
       throw new Error('the original native desktop receiver is no longer focused');
+    }
+    const captures = await this.driver.capture();
+    this.replaceCaptures(captures);
+    const facts =
+      target === null ? await this.driver.inspectFocused() : await this.driver.inspect(target);
+    const payloadFields = await this.driver.readPendingPayload(target);
+    const current = this.currentCaptures();
+    const receiverAfterCapture = this.requiresReceiverIdentity
+      ? await this.queryReceiverIdentity()
+      : null;
+    if (
+      this.requiresReceiverIdentity &&
+      (receiverAfterCapture === null ||
+        receiverAfterCapture !== receiverBeforeCapture ||
+        receiverAfterCapture !== this.expectedReceiverIdentity)
+    ) {
+      throw new Error('the native desktop receiver changed during capture');
+    }
+    if (this.requiresReceiverIdentity) {
+      const receiverScreenIndex =
+        receiverAfterCapture === null
+          ? null
+          : (this.evidence.receiverCaptureScreenIndex?.(current, receiverAfterCapture) ?? null);
+      const receiverCapture = current.find(
+        (capture) => capture.meta.screenIndex === receiverScreenIndex,
+      );
+      if (receiverScreenIndex === null || !receiverCapture) {
+        throw new Error('the native desktop receiver cannot be mapped to one captured display');
+      }
+      if (receiverScreenIndex !== this.receiverCaptureScreenIndex) {
+        throw new Error('the native desktop receiver changed captured displays');
+      }
+      // ActionGate selects the first capture for focused keyboard actions.
+      // Provide only the uniquely mapped receiver display, from this exact
+      // observation, so the human never approves an unrelated screen0 image.
+      this.approvalEvidence = [receiverCapture];
+    } else {
+      this.approvalEvidence = [...captures];
     }
     const fingerprint = await this.evidence.fingerprint(
       current,
       this.anchor,
       this.requiresReceiverIdentity,
-      receiverIdentity,
+      receiverAfterCapture,
+      this.requiresReceiverVisualEvidence,
     );
     if (fingerprint === null) throw new Error('native desktop receiver identity is unavailable');
     return {
