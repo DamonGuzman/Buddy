@@ -9,51 +9,81 @@
  * - superseded turn while grounding runs -> NO pointer routed;
  * - CLICKY_NO_REST_GROUND=1 -> REST layer skipped entirely.
  *
- * Electron, capture, snapper and rest-grounder are mocked; the
- * RealtimeSession is REAL, talking to the in-process mock server whose
- * "point" scenario calls point_at at the center of screen0 with label
- * "the button".
+ * Electron and capture are mocked; the snapper + rest-grounder are fakes
+ * injected through the ConversationDeps grounding seams; the RealtimeSession
+ * is REAL, talking to the in-process mock server whose "point" scenario
+ * calls point_at at the center of screen0 with label "the button".
  */
 
 import { createRequire } from 'node:module';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PointerCommand } from '../src/shared/types';
+import type { AuthSource } from '../src/main/auth/auth-source';
+import type { ConversationDeps } from '../src/main/conversation';
+import type { GroundOutcome, RestGroundQuery } from '../src/main/grounding/rest-grounder';
+import type { SnapOutcome, SnapQuery } from '../src/main/grounding/snapper';
+import type * as MockRealtime from '../tools/mock-realtime/server';
 
 // ---------------------------------------------------------------------------
-// Controllable grounding layers (hoisted for the vi.mock factories)
+// Controllable grounding layers (injected via the ConversationDeps seams)
 // ---------------------------------------------------------------------------
 
-const ctl = vi.hoisted(() => {
-  const noMatch = {
-    matched: false,
-    point: null,
-    name: null,
-    score: null,
-    elapsedMs: 5,
-    daemonMs: 5,
-    candidates: 0,
-    timedOut: false,
-  };
-  return {
-    noMatch,
-    snapQueries: [] as unknown[],
-    snap: (async () => noMatch) as (q: unknown) => Promise<unknown>,
-    restQueries: [] as { jpegBase64: string; imageW: number; imageH: number; label: string }[],
-    rest: (async () => null) as (q: unknown) => Promise<{ x: number; y: number } | null>,
-    // M13-core: the grounding transport the mock RestGrounder.ground() reports,
-    // and a quota-exhausted flag to drive the fail-closed assertion.
-    restBackend: 'apiKey' as 'apiKey' | 'codex' | 'none',
-    restQuota: false,
-    restUsedPercent: null as { primary: number | null; secondary: number | null } | null,
-    // M13-core: controllable Codex sign-in state for resolveGroundingAuth.
-    codexInfo: null as {
-      accessToken: string;
-      accountId: string;
-      planType: string;
-      expiresAt: number;
-    } | null,
-  };
-});
+const noMatch: SnapOutcome = {
+  matched: false,
+  point: null,
+  name: null,
+  score: null,
+  elapsedMs: 5,
+  daemonMs: 5,
+  candidates: 0,
+  timedOut: false,
+};
+
+const ctl = {
+  noMatch,
+  snapQueries: [] as SnapQuery[],
+  snap: (async () => noMatch) as (q: SnapQuery) => Promise<SnapOutcome>,
+  restQueries: [] as RestGroundQuery[],
+  rest: (async () => null) as (q: RestGroundQuery) => Promise<{ x: number; y: number } | null>,
+  // M13-core: a quota-exhausted flag to drive the fail-closed assertion, and
+  // the plan-usage headers the fake RestGrounder.ground() reports.
+  restQuota: false,
+  restUsedPercent: null as { primary: number | null; secondary: number | null } | null,
+  // M13-core: controllable Codex sign-in state for resolveGroundingAuth.
+  codexInfo: null as {
+    accessToken: string;
+    accountId: string;
+    planType: string;
+    expiresAt: number;
+  } | null,
+};
+
+/** The fake UIA snapper injected through `buildUiaSnapper`. */
+const fakeSnapper = {
+  warmUp(): void {},
+  dispose(): void {},
+  snap(q: SnapQuery): Promise<SnapOutcome> {
+    ctl.snapQueries.push(q);
+    return ctl.snap(q);
+  },
+};
+
+/** The fake REST grounder injected through `buildRestGrounder`. */
+const fakeRestGrounder = {
+  // M13-core: the transport-selecting entry point. Records the query and
+  // returns a GroundOutcome built from the controllable ctl state.
+  async ground(query: RestGroundQuery, auth: AuthSource): Promise<GroundOutcome> {
+    ctl.restQueries.push(query);
+    const point = await ctl.rest(query);
+    const source = auth.kind === 'chatgptCodex' ? 'codex' : 'apiKey';
+    return {
+      point: ctl.restQuota ? null : point,
+      source,
+      quotaExhausted: ctl.restQuota,
+      usedPercent: ctl.restUsedPercent,
+    };
+  },
+};
 
 vi.mock('electron', () => ({
   app: { getPath: () => 'unused-in-tests' },
@@ -64,43 +94,6 @@ vi.mock('electron', () => ({
       bounds: { x: 0, y: 0, width: 2560, height: 1440 },
       scaleFactor: 1.5,
     }),
-  },
-}));
-
-vi.mock('../src/main/grounding/snapper', () => ({
-  GroundingService: class {
-    warmUp(): void {}
-    dispose(): void {}
-    snap(q: unknown): Promise<unknown> {
-      ctl.snapQueries.push(q);
-      return ctl.snap(q);
-    }
-  },
-}));
-
-vi.mock('../src/main/grounding/rest-grounder', () => ({
-  RestGrounder: class {
-    // M13-core: the transport-selecting entry point. Records the query and
-    // returns a GroundOutcome built from the controllable ctl state.
-    async ground(
-      query: { jpegBase64: string; imageW: number; imageH: number; label: string },
-      auth: { kind: 'apiKey' | 'chatgptCodex' },
-    ): Promise<{
-      point: { x: number; y: number } | null;
-      source: 'apiKey' | 'codex' | 'none';
-      quotaExhausted: boolean;
-      usedPercent: { primary: number | null; secondary: number | null } | null;
-    }> {
-      ctl.restQueries.push(query);
-      const point = await ctl.rest(query);
-      const source = auth.kind === 'chatgptCodex' ? 'codex' : 'apiKey';
-      return {
-        point: ctl.restQuota ? null : point,
-        source,
-        quotaExhausted: ctl.restQuota,
-        usedPercent: ctl.restUsedPercent,
-      };
-    }
   },
 }));
 
@@ -133,45 +126,43 @@ vi.mock('../src/main/windows/overlay', () => ({}));
 const { Conversation } = await import('../src/main/conversation');
 
 const require = createRequire(import.meta.url);
-const mock =
-  require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
+const mock = require('../tools/mock-realtime/server') as typeof MockRealtime;
 type MockServer = Awaited<ReturnType<typeof mock.createMockServer>>;
 
 // ---------------------------------------------------------------------------
 
 type AnimateCommand = Extract<PointerCommand, { type: 'animate' }>;
 
-function fakeDeps(pointers: PointerCommand[]) {
-  const settings = {
-    get: () => ({
-      apiKeyPresent: true,
-      model: 'gpt-realtime-2.1-mini',
-      voice: 'marin',
-      captionsEnabled: false,
-      micDeviceId: '',
-      hotkeyLabel: 'Ctrl+Alt',
-    }),
-    // A key IS present so resolveGroundingAuth returns the apiKey arm by
-    // default; the realtime session runs in mock mode and ignores it.
-    getApiKey: () => 'sk-mock',
-    onChange: () => () => {},
-  };
-  const overlays = {
-    broadcast: () => {},
-    routePointer: (cmd: PointerCommand) => pointers.push(cmd),
-    count: () => 1,
-  };
-  const panel = { send: () => {} };
-  // M13-core: deterministic Codex provider (no real ~/.codex/auth.json read).
-  const codexAuth = {
-    getCodexAuth: () => ctl.codexInfo,
-    getBearer: async () => ctl.codexInfo?.accessToken ?? '',
-  };
+function fakeDeps(pointers: PointerCommand[]): ConversationDeps {
   return {
-    settings: settings as never,
-    overlays: overlays as never,
-    panel: panel as never,
-    codexAuth: codexAuth as never,
+    settings: {
+      get: () => ({
+        model: 'gpt-realtime-2.1-mini',
+        voice: 'marin',
+        captionsEnabled: false,
+        voiceMuted: false,
+        fullRealtimeMode: false,
+        computerUseEnabled: false,
+        preferApiKeyGrounding: false,
+        apiKeyUnreadable: false,
+      }),
+      // A key IS present so resolveGroundingAuth returns the apiKey arm by
+      // default; the realtime session runs in mock mode and ignores it.
+      getApiKey: () => 'sk-mock',
+      settingsWereReset: () => false,
+    },
+    overlays: {
+      broadcast: () => {},
+      routePointer: (cmd: PointerCommand) => pointers.push(cmd),
+    },
+    panel: { send: () => {} },
+    // M13-core: deterministic Codex provider (no real ~/.codex/auth.json read).
+    codexAuth: {
+      getCodexAuth: () => ctl.codexInfo,
+      getBearer: async () => ctl.codexInfo?.accessToken ?? '',
+    },
+    buildUiaSnapper: () => fakeSnapper,
+    buildRestGrounder: () => fakeRestGrounder,
   };
 }
 

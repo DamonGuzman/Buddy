@@ -10,7 +10,8 @@
  *   redundant REST grounding call is SKIPPED (sol is already pixel-exact).
  * - Not signed in / no sub     -> falls back to the realtime askText path.
  *
- * Electron, capture, snapper and rest-grounder are mocked; the realtime
+ * Electron and capture are mocked; the snapper + rest-grounder are fakes
+ * injected through the ConversationDeps grounding seams; the realtime
  * RealtimeSession is REAL (mock server) so the fallback path is exercised end
  * to end. The Codex session is a controllable fake injected via deps.
  */
@@ -23,30 +24,50 @@ import type {
   CodexTurnResult,
   CodexUserTurn,
 } from '../src/main/codex/responses-session';
-import type { CodexTextSession } from '../src/main/conversation';
+import type { AgentsPort, CodexTextSession, ConversationDeps } from '../src/main/conversation';
+import type { GroundOutcome } from '../src/main/grounding/rest-grounder';
+import type { SnapOutcome, SnapQuery } from '../src/main/grounding/snapper';
+import type * as MockRealtime from '../tools/mock-realtime/server';
 
 // ---------------------------------------------------------------------------
-// Controllable grounding layers (hoisted for the vi.mock factories)
+// Controllable grounding layers (injected via the ConversationDeps seams)
 // ---------------------------------------------------------------------------
 
-const ctl = vi.hoisted(() => {
-  const noMatch = {
-    matched: false,
-    point: null,
-    name: null,
-    score: null,
-    elapsedMs: 5,
-    daemonMs: 5,
-    candidates: 0,
-    timedOut: false,
-  };
-  return {
-    noMatch,
-    snapQueries: [] as unknown[],
-    snap: (async () => noMatch) as (q: unknown) => Promise<unknown>,
-    restCalls: 0,
-  };
-});
+const noMatch: SnapOutcome = {
+  matched: false,
+  point: null,
+  name: null,
+  score: null,
+  elapsedMs: 5,
+  daemonMs: 5,
+  candidates: 0,
+  timedOut: false,
+};
+
+const ctl = {
+  noMatch,
+  snapQueries: [] as SnapQuery[],
+  snap: (async () => noMatch) as (q: SnapQuery) => Promise<SnapOutcome>,
+  restCalls: 0,
+};
+
+/** The fake UIA snapper injected through `buildUiaSnapper`. */
+const fakeSnapper = {
+  warmUp(): void {},
+  dispose(): void {},
+  snap(q: SnapQuery): Promise<SnapOutcome> {
+    ctl.snapQueries.push(q);
+    return ctl.snap(q);
+  },
+};
+
+/** The REST grounder must NEVER be called on the text-accurate path. */
+const fakeRestGrounder = {
+  async ground(): Promise<GroundOutcome> {
+    ctl.restCalls += 1;
+    return { point: null, source: 'none', quotaExhausted: false, usedPercent: null };
+  },
+};
 
 vi.mock('electron', () => ({
   app: { getPath: () => 'unused-in-tests' },
@@ -57,27 +78,6 @@ vi.mock('electron', () => ({
       bounds: { x: 0, y: 0, width: 2560, height: 1440 },
       scaleFactor: 1.5,
     }),
-  },
-}));
-
-vi.mock('../src/main/grounding/snapper', () => ({
-  GroundingService: class {
-    warmUp(): void {}
-    dispose(): void {}
-    snap(q: unknown): Promise<unknown> {
-      ctl.snapQueries.push(q);
-      return ctl.snap(q);
-    }
-  },
-}));
-
-// The REST grounder must NEVER be called on the text-accurate path.
-vi.mock('../src/main/grounding/rest-grounder', () => ({
-  RestGrounder: class {
-    async ground(): Promise<unknown> {
-      ctl.restCalls += 1;
-      return { point: null, source: 'none', quotaExhausted: false, usedPercent: null };
-    }
   },
 }));
 
@@ -106,8 +106,7 @@ vi.mock('../src/main/windows/overlay', () => ({}));
 const { Conversation } = await import('../src/main/conversation');
 
 const require = createRequire(import.meta.url);
-const mock =
-  require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
+const mock = require('../tools/mock-realtime/server') as typeof MockRealtime;
 type MockServer = Awaited<ReturnType<typeof mock.createMockServer>>;
 
 // ---------------------------------------------------------------------------
@@ -176,26 +175,8 @@ function makeDeps(opts: {
   signedIn: boolean;
   apiKey?: string | null;
   fake?: FakeCodexSession | null;
-  agents?: object;
-}) {
-  const settings = {
-    get: () => ({
-      apiKeyPresent: opts.apiKey != null,
-      model: 'gpt-realtime-2.1-mini',
-      voice: 'marin',
-      captionsEnabled: true,
-      micDeviceId: '',
-      hotkeyLabel: 'Ctrl+Alt',
-    }),
-    getApiKey: () => opts.apiKey ?? null,
-    onChange: () => () => {},
-  };
-  const overlays = {
-    broadcast: () => {},
-    routePointer: (cmd: PointerCommand) => opts.pointers.push(cmd),
-    count: () => 1,
-  };
-  const panel = { send: () => {} };
+  agents?: AgentsPort;
+}): ConversationDeps {
   const codexInfo = opts.signedIn
     ? {
         accessToken: 'codex-bearer',
@@ -204,17 +185,42 @@ function makeDeps(opts: {
         expiresAt: Date.now() + 9e7,
       }
     : null;
-  const codexAuth = {
-    getCodexAuth: () => codexInfo,
-    getBearer: async () => codexInfo?.accessToken ?? '',
-  };
   return {
-    settings: settings as never,
-    overlays: overlays as never,
-    panel: panel as never,
-    codexAuth: codexAuth as never,
-    ...(opts.agents !== undefined ? { agents: opts.agents as never } : {}),
-    ...(opts.fake !== undefined ? { buildCodexSession: (() => opts.fake) as never } : {}),
+    settings: {
+      get: () => ({
+        model: 'gpt-realtime-2.1-mini',
+        voice: 'marin',
+        captionsEnabled: true,
+        voiceMuted: false,
+        fullRealtimeMode: false,
+        computerUseEnabled: false,
+        preferApiKeyGrounding: false,
+        apiKeyUnreadable: false,
+      }),
+      getApiKey: () => opts.apiKey ?? null,
+      settingsWereReset: () => false,
+    },
+    overlays: {
+      broadcast: () => {},
+      routePointer: (cmd: PointerCommand) => opts.pointers.push(cmd),
+    },
+    panel: { send: () => {} },
+    codexAuth: {
+      getCodexAuth: () => codexInfo,
+      getBearer: async () => codexInfo?.accessToken ?? '',
+    },
+    buildUiaSnapper: () => fakeSnapper,
+    buildRestGrounder: () => fakeRestGrounder,
+    ...(opts.agents !== undefined ? { agents: opts.agents } : {}),
+    ...(opts.fake !== undefined
+      ? {
+          buildCodexSession: (): CodexTextSession => {
+            // A null fake marks a scenario whose Codex path must never run.
+            if (!opts.fake) throw new Error('buildCodexSession ran unexpectedly');
+            return opts.fake;
+          },
+        }
+      : {}),
   };
 }
 
@@ -289,9 +295,10 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
     const fake = new FakeCodexSession();
     const spawned: Array<{ id: string }> = [];
     const markSpoken = vi.fn();
-    const agents = {
+    const agents: AgentsPort = {
       isReady: () => true,
-      spawn: (brief: { id: string }) => {
+      list: () => [],
+      spawn: (brief) => {
         spawned.push(brief);
         return { ok: true as const, agentId: brief.id };
       },
@@ -433,8 +440,9 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
 
   it('a completion queued during a realtime turn wakes the foreground after it settles', async () => {
     const markSpoken = vi.fn();
-    const agents = {
+    const agents: AgentsPort = {
       isReady: () => true,
+      list: () => [],
       spawn: () => ({ ok: true as const, agentId: 'unused' }),
       markSpoken,
     };
@@ -489,8 +497,9 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
     const flush = () => new Promise((resolve) => setImmediate(resolve));
     try {
       const markSpoken = vi.fn();
-      const agents = {
+      const agents: AgentsPort = {
         isReady: () => true,
+        list: () => [],
         spawn: () => ({ ok: true as const, agentId: 'unused' }),
         markSpoken,
       };
@@ -624,7 +633,7 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
     const deps = makeDeps({ pointers, signedIn: false, apiKey: null, fake: null });
     // buildCodexSession absent -> real factory would build; assert it is not
     // reached by counting the injected factory calls instead.
-    (deps as unknown as { buildCodexSession: unknown }).buildCodexSession = () => {
+    deps.buildCodexSession = () => {
       built += 1;
       return new FakeCodexSession();
     };

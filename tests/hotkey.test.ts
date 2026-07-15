@@ -6,7 +6,7 @@
 
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HotkeyManager, MAX_HOLD_MS } from '../src/main/hotkey';
+import { HotkeyManager, MAX_HOLD_MS, TAP_MAX_MS } from '../src/main/hotkey';
 import type { UiohookLike } from '../src/main/hotkey';
 
 // uiohook keycodes.
@@ -29,6 +29,8 @@ interface Harness {
   hook: FakeHook;
   hotkey: HotkeyManager;
   events: string[];
+  /** M20: taps tracked separately — hold semantics stay unchanged by taps. */
+  taps: number;
   down(code: number): void;
   up(code: number): void;
 }
@@ -37,17 +39,20 @@ function makeHarness(maxHoldMs?: number): Harness {
   const hook = new FakeHook();
   const hotkey = new HotkeyManager({ hook, ...(maxHoldMs !== undefined ? { maxHoldMs } : {}) });
   const events: string[] = [];
-  hotkey.on('hold-start', () => events.push('start'));
-  hotkey.on('hold-end', () => events.push('end'));
-  hotkey.on('hold-cancel', () => events.push('cancel'));
-  hotkey.start();
-  return {
+  const harness: Harness = {
     hook,
     hotkey,
     events,
+    taps: 0,
     down: (code) => hook.emit('keydown', { keycode: code }),
     up: (code) => hook.emit('keyup', { keycode: code }),
   };
+  hotkey.on('hold-start', () => events.push('start'));
+  hotkey.on('hold-end', () => events.push('end'));
+  hotkey.on('hold-cancel', () => events.push('cancel'));
+  hotkey.on('tap', () => (harness.taps += 1));
+  hotkey.start();
+  return harness;
 }
 
 afterEach(() => {
@@ -158,6 +163,129 @@ describe('hook start failure (M11 crash fix)', () => {
     hotkey.simulate('press');
     hotkey.simulate('release');
     expect(events).toEqual(['start', 'end']);
+  });
+});
+
+describe('double-start guard', () => {
+  it('a second start() on a live hook is a no-op (no duplicate listeners)', () => {
+    const h = makeHarness();
+    h.hotkey.start(); // second start: must not attach a second listener set
+    expect(h.hook.listenerCount('keydown')).toBe(1);
+    expect(h.hook.listenerCount('keyup')).toBe(1);
+    h.down(L_CTRL);
+    h.down(L_ALT);
+    h.up(L_ALT);
+    expect(h.events).toEqual(['start', 'end']); // each hold fires exactly once
+  });
+
+  it('start() may retry after a FAILED start (guard keys off hookAlive)', () => {
+    class FlakyHook extends FakeHook {
+      attempts = 0;
+      override start(): void {
+        this.attempts += 1;
+        if (this.attempts === 1) throw new Error('transient hook failure');
+        super.start();
+      }
+    }
+    const hook = new FlakyHook();
+    const hotkey = new HotkeyManager({ hook });
+    hotkey.on('error', () => {});
+    hotkey.start();
+    expect(hotkey.status().hookAlive).toBe(false);
+    hotkey.start(); // retry is allowed — only a LIVE hook blocks re-start
+    expect(hotkey.status().hookAlive).toBe(true);
+  });
+});
+
+describe('tap detection (M20 whisper)', () => {
+  it('a release within TAP_MAX_MS fires tap, AFTER hold-end', () => {
+    vi.useFakeTimers();
+    const h = makeHarness();
+    const order: string[] = [];
+    h.hotkey.on('hold-end', () => order.push('end'));
+    h.hotkey.on('tap', () => order.push('tap'));
+    h.down(L_CTRL);
+    h.down(L_ALT);
+    vi.advanceTimersByTime(TAP_MAX_MS);
+    h.up(L_ALT);
+    expect(h.taps).toBe(1);
+    expect(order).toEqual(['end', 'tap']);
+    expect(h.events).toEqual(['start', 'end']); // hold semantics untouched
+  });
+
+  it('a release after TAP_MAX_MS is a talk, not a tap', () => {
+    vi.useFakeTimers();
+    const h = makeHarness();
+    h.down(L_CTRL);
+    h.down(L_ALT);
+    vi.advanceTimersByTime(TAP_MAX_MS + 1);
+    h.up(L_CTRL);
+    expect(h.taps).toBe(0);
+    expect(h.events).toEqual(['start', 'end']);
+  });
+
+  it('forced releases (watchdog / lock) never tap', () => {
+    vi.useFakeTimers();
+    const h = makeHarness(1_000);
+    h.down(L_CTRL);
+    h.down(L_ALT);
+    h.hotkey.forceCancel();
+    expect(h.taps).toBe(0);
+    h.down(L_CTRL);
+    h.down(L_ALT);
+    vi.advanceTimersByTime(1_000); // watchdog
+    expect(h.taps).toBe(0);
+    expect(h.events).toEqual(['start', 'cancel', 'start', 'cancel']);
+  });
+
+  it('simulate() press/release counts as a tap (debug harness parity)', () => {
+    const h = makeHarness();
+    h.hotkey.simulate('press');
+    h.hotkey.simulate('release');
+    expect(h.taps).toBe(1);
+    expect(h.events).toEqual(['start', 'end']);
+  });
+
+  it('a Ctrl+Alt+<key> CHORD never taps (app shortcuts must not summon the whisper)', () => {
+    const K = 37; // arbitrary letter keycode
+    const h = makeHarness();
+    h.down(L_CTRL);
+    h.down(L_ALT);
+    h.down(K); // the chord key
+    h.up(K);
+    h.up(L_ALT);
+    h.up(L_CTRL);
+    expect(h.taps).toBe(0);
+    expect(h.events).toEqual(['start', 'end']); // hold semantics untouched
+  });
+
+  it('a chord in one hold does not poison the next pure tap', () => {
+    const K = 37;
+    const h = makeHarness();
+    h.down(L_CTRL);
+    h.down(L_ALT);
+    h.down(K);
+    h.up(K);
+    h.up(L_ALT);
+    expect(h.taps).toBe(0);
+    h.up(L_CTRL);
+    // Fresh pure tap: chordSeen must have been reset by the new hold.
+    h.down(L_CTRL);
+    h.down(L_ALT);
+    h.up(L_ALT);
+    expect(h.taps).toBe(1);
+  });
+
+  it('keys pressed while NOT holding do not disqualify a following tap', () => {
+    const K = 37;
+    const h = makeHarness();
+    h.down(K); // typing before the hotkey
+    h.up(K);
+    h.down(L_CTRL);
+    h.down(L_ALT);
+    h.up(L_ALT);
+    h.up(L_CTRL);
+    expect(h.taps).toBe(1);
   });
 });
 

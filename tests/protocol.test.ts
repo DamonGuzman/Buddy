@@ -10,7 +10,12 @@ import type {
   ServerEvent,
   SessionUpdateEvent,
 } from '../src/main/realtime/protocol';
-import { parseServerEvent, validatePointAtArgs } from '../src/main/realtime/protocol';
+import {
+  findCaptureForScreen,
+  isKnownServerEvent,
+  parseServerEvent,
+  validatePointAtArgs,
+} from '../src/main/realtime/protocol';
 import {
   getSessionInstructions,
   getTextInstructions,
@@ -126,6 +131,53 @@ describe('parseServerEvent', () => {
     const parsed = parseServerEvent('{"type":"conversation.item.added","item":{}}');
     expect(parsed).not.toBeNull();
     expect((parsed as { type: string }).type).toBe('conversation.item.added');
+  });
+});
+
+describe('isKnownServerEvent', () => {
+  it('narrows parsed frames to the typed subset', () => {
+    const known = parseServerEvent('{"type":"response.done","response":{"id":"resp_1"}}');
+    expect(known !== null && isKnownServerEvent(known)).toBe(true);
+    const unknown = parseServerEvent('{"type":"conversation.item.added","item":{}}');
+    expect(unknown !== null && isKnownServerEvent(unknown)).toBe(false);
+  });
+});
+
+describe('findCaptureForScreen', () => {
+  const metas: CaptureMeta[] = [
+    {
+      screenIndex: 0,
+      displayId: 1,
+      imageW: 1280,
+      imageH: 720,
+      displayBounds: { x: 0, y: 0, width: 2560, height: 1440 },
+      scaleFactor: 2,
+      isActive: false,
+    },
+    {
+      screenIndex: 2, // a skipped display: keys are NOT array positions (F1 m2)
+      displayId: 3,
+      imageW: 1024,
+      imageH: 768,
+      displayBounds: { x: 2560, y: 0, width: 1024, height: 768 },
+      scaleFactor: 1,
+      isActive: true,
+    },
+  ];
+
+  it('looks up by screenIndex KEY, not array position', () => {
+    expect(findCaptureForScreen(metas, 2)?.displayId).toBe(3);
+    expect(findCaptureForScreen(metas, 0)?.displayId).toBe(1);
+  });
+
+  it('falls back to the ACTIVE screen for an unknown index, then the first', () => {
+    expect(findCaptureForScreen(metas, 7)?.screenIndex).toBe(2); // active
+    const noActive = metas.map((m) => ({ ...m, isActive: false }));
+    expect(findCaptureForScreen(noActive, 7)?.screenIndex).toBe(0); // first
+  });
+
+  it('returns undefined only for an empty batch', () => {
+    expect(findCaptureForScreen([], 0)).toBeUndefined();
   });
 });
 

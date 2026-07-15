@@ -20,16 +20,24 @@ export const ENV_MOCK_URL = 'CLICKY_MOCK_URL';
 /** '1' enables the local debug HTTP server on DEBUG_PORT. */
 export const ENV_DEBUG = 'CLICKY_DEBUG';
 
-/** Default port of tools/mock-realtime (ws://127.0.0.1:8123). */
-export const MOCK_DEFAULT_PORT = 8123;
+/**
+ * True when a mock Realtime URL is configured (CLICKY_MOCK_URL set and
+ * non-empty) — the shared semantics for every consumer (endpoint resolution,
+ * REST-grounding skip, codex text gating). Defaults to `process.env` where a
+ * Node `process` global exists.
+ */
+export function isMockMode(env?: Record<string, string | undefined>): boolean {
+  const resolved =
+    env ?? (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  const url = resolved?.[ENV_MOCK_URL];
+  return url !== undefined && url !== '';
+}
 
 // ---------------------------------------------------------------------------
 // Audio format (both directions — docs/ARCHITECTURE.md §3, §7)
 // ---------------------------------------------------------------------------
 
 export const AUDIO_SAMPLE_RATE = 24_000;
-export const AUDIO_CHANNELS = 1;
-export const AUDIO_FORMAT = 'pcm16' as const;
 /** Bytes per sample for pcm16. */
 export const AUDIO_BYTES_PER_SAMPLE = 2;
 
@@ -66,5 +74,10 @@ export const CAPTURE_JPEG_QUALITY = 80;
 
 export const PANEL_WIDTH = 380;
 export const PANEL_HEIGHT = 520;
+
+// M20: the whisper — small floating composer summoned by a hotkey tap or a
+// buddy click. Sized for a short reply stack + a one-line composer.
+export const WHISPER_WIDTH = 340;
+export const WHISPER_HEIGHT = 244;
 
 export const APP_NAME = 'Buddy';

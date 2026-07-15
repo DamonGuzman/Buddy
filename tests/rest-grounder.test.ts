@@ -1,21 +1,25 @@
 /**
- * M10 REST grounding fallback tests (rest-grounder.ts), all offline:
+ * M10 REST grounding fallback tests (rest-grounder.ts) — the api-key arm of
+ * `ground()` — all offline:
  * - the request replicates the COORD-STUDY §8 winning protocol (gpt-5.4-mini,
  *   reasoning effort low, bare image as a data URI, strict-JSON PIXEL coords),
- * - null (never throw) on: no key, mock mode, timeout, HTTP error, garbage
- *   output, out-of-bounds coordinates, concurrent call,
+ * - null point (never throw) on: no key, mock mode, timeout, HTTP error,
+ *   garbage output, out-of-bounds coordinates, concurrent call,
  * - the API key is sent in the Authorization header only.
  */
 
 import { describe, expect, it } from 'vitest';
 import { RestGrounder, parseGroundingResponse } from '../src/main/grounding/rest-grounder';
 import type { RestGrounderOptions } from '../src/main/grounding/rest-grounder';
+import type { AuthSource } from '../src/main/auth/auth-source';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const QUERY = { jpegBase64: 'ZmFrZS1qcGVn', imageW: 2048, imageH: 1152, label: 'the save button' };
+
+const API_AUTH: AuthSource = { kind: 'apiKey', getApiKey: () => 'sk-test-key' };
 
 /** Minimal Responses-API payload with the point in a message output item. */
 function responsesPayload(text: string): unknown {
@@ -57,8 +61,10 @@ describe('RestGrounder: success path', () => {
       return okResponse(responsesPayload('{"x":123,"y":456}'));
     });
 
-    const result = await grounder.groundWithModel({ ...QUERY, spokenContext: 'click save' });
-    expect(result).toEqual({ x: 123, y: 456 });
+    const outcome = await grounder.ground({ ...QUERY, spokenContext: 'click save' }, API_AUTH);
+    expect(outcome.point).toEqual({ x: 123, y: 456 });
+    expect(outcome.source).toBe('apiKey');
+    expect(outcome.quotaExhausted).toBe(false);
 
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe('https://api.openai.com/v1/responses');
@@ -98,14 +104,14 @@ describe('RestGrounder: success path', () => {
     const grounder = makeGrounder(async () =>
       okResponse({ output_text: '{"x":1,"y":1}', output: [] }),
     );
-    expect(await grounder.groundWithModel(QUERY)).toEqual({ x: 1, y: 1 });
+    expect((await grounder.ground(QUERY, API_AUTH)).point).toEqual({ x: 1, y: 1 });
   });
 
   it('accepts edge coordinates (0,0) and (imageW,imageH)', async () => {
     const g1 = makeGrounder(async () => okResponse(responsesPayload('{"x":0,"y":0}')));
-    expect(await g1.groundWithModel(QUERY)).toEqual({ x: 0, y: 0 });
+    expect((await g1.ground(QUERY, API_AUTH)).point).toEqual({ x: 0, y: 0 });
     const g2 = makeGrounder(async () => okResponse(responsesPayload('{"x":2048,"y":1152}')));
-    expect(await g2.groundWithModel(QUERY)).toEqual({ x: 2048, y: 1152 });
+    expect((await g2.ground(QUERY, API_AUTH)).point).toEqual({ x: 2048, y: 1152 });
   });
 });
 
@@ -114,20 +120,19 @@ describe('RestGrounder: success path', () => {
 // ---------------------------------------------------------------------------
 
 describe('RestGrounder: null paths', () => {
-  it('returns null without fetching when no API key is configured', async () => {
+  it('returns a null point without fetching when no API key is configured', async () => {
     let fetched = 0;
-    const grounder = makeGrounder(
-      async () => {
-        fetched += 1;
-        return okResponse(responsesPayload('{"x":1,"y":1}'));
-      },
-      { getApiKey: () => null },
-    );
-    expect(await grounder.groundWithModel(QUERY)).toBeNull();
+    const grounder = makeGrounder(async () => {
+      fetched += 1;
+      return okResponse(responsesPayload('{"x":1,"y":1}'));
+    });
+    const outcome = await grounder.ground(QUERY, { kind: 'apiKey', getApiKey: () => null });
+    expect(outcome.point).toBeNull();
+    expect(outcome.source).toBe('apiKey');
     expect(fetched).toBe(0);
   });
 
-  it('returns null without fetching in mock mode (CLICKY_MOCK_URL)', async () => {
+  it('returns a null point without fetching in mock mode (CLICKY_MOCK_URL)', async () => {
     let fetched = 0;
     const grounder = makeGrounder(
       async () => {
@@ -136,11 +141,13 @@ describe('RestGrounder: null paths', () => {
       },
       { env: { CLICKY_MOCK_URL: 'ws://127.0.0.1:9' } },
     );
-    expect(await grounder.groundWithModel(QUERY)).toBeNull();
+    const outcome = await grounder.ground(QUERY, API_AUTH);
+    expect(outcome.point).toBeNull();
+    expect(outcome.source).toBe('none');
     expect(fetched).toBe(0);
   });
 
-  it('returns null on timeout (abort respected, no hang)', async () => {
+  it('returns a null point on timeout (abort respected, no hang)', async () => {
     const grounder = makeGrounder(
       (_url, init) =>
         new Promise<Response>((_resolve, reject) => {
@@ -151,11 +158,11 @@ describe('RestGrounder: null paths', () => {
       { timeoutMs: 40 },
     );
     const t0 = Date.now();
-    expect(await grounder.groundWithModel(QUERY)).toBeNull();
+    expect((await grounder.ground(QUERY, API_AUTH)).point).toBeNull();
     expect(Date.now() - t0).toBeLessThan(1_000);
   });
 
-  it('returns null on an HTTP error status', async () => {
+  it('returns a null point on an HTTP error status', async () => {
     const grounder = makeGrounder(async () => {
       return {
         ok: false,
@@ -163,19 +170,19 @@ describe('RestGrounder: null paths', () => {
         json: async () => ({ error: { message: 'quota' } }),
       } as unknown as Response;
     });
-    expect(await grounder.groundWithModel(QUERY)).toBeNull();
+    expect((await grounder.ground(QUERY, API_AUTH)).point).toBeNull();
   });
 
-  it('returns null on garbage output (non-JSON text, wrong types, empty)', async () => {
+  it('returns a null point on garbage output (non-JSON text, wrong types, empty)', async () => {
     for (const text of ['not json at all', '{"x":"left","y":"top"}', '{"only":"noise"}', '']) {
       const grounder = makeGrounder(async () => okResponse(responsesPayload(text)));
-      expect(await grounder.groundWithModel(QUERY)).toBeNull();
+      expect((await grounder.ground(QUERY, API_AUTH)).point).toBeNull();
     }
     const weird = makeGrounder(async () => okResponse({ totally: 'unexpected' }));
-    expect(await weird.groundWithModel(QUERY)).toBeNull();
+    expect((await weird.ground(QUERY, API_AUTH)).point).toBeNull();
   });
 
-  it('returns null on out-of-bounds coordinates', async () => {
+  it('returns a null point on out-of-bounds coordinates', async () => {
     for (const text of [
       '{"x":5000,"y":100}',
       '{"x":100,"y":5000}',
@@ -183,7 +190,7 @@ describe('RestGrounder: null paths', () => {
       '{"x":100,"y":-1}',
     ]) {
       const grounder = makeGrounder(async () => okResponse(responsesPayload(text)));
-      expect(await grounder.groundWithModel(QUERY)).toBeNull();
+      expect((await grounder.ground(QUERY, API_AUTH)).point).toBeNull();
     }
   });
 
@@ -191,10 +198,10 @@ describe('RestGrounder: null paths', () => {
     const rejecting = makeGrounder(async () => {
       throw new Error('network down');
     });
-    expect(await rejecting.groundWithModel(QUERY)).toBeNull();
+    expect((await rejecting.ground(QUERY, API_AUTH)).point).toBeNull();
   });
 
-  it('allows only one in-flight call (second returns null immediately)', async () => {
+  it('allows only one in-flight call (second returns a null point immediately)', async () => {
     let release: (() => void) | null = null;
     const grounder = makeGrounder(
       (_url, _init) =>
@@ -202,15 +209,15 @@ describe('RestGrounder: null paths', () => {
           release = () => resolve(okResponse(responsesPayload('{"x":9,"y":9}')));
         }),
     );
-    const first = grounder.groundWithModel(QUERY);
+    const first = grounder.ground(QUERY, API_AUTH);
     // Give the first call a tick to reach fetch.
     await new Promise((r) => setTimeout(r, 10));
-    expect(await grounder.groundWithModel(QUERY)).toBeNull(); // busy
+    expect((await grounder.ground(QUERY, API_AUTH)).point).toBeNull(); // busy
     release!();
-    expect(await first).toEqual({ x: 9, y: 9 });
+    expect((await first).point).toEqual({ x: 9, y: 9 });
     // And the guard resets afterwards.
     const again = makeGrounder(async () => okResponse(responsesPayload('{"x":2,"y":2}')));
-    expect(await again.groundWithModel(QUERY)).toEqual({ x: 2, y: 2 });
+    expect((await again.ground(QUERY, API_AUTH)).point).toEqual({ x: 2, y: 2 });
   });
 });
 

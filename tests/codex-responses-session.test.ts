@@ -14,12 +14,9 @@
  * - the bearer token appears in the Authorization header ONLY.
  */
 
-import { describe, expect, it, vi } from 'vitest';
-import {
-  CodexResponsesSession,
-  parseUsage,
-  parseUsedPercent,
-} from '../src/main/codex/responses-session';
+import { describe, expect, it } from 'vitest';
+import { CodexResponsesSession, parseUsage } from '../src/main/codex/responses-session';
+import { parseUsedPercent } from '../src/main/codex/transport';
 import type {
   CodexResponsesCallbacks,
   CodexResponsesSessionOptions,

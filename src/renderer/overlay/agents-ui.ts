@@ -9,7 +9,8 @@
  * "sources" or status codes. Lowercase, warm, matches the persona.
  */
 
-import type { AgentSummary } from '../../shared/types';
+import type { AgentSummary, Rect } from '../../shared/types';
+import { AUX_PAD, dist, insideRect, padRect } from './hover';
 import type { Vec } from './hover';
 
 // ---------------------------------------------------------------------------
@@ -137,6 +138,84 @@ export function helperSlots(count: number, dir: 1 | -1, vdir: 1 | -1): Vec[] {
     });
   }
   return slots;
+}
+
+// ---------------------------------------------------------------------------
+// Hover decision (which helper the cursor wants, anti-flicker grace)
+// ---------------------------------------------------------------------------
+
+/** One rendered cluster slot: a helper sprite or the "+N" overflow pebble. */
+export interface HelperSlot {
+  /** Agent id, or OVERFLOW_KEY for the pebble. */
+  key: string;
+  /** Absolute sprite/pebble center (window-local DIP). */
+  pos: Vec;
+}
+
+/** Fuse the visible view + arc layout into keyed, absolutely-positioned slots. */
+export function helperSlotViews(
+  view: HelperView,
+  anchor: Vec,
+  dir: 1 | -1,
+  vdir: 1 | -1,
+): HelperSlot[] {
+  const keys = [
+    ...view.shown.map((a) => a.id),
+    ...(view.overflow.length > 0 ? [OVERFLOW_KEY] : []),
+  ];
+  const offsets = helperSlots(keys.length, dir, vdir);
+  return keys.map((key, i) => {
+    const o = offsets[i] ?? { x: 0, y: 0 };
+    return { key, pos: { x: anchor.x + o.x, y: anchor.y + o.y } };
+  });
+}
+
+/**
+ * Which helper (if any) the cursor is on: the NEAREST sprite within
+ * HELPER_HIT_RADIUS wins; failing that, a cursor still inside the open card
+ * (padded by AUX_PAD, matching the hover machine's aux test) keeps the
+ * currently hovered helper. null when nothing is hovered or hovering is
+ * ineligible (machine disabled and overlay not interactive).
+ */
+export function desiredHelperHover(input: {
+  cursor: Vec | null;
+  slots: HelperSlot[];
+  hovered: string | null;
+  cardRect: Rect | null;
+  enabled: boolean;
+}): string | null {
+  const { cursor, slots, hovered, cardRect } = input;
+  if (cursor === null || slots.length === 0 || !input.enabled) return null;
+  let want: string | null = null;
+  let bestD = Infinity;
+  for (const slot of slots) {
+    const d = dist(cursor, slot.pos);
+    if (d <= HELPER_HIT_RADIUS && d < bestD) {
+      bestD = d;
+      want = slot.key;
+    }
+  }
+  // Not on a sprite, but still inside the open card: keep it open.
+  if (want === null && hovered !== null && cardRect !== null) {
+    if (insideRect(cursor, padRect(cardRect, AUX_PAD))) want = hovered;
+  }
+  return want;
+}
+
+/**
+ * Anti-flicker transition from the current hover to `want`:
+ * - 'hold'   nothing to change — cancel any pending switch
+ * - 'commit' switch NOW (moving directly between helpers must not blink)
+ * - 'defer'  arm a grace timer (show delay entering, hide delay leaving —
+ *            time to travel from a sprite into its card)
+ */
+export type HelperHoverStep =
+  { kind: 'hold' } | { kind: 'commit' } | { kind: 'defer'; delayMs: number };
+
+export function helperHoverStep(want: string | null, hovered: string | null): HelperHoverStep {
+  if (want === hovered) return { kind: 'hold' };
+  if (want !== null && hovered !== null) return { kind: 'commit' };
+  return { kind: 'defer', delayMs: want === null ? CARD_HIDE_DELAY_MS : CARD_SHOW_DELAY_MS };
 }
 
 // ---------------------------------------------------------------------------

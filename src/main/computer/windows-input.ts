@@ -6,6 +6,35 @@ import inputScript from './windows-input.ps1?raw';
 
 export type MouseButton = 'left' | 'right' | 'middle';
 
+/**
+ * One request line to the PowerShell input daemon (windows-input.ps1). A
+ * numeric `id` is stamped on at write time; the daemon replies with one JSON
+ * line `{id, ok, error?}` per request.
+ */
+export type InputRequest =
+  | { action: 'click'; x: number; y: number; button: MouseButton; count: number }
+  | { action: 'type_text'; text: string }
+  | { action: 'press_keys'; keys: string[] };
+
+/** Per-request reply budget from the daemon. */
+const REQUEST_TIMEOUT_MS = 5_000;
+
+/** The `child_process.spawn` surface this controller uses (tests inject a fake). */
+export type SpawnImpl = (
+  command: string,
+  args: readonly string[],
+  options: { stdio: ['pipe', 'pipe', 'pipe']; windowsHide: boolean },
+) => ChildProcessWithoutNullStreams;
+
+export interface WindowsInputControllerOptions {
+  /** Process spawner. Default: node:child_process spawn. */
+  spawnImpl?: SpawnImpl;
+  /** Platform gate override (tests). Default: process.platform. */
+  platform?: NodeJS.Platform;
+  /** Per-request reply budget, ms (tests shrink it). Default 5s. */
+  requestTimeoutMs?: number;
+}
+
 interface Pending {
   resolve(value: { ok: boolean; error?: string }): void;
   timer: NodeJS.Timeout;
@@ -16,8 +45,18 @@ export class WindowsInputController {
   private readonly pending = new Map<number, Pending>();
   private nextId = 1;
   private buffer = '';
+  private readonly spawnImpl: SpawnImpl;
+  private readonly platform: NodeJS.Platform;
+  private readonly requestTimeoutMs: number;
 
-  constructor(private readonly scriptDir: string) {}
+  constructor(
+    private readonly scriptDir: string,
+    options: WindowsInputControllerOptions = {},
+  ) {
+    this.spawnImpl = options.spawnImpl ?? spawn;
+    this.platform = options.platform ?? process.platform;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
+  }
 
   click(x: number, y: number, button: MouseButton = 'left', count = 1): Promise<void> {
     return this.request({ action: 'click', x: Math.round(x), y: Math.round(y), button, count });
@@ -47,12 +86,12 @@ export class WindowsInputController {
   }
 
   private ensureChild(): ChildProcessWithoutNullStreams {
-    if (process.platform !== 'win32') throw new Error('computer use is only available on windows');
+    if (this.platform !== 'win32') throw new Error('computer use is only available on windows');
     if (this.child !== null && this.child.exitCode === null) return this.child;
     mkdirSync(this.scriptDir, { recursive: true });
     const scriptPath = join(this.scriptDir, 'windows-input.ps1');
     writeFileSync(scriptPath, inputScript, 'utf8');
-    const child = spawn(
+    const child = this.spawnImpl(
       'powershell.exe',
       [
         '-NoProfile',
@@ -79,7 +118,7 @@ export class WindowsInputController {
     return child;
   }
 
-  private request(payload: Record<string, unknown>): Promise<void> {
+  private request(payload: InputRequest): Promise<void> {
     return new Promise((resolve, reject) => {
       let child: ChildProcessWithoutNullStreams;
       try {
@@ -91,7 +130,7 @@ export class WindowsInputController {
       const id = this.nextId++;
       const timer = setTimeout(() => {
         if (this.pending.delete(id)) reject(new Error('windows input timed out'));
-      }, 5_000);
+      }, this.requestTimeoutMs);
       this.pending.set(id, {
         timer,
         resolve: (result) =>

@@ -50,6 +50,7 @@ describe.skipIf(!LIVE)('RestGrounder LIVE validation (CLICKY_LIVE_GROUND=1)', ()
     const key = liveApiKey();
     expect(key, 'OPENAI_API_KEY must be available for the live run').not.toBeNull();
     const grounder = new RestGrounder({ getApiKey: () => key, env: {} });
+    const auth = { kind: 'apiKey', getApiKey: () => key } as const;
 
     const layouts = JSON.parse(readFileSync(join(STUDY, 'layouts.json'), 'utf8')) as {
       width: number;
@@ -79,12 +80,11 @@ describe.skipIf(!LIVE)('RestGrounder LIVE validation (CLICKY_LIVE_GROUND=1)', ()
     }[] = [];
     for (const { image, kind, t } of jobs) {
       const t0 = Date.now();
-      const res = await grounder.groundWithModel({
-        jpegBase64: image,
-        imageW: layouts.width,
-        imageH: layouts.height,
-        label: t.ask,
-      });
+      const outcome = await grounder.ground(
+        { jpegBase64: image, imageW: layouts.width, imageH: layouts.height, label: t.ask },
+        auth,
+      );
+      const res = outcome.point;
       const ms = Date.now() - t0;
       if (res === null) {
         rows.push({ id: t.id, kind, err: null, hit: false, ms });

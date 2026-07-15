@@ -3,6 +3,7 @@ import type { ChatGptCodexAuthSource } from '../auth/auth-source';
 import { captureAllDisplays } from '../capture';
 import type { CaptureResult } from '../capture';
 import { mapModelPoint } from '../coords';
+import type { Point } from '../coords';
 import { CodexResponsesSession, DEFAULT_CODEX_MODEL } from '../codex/responses-session';
 import type {
   CodexFunctionCall,
@@ -11,11 +12,18 @@ import type {
   CodexTurnResult,
   CodexUserTurn,
 } from '../codex/responses-session';
-import { WindowsInputController } from './windows-input';
+import { asFiniteNumber, asRecord, errorMessage } from '../util/guards';
+import { type WindowsInputController } from './windows-input';
 import type { MouseButton } from './windows-input';
 
 const MAX_ACTIONS = 12;
 const SETTLE_MS = 350;
+/** Network budget for one Sol Responses request. */
+const OPERATOR_TIMEOUT_MS = 45_000;
+/** type_text upper bound (mirrored in the error copy below). */
+const MAX_TYPE_TEXT_CHARS = 10_000;
+/** click_at label echo cap (tool output back to Sol). */
+const LABEL_MAX = 200;
 
 const OPERATOR_INSTRUCTIONS = `you are the careful computer operator inside buddy.
 the user has explicitly enabled computer use and asked you to carry out the supplied task.
@@ -73,6 +81,85 @@ export const PRESS_KEYS_TOOL: CodexToolDef = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Pure tool-argument parsing (unknown -> typed | error). The error strings are
+// tool outputs the model reads — they are part of the wire copy; keep exact.
+// ---------------------------------------------------------------------------
+
+/** Result of narrowing one tool call's untrusted arguments. */
+export type ParsedArgs<T> = { ok: true; value: T } | { ok: false; error: string };
+
+export interface ClickArgs {
+  screen: number;
+  x: number;
+  y: number;
+  button: MouseButton;
+  count: 1 | 2;
+  /** Echoed back to Sol, capped at LABEL_MAX chars; '' when absent. */
+  label: string;
+}
+
+export function parseClickArgs(value: unknown): ParsedArgs<ClickArgs> {
+  const args = asRecord(value);
+  if (args === null) return { ok: false, error: 'arguments were not valid json' };
+  const screenIndex = asFiniteNumber(args['screen']);
+  const x = asFiniteNumber(args['x']);
+  const y = asFiniteNumber(args['y']);
+  if (screenIndex === null || x === null || y === null)
+    return { ok: false, error: 'screen, x, and y must be numbers' };
+  return {
+    ok: true,
+    value: {
+      screen: screenIndex,
+      x,
+      y,
+      button: isButton(args['button']) ? args['button'] : 'left',
+      count: args['count'] === 2 ? 2 : 1,
+      label: typeof args['label'] === 'string' ? args['label'].slice(0, LABEL_MAX) : '',
+    },
+  };
+}
+
+export interface TypeTextArgs {
+  text: string;
+}
+
+export function parseTypeTextArgs(value: unknown): ParsedArgs<TypeTextArgs> {
+  const args = asRecord(value);
+  if (args === null) return { ok: false, error: 'arguments were not valid json' };
+  const text = args['text'];
+  if (typeof text !== 'string' || text.length > MAX_TYPE_TEXT_CHARS)
+    return { ok: false, error: 'text must be at most 10000 characters' };
+  return { ok: true, value: { text } };
+}
+
+export interface PressKeysArgs {
+  keys: string[];
+}
+
+export function parsePressKeysArgs(value: unknown): ParsedArgs<PressKeysArgs> {
+  const args = asRecord(value);
+  if (args === null) return { ok: false, error: 'arguments were not valid json' };
+  const keys = args['keys'];
+  if (!Array.isArray(keys) || keys.length < 1 || keys.length > 8)
+    return { ok: false, error: 'keys must be an array of one to eight strings' };
+  if (!keys.every((key): key is string => typeof key === 'string'))
+    return { ok: false, error: 'keys must be an array of one to eight strings' };
+  return { ok: true, value: { keys } };
+}
+
+/**
+ * One executed tool call's output, JSON-serialized back to Sol via
+ * `function_call_output` — the success/error shapes are pinned wire payloads.
+ */
+export type ToolOutcome =
+  | { ok: true; clicked: string }
+  | { ok: true; typed_characters: number }
+  | { ok: true; pressed: string[] }
+  | { ok?: never; error: string };
+
+// ---------------------------------------------------------------------------
+
 export interface ComputerUseResult {
   ok: boolean;
   summary: string;
@@ -87,16 +174,20 @@ export interface ComputerUseOperatorOptions {
   isAllowed(): boolean;
   capture?: () => Promise<CaptureResult[]>;
   buildSession?: (auth: ChatGptCodexAuthSource) => CodexResponsesSession;
+  /** DIP -> physical px conversion (tests inject; default Electron `screen`). */
+  dipToScreenPoint?: (point: Point) => Point;
 }
 
 export class ComputerUseOperator {
   private readonly capture: () => Promise<CaptureResult[]>;
+  private readonly dipToScreenPoint: (point: Point) => Point;
   private readonly session: CodexResponsesSession;
   private captures: CaptureResult[];
   private finalText = '';
 
   constructor(private readonly options: ComputerUseOperatorOptions) {
     this.capture = options.capture ?? captureAllDisplays;
+    this.dipToScreenPoint = options.dipToScreenPoint ?? ((point) => screen.dipToScreenPoint(point));
     this.captures = options.initialCaptures ?? [];
     this.session =
       options.buildSession?.(options.auth) ??
@@ -107,7 +198,7 @@ export class ComputerUseOperator {
         tools: [CLICK_AT_TOOL, TYPE_TEXT_TOOL, PRESS_KEYS_TOOL],
         reasoningEffort: 'low',
         serviceTier: 'priority',
-        timeoutMs: 45_000,
+        timeoutMs: OPERATOR_TIMEOUT_MS,
       });
   }
 
@@ -153,8 +244,7 @@ export class ComputerUseOperator {
           error: 'only one action is allowed per screen observation',
         });
       }
-      if (output['ok'] !== true)
-        return failure(String(output['error'] || 'the action failed.'), actions);
+      if (output.ok !== true) return failure(output.error || 'the action failed.', actions);
       actions += 1;
       await delay(SETTLE_MS);
       if (!this.options.isAllowed()) {
@@ -181,56 +271,42 @@ export class ComputerUseOperator {
     };
   }
 
-  private async execute(call: CodexFunctionCall): Promise<Record<string, unknown>> {
-    let args: Record<string, unknown>;
+  private async execute(call: CodexFunctionCall): Promise<ToolOutcome> {
+    let args: Record<string, unknown> | null;
     try {
-      const parsed: unknown = JSON.parse(call.argsJson || '{}');
-      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
-      args = parsed as Record<string, unknown>;
+      args = asRecord(JSON.parse(call.argsJson || '{}'));
     } catch {
-      return { error: 'arguments were not valid json' };
+      args = null;
     }
+    if (args === null) return { error: 'arguments were not valid json' };
 
     try {
       if (call.name === 'click_at') {
-        const screenIndex = finiteNumber(args['screen']);
-        const x = finiteNumber(args['x']);
-        const y = finiteNumber(args['y']);
-        if (screenIndex === null || x === null || y === null)
-          return { error: 'screen, x, and y must be numbers' };
-        const capture = this.captures.find((item) => item.meta.screenIndex === screenIndex);
+        const parsed = parseClickArgs(args);
+        if (!parsed.ok) return { error: parsed.error };
+        const click = parsed.value;
+        const capture = this.captures.find((item) => item.meta.screenIndex === click.screen);
         if (!capture) return { error: 'that screenshot does not exist' };
-        const mapped = mapModelPoint({ x, y }, capture.meta);
-        const physical = screen.dipToScreenPoint(mapped.global);
-        const button = isButton(args['button']) ? args['button'] : 'left';
-        const count = args['count'] === 2 ? 2 : 1;
-        await this.options.input.click(physical.x, physical.y, button, count);
-        return {
-          ok: true,
-          clicked: typeof args['label'] === 'string' ? args['label'].slice(0, 200) : '',
-        };
+        const mapped = mapModelPoint({ x: click.x, y: click.y }, capture.meta);
+        const physical = this.dipToScreenPoint(mapped.global);
+        await this.options.input.click(physical.x, physical.y, click.button, click.count);
+        return { ok: true, clicked: click.label };
       }
       if (call.name === 'type_text') {
-        if (typeof args['text'] !== 'string' || args['text'].length > 10_000)
-          return { error: 'text must be at most 10000 characters' };
-        await this.options.input.typeText(args['text']);
-        return { ok: true, typed_characters: args['text'].length };
+        const parsed = parseTypeTextArgs(args);
+        if (!parsed.ok) return { error: parsed.error };
+        await this.options.input.typeText(parsed.value.text);
+        return { ok: true, typed_characters: parsed.value.text.length };
       }
       if (call.name === 'press_keys') {
-        if (
-          !Array.isArray(args['keys']) ||
-          args['keys'].length < 1 ||
-          args['keys'].length > 8 ||
-          !args['keys'].every((key) => typeof key === 'string')
-        ) {
-          return { error: 'keys must be an array of one to eight strings' };
-        }
-        await this.options.input.pressKeys(args['keys'] as string[]);
-        return { ok: true, pressed: args['keys'] };
+        const parsed = parsePressKeysArgs(args);
+        if (!parsed.ok) return { error: parsed.error };
+        await this.options.input.pressKeys(parsed.value.keys);
+        return { ok: true, pressed: parsed.value.keys };
       }
       return { error: `unknown tool: ${call.name}` };
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) };
+      return { error: errorMessage(error) };
     }
   }
 }
@@ -242,9 +318,6 @@ function captureContext(captures: CaptureResult[]): string {
       return `screen${m.screenIndex}: ${m.imageW}x${m.imageH} screenshot pixels${m.isActive ? ' (active)' : ''}; coordinates use this image.`;
     })
     .join('\n');
-}
-function finiteNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 function isButton(value: unknown): value is MouseButton {
   return value === 'left' || value === 'right' || value === 'middle';

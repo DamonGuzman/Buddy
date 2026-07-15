@@ -1,7 +1,15 @@
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
 import type { AgentToolSpec } from '../types';
-import { AGENT_FETCH_MAX_CALLS, AGENT_FETCH_MAX_CHARS, AGENT_FETCH_TIMEOUT_MS } from '../types';
+import { AGENT_FETCH_MAX_CALLS, AGENT_FETCH_MAX_CHARS, AGENT_FETCH_TIMEOUT_MS } from '../config';
+
+/** Redirect hops followed before giving up. */
+const MAX_REDIRECTS = 5;
+/**
+ * Raw-body pre-slice: markup is stripped before the final char cap, so read
+ * this multiple of the budget to keep enough text after sanitizing.
+ */
+const RAW_BODY_PRESLICE_MULTIPLIER = 4;
 
 export const webFetchTool: AgentToolSpec = {
   definition: {
@@ -29,7 +37,10 @@ export const webFetchTool: AgentToolSpec = {
     const type = response.headers.get('content-type') ?? '';
     if (!/text|json|xml|html/i.test(type))
       return JSON.stringify({ error: `unsupported content type: ${type || 'unknown'}` });
-    const body = (await response.text()).slice(0, AGENT_FETCH_MAX_CHARS * 4);
+    const body = (await response.text()).slice(
+      0,
+      AGENT_FETCH_MAX_CHARS * RAW_BODY_PRESLICE_MULTIPLIER,
+    );
     const text = sanitize(body).slice(0, AGENT_FETCH_MAX_CHARS);
     ctx.addSource(response.url || url.toString());
     return [
@@ -42,7 +53,7 @@ export const webFetchTool: AgentToolSpec = {
 
 async function safeFetch(initial: URL, signal: AbortSignal): Promise<Response> {
   let current = initial;
-  for (let redirects = 0; redirects <= 5; redirects += 1) {
+  for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
     await assertPublic(current);
     const response = await fetch(current, {
       redirect: 'manual',
@@ -74,7 +85,12 @@ async function assertPublic(url: URL): Promise<void> {
     throw new Error('private addresses are blocked');
 }
 
-function isPrivateAddress(address: string): boolean {
+/**
+ * SSRF guard: loopback / link-local / RFC1918 / ULA / multicast+reserved
+ * ranges, including v4-mapped v6 forms. Exported for direct unit tests
+ * (tests/web-fetch-guards.test.ts).
+ */
+export function isPrivateAddress(address: string): boolean {
   const a = address.toLowerCase();
   if (
     a === '::1' ||
@@ -102,7 +118,11 @@ function isPrivateAddress(address: string): boolean {
   );
 }
 
-function sanitize(value: string): string {
+/**
+ * Markup strip + entity decode + whitespace collapse for fetched pages.
+ * Exported for direct unit tests (tests/web-fetch-guards.test.ts).
+ */
+export function sanitize(value: string): string {
   return value
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
@@ -114,6 +134,7 @@ function sanitize(value: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
 function safeHost(raw: string): string {
   try {
     return new URL(raw).hostname;

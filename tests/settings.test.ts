@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SETTINGS, applySettingsPatch } from '../src/shared/types';
+import { DEFAULT_SETTINGS, PATCHABLE_KEYS, applySettingsPatch } from '../src/shared/types';
 import type { Settings, SettingsPatch } from '../src/shared/types';
 
 describe('settings schema', () => {
@@ -44,6 +44,8 @@ describe('settings schema', () => {
       captionsEnabled: false,
       micDeviceId: 'mic-42',
       fullRealtimeMode: true,
+      // M20: whisper quiet mode rides along untouched (not in this patch).
+      voiceMuted: false,
       hotkeyLabel: 'Ctrl+Alt (left alt)',
       // M15 addition (orchestrator-approved): buddyRest rides along untouched.
       buddyRest: null,
@@ -77,5 +79,33 @@ describe('settings schema', () => {
     const before = { ...DEFAULT_SETTINGS };
     applySettingsPatch(DEFAULT_SETTINGS, { captionsEnabled: false });
     expect(DEFAULT_SETTINGS).toEqual(before);
+  });
+
+  it('applies buddyRest patches, including the null reset (M15)', () => {
+    const rest = { screenIndex: 1, xFrac: 0.25, yFrac: 0.75 };
+    const moved = applySettingsPatch(DEFAULT_SETTINGS, { buddyRest: rest });
+    expect(moved.buddyRest).toEqual(rest);
+    const reset = applySettingsPatch(moved, { buddyRest: null });
+    expect(reset.buddyRest).toBeNull();
+  });
+
+  it('storing a new key resolves an unreadable blob (M11)', () => {
+    const unreadable: Settings = {
+      ...DEFAULT_SETTINGS,
+      apiKeyPresent: true,
+      apiKeyUnreadable: true,
+    };
+    const next = applySettingsPatch(unreadable, { apiKey: 'sk-new' });
+    expect(next.apiKeyPresent).toBe(true);
+    expect(next.apiKeyUnreadable).toBe(false);
+  });
+
+  it('drives the merge from PATCHABLE_KEYS (no dupes, never the write-only apiKey)', () => {
+    expect(new Set(PATCHABLE_KEYS).size).toBe(PATCHABLE_KEYS.length);
+    expect(PATCHABLE_KEYS).not.toContain('apiKey');
+    // main-owned codex* sign-in fields must never be renderer-patchable
+    for (const key of PATCHABLE_KEYS) {
+      expect(key.startsWith('codex')).toBe(false);
+    }
   });
 });

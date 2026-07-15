@@ -1,4 +1,5 @@
 import type { AgentToolSpec } from '../types';
+import { AGENT_TOOL_TIMEOUT_MS } from '../config';
 
 export const readScreenTool: AgentToolSpec = {
   definition: {
@@ -8,7 +9,7 @@ export const readScreenTool: AgentToolSpec = {
       'Re-read the screenshot included with the original handoff. It is immutable and no new capture occurs.',
     parameters: { type: 'object', properties: {} },
   },
-  timeoutMs: 15_000,
+  timeoutMs: AGENT_TOOL_TIMEOUT_MS,
   stepKind: 'think',
   stepLabel: () => 're-read the handoff screen',
   async execute(_args, ctx) {

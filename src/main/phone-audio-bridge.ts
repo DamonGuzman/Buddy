@@ -15,9 +15,15 @@
 
 import { EventEmitter } from 'node:events';
 import WebSocket from 'ws';
+import { Backoff, RetryTimer } from './util/backoff';
 
 export type PhoneCaptureCommand = 'start' | 'stop';
 export type PhonePlaybackCommand = 'stop' | 'flush';
+
+/** Every JSON control message Clicky sends to the bridge (the full wire vocabulary). */
+type PhoneControlMessage =
+  | { type: 'capture'; command: PhoneCaptureCommand }
+  | { type: 'playback'; command: PhonePlaybackCommand };
 
 export interface PhoneAudioTransport {
   capture(command: PhoneCaptureCommand): void;
@@ -34,13 +40,28 @@ interface PhoneAudioBridgeEvents {
 const RECONNECT_MIN_MS = 250;
 const RECONNECT_MAX_MS = 4_000;
 
+/**
+ * Copy a ws 'message' payload into a standalone ArrayBuffer (never a view
+ * into a shared pool buffer). Handles all three RawData cases: Buffer,
+ * Buffer[], and ArrayBuffer.
+ */
+export function toArrayBuffer(data: Buffer | ArrayBuffer | Buffer[]): ArrayBuffer {
+  const bytes = Buffer.isBuffer(data)
+    ? data
+    : Buffer.concat(Array.isArray(data) ? data : [Buffer.from(data)]);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 export class PhoneAudioBridgeClient
   extends EventEmitter<PhoneAudioBridgeEvents>
   implements PhoneAudioTransport
 {
   private socket: WebSocket | null = null;
-  private reconnectTimer: NodeJS.Timeout | null = null;
-  private reconnectMs = RECONNECT_MIN_MS;
+  private readonly reconnectTimer = new RetryTimer();
+  private readonly reconnectBackoff = new Backoff({
+    minMs: RECONNECT_MIN_MS,
+    maxMs: RECONNECT_MAX_MS,
+  });
   private closed = false;
   private captureState: PhoneCaptureCommand = 'stop';
 
@@ -69,8 +90,7 @@ export class PhoneAudioBridgeClient
 
   close(): void {
     this.closed = true;
-    if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = null;
+    this.reconnectTimer.clear();
     const socket = this.socket;
     this.socket = null;
     socket?.close(1000, 'clicky shutting down');
@@ -85,7 +105,7 @@ export class PhoneAudioBridgeClient
 
     socket.on('open', () => {
       if (this.socket !== socket || this.closed) return;
-      this.reconnectMs = RECONNECT_MIN_MS;
+      this.reconnectBackoff.reset();
       console.log(`[phone-audio] connected to ${this.url}`);
       this.sendJson({ type: 'capture', command: this.captureState });
       this.emit('connected');
@@ -93,14 +113,7 @@ export class PhoneAudioBridgeClient
 
     socket.on('message', (data, isBinary) => {
       if (!isBinary || this.socket !== socket || this.closed) return;
-      const bytes = Buffer.isBuffer(data)
-        ? data
-        : Buffer.concat(Array.isArray(data) ? data : [Buffer.from(data)]);
-      const chunk = bytes.buffer.slice(
-        bytes.byteOffset,
-        bytes.byteOffset + bytes.byteLength,
-      ) as ArrayBuffer;
-      this.emit('audio', chunk);
+      this.emit('audio', toArrayBuffer(data));
     });
 
     socket.on('error', (error) => {
@@ -119,17 +132,12 @@ export class PhoneAudioBridgeClient
   }
 
   private scheduleReconnect(): void {
-    if (this.closed || this.reconnectTimer !== null) return;
-    const delay = this.reconnectMs;
-    this.reconnectMs = Math.min(RECONNECT_MAX_MS, this.reconnectMs * 2);
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.connect();
-    }, delay);
-    this.reconnectTimer.unref?.();
+    // Skip-if-pending: never stack reconnect attempts (see util/backoff.ts).
+    if (this.closed || this.reconnectTimer.isPending()) return;
+    this.reconnectTimer.schedule(this.reconnectBackoff.next(), () => this.connect());
   }
 
-  private sendJson(payload: object): void {
+  private sendJson(payload: PhoneControlMessage): void {
     if (this.socket?.readyState !== WebSocket.OPEN) return;
     this.socket.send(JSON.stringify(payload));
   }

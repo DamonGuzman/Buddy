@@ -25,13 +25,18 @@ export function lockdownNavigation(win: BrowserWindow): void {
   });
 }
 
+/** Default recreate budget shared by the overlay + panel guards. */
+export const CRASH_LOOP_MAX_RECREATES = 3;
+/** Default sliding window for the recreate budget. */
+export const CRASH_LOOP_WINDOW_MS = 5 * 60_000;
+
 /** Sliding-window crash counter: at most `max` recoveries per `windowMs`. */
 export class CrashLoopGuard {
   private readonly timestamps: number[] = [];
 
   constructor(
-    private readonly max = 3,
-    private readonly windowMs = 5 * 60_000,
+    private readonly max = CRASH_LOOP_MAX_RECREATES,
+    private readonly windowMs = CRASH_LOOP_WINDOW_MS,
     private readonly label = 'renderer',
   ) {}
 

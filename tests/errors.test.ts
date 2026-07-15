@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AUTO_SHOW_KINDS,
+  ERROR_KINDS,
   classifyError,
   describeKind,
   singleLine,
@@ -17,32 +18,9 @@ import {
 } from '../src/main/errors';
 import type { ErrorKind } from '../src/main/errors';
 
-const ALL_KINDS: ErrorKind[] = [
-  'no_api_key',
-  'api_key_rejected',
-  'api_key_unreadable',
-  'insufficient_quota',
-  'rate_limited',
-  'model_unavailable',
-  'network_unreachable',
-  'response_interrupted',
-  'response_incomplete',
-  'server_error',
-  'mic_unavailable',
-  'audio_output_failed',
-  'capture_failed',
-  'codex_plan_limit',
-  'hotkey_dead',
-  'hold_too_long',
-  'settings_reset',
-  'renderer_dead',
-  // M18 additions (integration-approved): agent mode (docs/AGENT-MODE.md §7).
-  'agent_not_signed_in',
-  'agent_quota',
-  'agent_backend_down',
-  'agent_timed_out',
-  'agent_tool_failed',
-];
+// Derived from the catalog itself — Record<ErrorKind, …> already guarantees
+// (at the type level) that every kind has an entry.
+const ALL_KINDS: readonly ErrorKind[] = ERROR_KINDS;
 
 describe('error catalog (describeKind)', () => {
   it('covers every kind with non-empty complete copy (no fallback prefix)', () => {

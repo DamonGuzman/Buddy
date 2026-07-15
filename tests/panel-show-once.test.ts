@@ -3,21 +3,18 @@
  * `shownOnce` boolean meant the first-run discoverability show consumed the
  * one-and-only auto-surface — a later "add your openai key" failure died
  * silently behind the tray icon. Now each reason (error kind or 'first-run')
- * gets its own once-per-run budget.
+ * gets its own once-per-run budget, owned by the PanelManager instance.
  *
- * Electron is mocked; PanelManager.showInactive is spied to a no-op so no
- * window is ever created.
+ * Electron is mocked (module-load only — the PanelManager constructor touches
+ * nothing Electron; window pre-creation happens in start(), never called
+ * here); PanelManager.showInactive is spied to a no-op so no window is ever
+ * created.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('electron', () => ({
-  app: {
-    // Never resolves: the constructor's ensureWindow path stays dormant.
-    whenReady: () => new Promise(() => {}),
-    getPath: () => 'unused-in-tests',
-    getAppPath: () => 'unused-in-tests',
-  },
+  app: {},
   BrowserWindow: class {},
   screen: {},
 }));

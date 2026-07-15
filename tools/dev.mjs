@@ -1,37 +1,28 @@
+/**
+ * `npm run dev` — the dev-mode runner. Two independent jobs, composed in
+ * main():
+ *
+ *  1. Dev runner: spawn electron-vite dev/--watch against the "Buddy Dev"
+ *     profile, importing the local OPENAI_API_KEY (env or HKCU registry).
+ *  2. iPhone audio bridge supervision — DEV MODE ONLY. Packaged builds are
+ *     supervised in-process by src/main/phone-audio-bridge-supervisor.ts;
+ *     this script only covers `npm run dev`, where that supervisor does not
+ *     autostart.
+ *
+ * Escape hatch: set CLICKY_PHONE_AUDIO_URL to an explicitly EMPTY value to
+ * skip the bridge entirely — a broken bridge then cannot block dev work that
+ * never touches phone audio (src/main treats '' as phone-audio disabled).
+ */
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 
-const require = createRequire(import.meta.url);
-const electronVitePackage = require.resolve('electron-vite/package.json');
-const electronViteCli = join(dirname(electronVitePackage), 'bin', 'electron-vite.js');
 const repoRoot = join(import.meta.dirname, '..');
-const bridgeEntry = join(repoRoot, 'tools', 'phone-audio-bridge', 'start.mjs');
 const cliArgs = process.argv.slice(2);
 
-const appData =
-  process.env.APPDATA ?? join(process.env.USERPROFILE ?? process.cwd(), 'AppData', 'Roaming');
-const devUserData = join(appData, 'Buddy Dev');
-const activeDevUserData = process.env.CLICKY_USER_DATA ?? devUserData;
-
-function readLocalApiKey() {
-  const processKey = process.env.OPENAI_API_KEY?.trim() ?? '';
-  if (processKey !== '') return processKey;
-  if (process.platform !== 'win32') return '';
-
-  const result = spawnSync('reg.exe', ['query', 'HKCU\\Environment', '/v', 'OPENAI_API_KEY'], {
-    encoding: 'utf8',
-    windowsHide: true,
-  });
-  if (result.status !== 0 || typeof result.stdout !== 'string') return '';
-  const match = result.stdout.match(/OPENAI_API_KEY\s+REG_[A-Z_]+\s+([^\r\n]+)/);
-  return match?.[1]?.trim() ?? '';
-}
-
-const localApiKey = readLocalApiKey();
-const bridgePort = Number(process.env.CLICKY_PHONE_AUDIO_SETUP_PORT ?? 3211);
-const bridgeHealthUrl = `http://127.0.0.1:${bridgePort}/health`;
-const bridgeSocketUrl = `ws://127.0.0.1:${bridgePort}/clicky`;
+// ---------------------------------------------------------------------------
+// Child-process lifecycle (shared by both jobs)
+// ---------------------------------------------------------------------------
 
 let bridgeProcess = null;
 let electronProcess = null;
@@ -57,6 +48,83 @@ function shutdown(exitCode = 0) {
   process.exit(exitCode);
 }
 
+// ---------------------------------------------------------------------------
+// Job 1 — dev runner: profile env + API-key import + electron-vite spawn
+// ---------------------------------------------------------------------------
+
+const require = createRequire(import.meta.url);
+const electronVitePackage = require.resolve('electron-vite/package.json');
+const electronViteCli = join(dirname(electronVitePackage), 'bin', 'electron-vite.js');
+
+const appData =
+  process.env.APPDATA ?? join(process.env.USERPROFILE ?? process.cwd(), 'AppData', 'Roaming');
+const devUserData = join(appData, 'Buddy Dev');
+const activeDevUserData = process.env.CLICKY_USER_DATA ?? devUserData;
+
+function readLocalApiKey() {
+  const processKey = process.env.OPENAI_API_KEY?.trim() ?? '';
+  if (processKey !== '') return processKey;
+  if (process.platform !== 'win32') return '';
+
+  const result = spawnSync('reg.exe', ['query', 'HKCU\\Environment', '/v', 'OPENAI_API_KEY'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  if (result.status !== 0 || typeof result.stdout !== 'string') return '';
+  const match = result.stdout.match(/OPENAI_API_KEY\s+REG_[A-Z_]+\s+([^\r\n]+)/);
+  return match?.[1]?.trim() ?? '';
+}
+
+/**
+ * Spawn electron-vite dev/--watch with the dev profile. `phoneAudioUrl` is
+ * what CLICKY_PHONE_AUDIO_URL should be for the app ('' = phone audio off).
+ */
+function spawnElectron(phoneAudioUrl) {
+  const localApiKey = readLocalApiKey();
+  console.log(`[dev] profile: ${activeDevUserData}`);
+  console.log('[dev] renderer edits hot-reload; main and preload edits restart Electron');
+  console.log('[dev] quit the installed Buddy from its tray icon before testing Ctrl+Alt');
+  if (localApiKey !== '') {
+    console.log('[dev] local OPENAI_API_KEY will be encrypted into the development profile');
+  } else {
+    console.warn('[dev] OPENAI_API_KEY is not set; no API key can be imported automatically');
+  }
+
+  electronProcess = spawn(process.execPath, [electronViteCli, 'dev', '--watch', ...cliArgs], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      CLICKY_USER_DATA: activeDevUserData,
+      CLICKY_SHOW_PANEL: process.env.CLICKY_SHOW_PANEL ?? '1',
+      CLICKY_PHONE_AUDIO_URL: phoneAudioUrl,
+      CLICKY_IMPORT_API_KEY_FROM_ENV: localApiKey !== '' ? '1' : '0',
+    },
+  });
+
+  electronProcess.on('error', (error) => {
+    console.error('[dev] failed to start Electron:', error);
+    shutdown(1);
+  });
+  electronProcess.on('exit', (code, signal) => {
+    if (shuttingDown) return;
+    console.log(`[dev] Electron exited (${signal ?? code ?? 'unknown'})`);
+    shutdown(code ?? 1);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Job 2 — iPhone audio bridge supervision (dev mode only)
+// ---------------------------------------------------------------------------
+
+const bridgeEntry = join(repoRoot, 'tools', 'phone-audio-bridge', 'start.mjs');
+
+/** Default setup/health/WS port of tools/phone-audio-bridge (its SETUP_PORT). */
+const DEFAULT_BRIDGE_SETUP_PORT = 3211;
+const bridgePort = Number(process.env.CLICKY_PHONE_AUDIO_SETUP_PORT ?? DEFAULT_BRIDGE_SETUP_PORT);
+const bridgeHealthUrl = `http://127.0.0.1:${bridgePort}/health`;
+const bridgeSocketUrl = `ws://127.0.0.1:${bridgePort}/clicky`;
+
 async function readBridgeHealth() {
   try {
     const response = await fetch(bridgeHealthUrl, { signal: AbortSignal.timeout(750) });
@@ -77,74 +145,44 @@ async function waitForBridge(predicate, timeoutMs) {
   return null;
 }
 
-function spawnElectron() {
-  console.log(`[dev] profile: ${activeDevUserData}`);
-  console.log('[dev] renderer edits hot-reload; main and preload edits restart Electron');
-  console.log('[dev] quit the installed Buddy from its tray icon before testing Ctrl+Alt');
-  if (localApiKey !== '') {
-    console.log('[dev] local OPENAI_API_KEY will be encrypted into the development profile');
-  } else {
-    console.warn('[dev] OPENAI_API_KEY is not set; no API key can be imported automatically');
-  }
-
-  electronProcess = spawn(process.execPath, [electronViteCli, 'dev', '--watch', ...cliArgs], {
-    cwd: repoRoot,
-    stdio: 'inherit',
-    env: {
-      ...process.env,
-      CLICKY_USER_DATA: activeDevUserData,
-      CLICKY_SHOW_PANEL: process.env.CLICKY_SHOW_PANEL ?? '1',
-      CLICKY_PHONE_AUDIO_URL: process.env.CLICKY_PHONE_AUDIO_URL ?? bridgeSocketUrl,
-      CLICKY_IMPORT_API_KEY_FROM_ENV: localApiKey !== '' ? '1' : '0',
-    },
-  });
-
-  electronProcess.on('error', (error) => {
-    console.error('[dev] failed to start Electron:', error);
-    shutdown(1);
-  });
-  electronProcess.on('exit', (code, signal) => {
-    if (shuttingDown) return;
-    console.log(`[dev] Electron exited (${signal ?? code ?? 'unknown'})`);
-    shutdown(code ?? 1);
-  });
-}
-
-async function main() {
-  if (cliArgs.some((arg) => ['--help', '-h', '--version', '-v'].includes(arg))) {
-    spawnElectron();
-    return;
-  }
-
+/**
+ * Reuse a healthy bridge or spawn one and wait for it to become healthy.
+ * Returns true when a healthy bridge is up; hard-fails dev otherwise.
+ */
+async function ensureBridgeHealthy() {
   const existingBridge = await readBridgeHealth();
   if (existingBridge?.ok === true) {
     console.log(`[dev] reusing iPhone audio bridge at ${bridgeHealthUrl}`);
-  } else {
-    console.log('[dev] starting iPhone audio bridge');
-    bridgeProcess = spawn(process.execPath, [bridgeEntry, '--no-launch'], {
-      cwd: repoRoot,
-      stdio: 'inherit',
-      env: process.env,
-    });
-    bridgeProcess.on('error', (error) => {
-      console.error('[dev] failed to start iPhone audio bridge:', error);
-      shutdown(1);
-    });
-    bridgeProcess.on('exit', (code, signal) => {
-      if (shuttingDown) return;
-      console.error(`[dev] iPhone audio bridge exited (${signal ?? code ?? 'unknown'})`);
-      shutdown(code ?? 1);
-    });
-
-    const bridgeReady = await waitForBridge((health) => health.ok === true, 30_000);
-    if (bridgeReady === null) {
-      console.error(`[dev] iPhone audio bridge did not become healthy at ${bridgeHealthUrl}`);
-      shutdown(1);
-      return;
-    }
+    return true;
   }
 
-  spawnElectron();
+  console.log('[dev] starting iPhone audio bridge');
+  bridgeProcess = spawn(process.execPath, [bridgeEntry, '--no-launch'], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+    env: process.env,
+  });
+  bridgeProcess.on('error', (error) => {
+    console.error('[dev] failed to start iPhone audio bridge:', error);
+    shutdown(1);
+  });
+  bridgeProcess.on('exit', (code, signal) => {
+    if (shuttingDown) return;
+    console.error(`[dev] iPhone audio bridge exited (${signal ?? code ?? 'unknown'})`);
+    shutdown(code ?? 1);
+  });
+
+  const bridgeReady = await waitForBridge((health) => health.ok === true, 30_000);
+  if (bridgeReady === null) {
+    console.error(`[dev] iPhone audio bridge did not become healthy at ${bridgeHealthUrl}`);
+    shutdown(1);
+    return false;
+  }
+  return true;
+}
+
+/** Background nicety: report when Buddy actually connects to the bridge. */
+function watchBuddyBridgeConnection() {
   void waitForBridge((health) => health.clickyConnected === true, 15_000).then((health) => {
     if (health !== null) {
       console.log('[dev] Buddy connected to the iPhone audio bridge');
@@ -152,6 +190,33 @@ async function main() {
       console.warn('[dev] Buddy has not connected to the iPhone audio bridge yet; it will retry');
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Composition
+// ---------------------------------------------------------------------------
+
+async function main() {
+  const explicitPhoneAudioUrl = process.env.CLICKY_PHONE_AUDIO_URL;
+  const phoneAudioUrl = explicitPhoneAudioUrl ?? bridgeSocketUrl;
+
+  if (cliArgs.some((arg) => ['--help', '-h', '--version', '-v'].includes(arg))) {
+    spawnElectron(phoneAudioUrl);
+    return;
+  }
+
+  // Escape hatch: an explicitly empty CLICKY_PHONE_AUDIO_URL disables phone
+  // audio in the app, so skip bridge supervision instead of failing dev on it.
+  if (explicitPhoneAudioUrl !== undefined && explicitPhoneAudioUrl.trim() === '') {
+    console.log('[dev] CLICKY_PHONE_AUDIO_URL is empty; skipping the iPhone audio bridge');
+    spawnElectron(phoneAudioUrl);
+    return;
+  }
+
+  if (!(await ensureBridgeHealthy())) return;
+
+  spawnElectron(phoneAudioUrl);
+  watchBuddyBridgeConnection();
 }
 
 process.on('SIGINT', () => shutdown(0));

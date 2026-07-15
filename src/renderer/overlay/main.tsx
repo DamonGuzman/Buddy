@@ -7,64 +7,46 @@
  * classes; the 60fps flight animation writes transforms imperatively through
  * FlightController so nothing re-renders per frame. rAF runs ONLY during a
  * flight — at rest all motion is cheap compositor-only CSS.
+ *
+ * This file is deliberately thin wiring: the behavior lives in focused
+ * controllers (PointerChoreographer, CaptionController, HelperHoverController,
+ * HoverDragController), each driven by an injected clock + TimerBag so it is
+ * unit-testable with fake time. The single mount effect constructs them,
+ * adapts DOM/IPC events onto them, and mirrors their view state into useState
+ * for JSX.
  */
 
 import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { clicky } from './clicky';
-import { FlightController, REST_ROT, SETTLE_ROT } from './flight';
+import { FlightController } from './flight';
 import type { Vec } from './flight';
-import { PointerReturnLifecycle } from './pointer-lifecycle';
 import type { BuddyMode } from './pointer-lifecycle';
-import {
-  AUX_PAD,
-  AWARE_RADIUS,
-  DRAG_THRESHOLD,
-  HOVER_RADIUS,
-  HoverMachine,
-  REGION_PAD,
-  dist,
-  eyeOffset,
-  hoverInteractionEnabled,
-  hintText,
-  insideRect,
-  restFromFrac,
-  restToFrac,
-  snapRest,
-} from './hover';
-import type { HoverEffects, HoverZone } from './hover';
+import { hintText, placementFor, restFromFrac } from './hover';
+import type { HoverZone, Placement } from './hover';
+import { CaptionController } from './caption-controller';
+import type { CaptionView } from './caption-controller';
+import { PointerChoreographer } from './pointer-choreographer';
+import type { PulseView } from './pointer-choreographer';
+import { HelperHoverController } from './helper-hover-controller';
+import type { ClusterGeom } from './helper-hover-controller';
+import { HoverDragController } from './hover-controller';
+import type { HintBubbleState } from './hover-controller';
+import { TimerBag } from './timer-bag';
+import { parseOverlayParams } from './query-params';
 import { AgentCluster } from './AgentHelpers';
-import {
-  CARD_HIDE_DELAY_MS,
-  CARD_SHOW_DELAY_MS,
-  HELPER_HIT_RADIUS,
-  OVERFLOW_KEY,
-  helperSlots,
-  nextHelperTransition,
-  selectHelpers,
-} from './agents-ui';
 import type { HelperView } from './agents-ui';
-import type {
-  AgentSummary,
-  AssistantState,
-  OverlayHoverConfig,
-  PointerPoint,
-  Rect,
-} from '../../shared/types';
+import { TriangleSvg } from './TriangleSvg';
+import type { AssistantState, OverlayHoverConfig, Rect } from '../../shared/types';
 import './overlay.css';
 
 // ---------------------------------------------------------------------------
-// Tuning constants
+// Page params + tuning constants
 // ---------------------------------------------------------------------------
 
-/** Dwell at each point of a multi-point command. */
-const DWELL_MS = 1200;
-/** Keep the final point visible this long after the current turn settles. */
-const HOME_AFTER_MS = 6000;
-/** Caption bubble lingers this long after done:true, then fades. */
-const CAPTION_LINGER_MS = 4000;
-/** Caption fade-out transition time (matches overlay.css). */
-const CAPTION_FADE_MS = 500;
+/** Overlay query-param protocol (?screenIndex / ?primary / ?bobIdleMs). */
+const PAGE_PARAMS = parseOverlayParams(window.location.search);
+
 /** Error flash duration (shake + red), then back to the idle look. */
 const ERROR_FLASH_MS = 650;
 /**
@@ -74,52 +56,13 @@ const ERROR_FLASH_MS = 650;
  * shrink this via the CLICKY_BOB_IDLE_MS env (test hook; forwarded as the
  * ?bobIdleMs query param).
  */
-const BOB_IDLE_PAUSE_MS = (() => {
-  const q = Number(new URLSearchParams(window.location.search).get('bobIdleMs'));
-  return Number.isFinite(q) && q > 0 ? q : 5 * 60_000;
-})();
-
-/**
- * When settled at SETTLE_ROT (tip up-left, like a cursor) the triangle's tip
- * sits at center + (-8.4, -10.7); offset the flight target so the TIP kisses
- * the exact point while the body sits just below-right of it.
- */
-const TIP_OFFSET: Vec = { x: 8.4, y: 10.7 };
-
-/** M15: hint bubble fade-out duration (matches overlay.css .hint-bubble). */
-const HINT_FADE_MS = 300;
-/** M15: min interval between drag-time region refresh IPC sends. */
-const DRAG_REGION_SEND_MS = 50;
-
-/** Was this overlay created on the primary display? (set by main via query) */
-function isPrimaryOverlay(): boolean {
-  return new URLSearchParams(window.location.search).get('primary') !== '0';
-}
-
-// ---------------------------------------------------------------------------
-// View models
-// ---------------------------------------------------------------------------
-
-interface CaptionView {
-  itemId: string;
-  text: string;
-  fading: boolean;
-}
-
-interface PulseView {
-  id: number;
-  x: number;
-  y: number;
-  label?: string;
-  side: 'left' | 'right';
-  /** Chip flips above the point near the bottom screen edge (mirror of side). */
-  vside: 'above' | 'below';
-}
-
-interface Placement {
-  h: 'left' | 'right';
-  v: 'above' | 'below';
-}
+const BOB_IDLE_PAUSE_MS = PAGE_PARAMS.bobIdleMs ?? 5 * 60_000;
+/** Blink cadence: instant class flip (~130ms closed) at a random 3.5–6.5s gap. */
+const BLINK_MIN_GAP_MS = 3500;
+const BLINK_GAP_JITTER_MS = 3000;
+const BLINK_CLOSED_MS = 130;
+/** Config re-anchors within this distance of the current pose are ignored. */
+const REST_REANCHOR_EPSILON_PX = 2;
 
 // ---------------------------------------------------------------------------
 
@@ -130,31 +73,18 @@ function BuddySvg({
   pupilsRef: React.RefObject<SVGGElement | null>;
 }): React.JSX.Element {
   return (
-    <svg className="buddy-svg" width={34} height={34} viewBox="0 0 40 40" aria-hidden="true">
-      <defs>
-        <linearGradient id="buddy-grad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#7cc4ff" />
-          <stop offset="1" stopColor="#2b6ef2" />
-        </linearGradient>
-      </defs>
-      {/* fat round-joined stroke = rounded corners on the triangle */}
-      <path
-        className="buddy-body"
-        d="M20 7 L34 32.5 L6 32.5 Z"
-        fill="url(#buddy-grad)"
-        stroke="url(#buddy-grad)"
-        strokeWidth={7}
-        strokeLinejoin="round"
-      />
-      <g className="buddy-eyes">
-        <circle cx={14.8} cy={24.5} r={3.1} fill="#ffffff" />
-        <circle cx={25.2} cy={24.5} r={3.1} fill="#ffffff" />
-        <g className="buddy-pupils" ref={pupilsRef}>
-          <circle cx={15.5} cy={25.1} r={1.55} fill="#173a63" />
-          <circle cx={25.9} cy={25.1} r={1.55} fill="#173a63" />
-        </g>
-      </g>
-    </svg>
+    <TriangleSvg
+      svgClassName="buddy-svg"
+      size={34}
+      gradientId="buddy-grad"
+      gradientTop="#7cc4ff"
+      gradientBottom="#2b6ef2"
+      bodyClassName="buddy-body"
+      eyesClassName="buddy-eyes"
+      pupilFill="#173a63"
+      pupilsClassName="buddy-pupils"
+      pupilsRef={pupilsRef}
+    />
   );
 }
 
@@ -168,7 +98,7 @@ function App(): React.JSX.Element {
 
   const [assistantState, setAssistantState] = useState<AssistantState>('idle');
   const [capturing, setCapturing] = useState(false);
-  const [buddyVisible, setBuddyVisible] = useState(isPrimaryOverlay());
+  const [buddyVisible, setBuddyVisible] = useState(PAGE_PARAMS.primary);
   const [mode, setMode] = useState<BuddyMode>('rest');
   const [errorFlash, setErrorFlash] = useState(false);
   const [blink, setBlink] = useState(false);
@@ -178,22 +108,28 @@ function App(): React.JSX.Element {
   const [bobPaused, setBobPaused] = useState(false);
   // M15 hover state.
   const [hoverZone, setHoverZone] = useState<HoverZone>('far');
-  const [hintState, setHintState] = useState<'hidden' | 'shown' | 'fading'>('hidden');
+  const [hintState, setHintState] = useState<HintBubbleState>('hidden');
   const [interactive, setInteractive] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [hoverCfg, setHoverCfg] = useState<OverlayHoverConfig | null>(null);
-  // M19 agent-helper state.
-  const [agents, setAgents] = useState<AgentSummary[]>([]);
+  // M19 agent-helper state (mirrors of HelperHoverController — one clock).
+  const [helperView, setHelperView] = useState<HelperView>({ shown: [], overflow: [] });
   const [helperHover, setHelperHover] = useState<string | null>(null);
-  const [cluster, setCluster] = useState<{ anchor: Vec; dir: 1 | -1; vdir: 1 | -1 } | null>(null);
+  const [cluster, setCluster] = useState<ClusterGeom | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const cardRef = useRef<HTMLDivElement | null>(null);
   /** Measured card bounds, window-local DIP (grows the interactive region). */
   const cardRectRef = useRef<Rect | null>(null);
-  /** Bridge: lets the card-measure effect resync the hover machine's aux. */
-  const auxResyncRef = useRef<(() => void) | null>(null);
+  /** The mounted helper controller — the card-measure effect resyncs its aux. */
+  const helpersRef = useRef<HelperHoverController | null>(null);
 
   useEffect(() => {
+    const clock = (): number => Date.now();
+    const viewport = (): { width: number; height: number } => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    });
+
     /**
      * M15: rest pose — the user-defined drag spot (from the hover config)
      * when this overlay hosts the buddy at rest, else the default corner
@@ -216,16 +152,8 @@ function App(): React.JSX.Element {
       if (rot) rot.style.transform = `rotate(${pose.rot}deg)`;
     });
 
-    let gen = 0;
-    let pulseSeq = 0;
-    let visible = isPrimaryOverlay();
     let currentState: AssistantState = 'idle';
-    let currentMode: BuddyMode = 'rest';
-    const pointerReturn = new PointerReturnLifecycle();
-    const timers = new Set<ReturnType<typeof setTimeout>>();
-    let homeTimer: ReturnType<typeof setTimeout> | null = null;
-    let captionTimer: ReturnType<typeof setTimeout> | null = null;
-    let bobTimer: ReturnType<typeof setTimeout> | null = null;
+    const uiTimers = new TimerBag(); // bob / errorFlash / blink one-shots
 
     /**
      * Battery saver: (re)arm the idle bob-pause timer. Called on every
@@ -235,186 +163,122 @@ function App(): React.JSX.Element {
      */
     const bumpActivity = (): void => {
       setBobPaused(false);
-      if (bobTimer !== null) clearTimeout(bobTimer);
-      bobTimer = setTimeout(() => {
+      uiTimers.set('bob', BOB_IDLE_PAUSE_MS, () => {
         if (currentState === 'idle') setBobPaused(true);
-      }, BOB_IDLE_PAUSE_MS);
-    };
-
-    const after = (ms: number, fn: () => void): void => {
-      const id = setTimeout(() => {
-        timers.delete(id);
-        fn();
-      }, ms);
-      timers.add(id);
-    };
-    const clearTimers = (): void => {
-      for (const id of timers) clearTimeout(id);
-      timers.clear();
-    };
-    const wait = (ms: number, myGen: number): Promise<boolean> =>
-      new Promise((resolve) => after(ms, () => resolve(gen === myGen)));
-
-    const setVisible = (v: boolean): void => {
-      visible = v;
-      setBuddyVisible(v);
-      syncHoverEnabled(); // M15
-    };
-    const applyMode = (m: BuddyMode): void => {
-      currentMode = m;
-      pointerReturn.setMode(m);
-      setMode(m);
-      syncHoverEnabled(); // M15: hover must never fight the flight engine
-    };
-    const updatePlacement = (pos: Vec): void => {
-      setPlacement({
-        h: pos.x < 420 ? 'left' : 'right',
-        v: pos.y < 180 ? 'below' : 'above',
       });
     };
 
-    const spawnPulse = (p: PointerPoint): void => {
-      pulseSeq += 1;
-      setPulses([
-        {
-          id: pulseSeq,
-          x: p.x,
-          y: p.y,
-          side: p.x > window.innerWidth - 260 ? 'left' : 'right',
-          // Mirror of the horizontal flip: chips for points near the bottom
-          // edge would clip off-screen, so flip them above the point.
-          vside: p.y > window.innerHeight - 60 ? 'above' : 'below',
-          ...(p.label !== undefined ? { label: p.label } : {}),
+    const updatePlacement = (pos: Vec): void => setPlacement(placementFor(pos));
+
+    // -------------------------------------------------------- controllers --
+    const captions = new CaptionController(setCaption, new TimerBag());
+
+    const choreographer = new PointerChoreographer(
+      {
+        flight,
+        timers: new TimerBag(),
+        restPos,
+        viewport,
+        onVisible: (v) => {
+          setBuddyVisible(v);
+          hoverCtrl.syncEnabled(); // M15
         },
-      ]);
-    };
+        onMode: (m) => {
+          setMode(m);
+          hoverCtrl.syncEnabled(); // M15: hover must never fight the flight engine
+        },
+        setPulses,
+        updatePlacement,
+      },
+      PAGE_PARAMS.primary,
+    );
 
-    const scheduleHome = (myGen: number): void => {
-      if (homeTimer !== null) clearTimeout(homeTimer);
-      homeTimer = setTimeout(() => {
-        homeTimer = null;
-        if (gen !== myGen) return;
-        if (pointerReturn.homeTimerFired(myGen) === 'home') void goHome(myGen);
-      }, HOME_AFTER_MS);
-    };
+    const helpers = new HelperHoverController({
+      clock,
+      timers: new TimerBag(),
+      anchor: restPos,
+      cursor: () => hoverCtrl.cursor,
+      hoverEligible: () => hoverCtrl.isEligible,
+      cardRect: () => cardRectRef.current,
+      applyAux: (aux) => hoverCtrl.setAux(aux),
+      onView: setHelperView,
+      onCluster: setCluster,
+      onHover: setHelperHover,
+      onNow: setNowTick,
+    });
 
-    async function goHome(expectedGen?: number): Promise<void> {
-      let myGen: number;
-      if (expectedGen === undefined) {
-        gen += 1;
-        myGen = gen;
-        clearTimers();
-      } else {
-        myGen = expectedGen;
-      }
-      if (homeTimer !== null) {
-        clearTimeout(homeTimer);
-        homeTimer = null;
-      }
-      pointerReturn.homeStarted();
-      setPulses([]);
-      setVisible(true);
-      applyMode('flying');
-      const done = await flight.flyTo(restPos(), { settleRot: REST_ROT, duration: 650 });
-      if (!done || gen !== myGen) return;
-      applyMode('rest');
-      updatePlacement(restPos());
-    }
-
-    async function runPoints(points: PointerPoint[]): Promise<void> {
-      gen += 1;
-      const myGen = gen;
-      clearTimers();
-      if (homeTimer !== null) {
-        clearTimeout(homeTimer);
-        homeTimer = null;
-      }
-      pointerReturn.beginPoints(myGen);
-      if (!visible) {
-        // Appearing on this display for the first time: rise from the rest corner.
-        flight.jumpTo(restPos(), REST_ROT);
-        setVisible(true);
-      }
-      for (let i = 0; i < points.length; i++) {
-        const p = points[i];
-        if (!p) continue;
-        setPulses([]);
-        applyMode('flying');
-        const target = { x: p.x + TIP_OFFSET.x, y: p.y + TIP_OFFSET.y };
-        const done = await flight.flyTo(target, { settleRot: SETTLE_ROT });
-        if (!done || gen !== myGen) return;
-        applyMode('pointing');
-        updatePlacement(target);
-        spawnPulse(p);
-        if (i < points.length - 1) {
-          const still = await wait(DWELL_MS, myGen);
-          if (!still) return;
-        }
-      }
-      // response.done can settle the turn while the final pointer flight is
-      // still in progress. Start the dwell only once both signals have
-      // arrived, so it is always six seconds rather than the response length.
-      if (pointerReturn.pointsFinished(myGen) === 'schedule') scheduleHome(myGen);
-    }
+    const hoverCtrl = new HoverDragController({
+      clock,
+      timers: new TimerBag(),
+      requestFrame: (cb) => requestAnimationFrame(cb),
+      cancelFrame: (id) => cancelAnimationFrame(id),
+      flight,
+      buddyPos: () => buddyPos,
+      viewport,
+      gateInput: () => ({
+        visible: choreographer.isVisible,
+        atRest: choreographer.mode === 'rest',
+        state: currentState,
+        fullRealtimeMode: cfgRef.current?.fullRealtimeMode ?? false,
+      }),
+      sendHover: (evt) => clicky.sendHover(evt),
+      sendBuddyClick: () => clicky.sendBuddyClick(),
+      sendBuddyMove: (rest) => clicky.sendBuddyMove(rest),
+      bumpActivity,
+      updatePlacement,
+      setZone: setHoverZone,
+      setHintState,
+      setDraggingState: setDragging,
+      setInteractiveState: setInteractive,
+      setPupilTransform: (css) => {
+        const pupils = pupilsRef.current;
+        if (pupils) pupils.style.transform = css;
+      },
+      helperHover: {
+        updateFromCursor: () => helpers.updateFromCursor(),
+        release: () => helpers.release(),
+      },
+    });
 
     const applyState = (s: AssistantState): void => {
       // M15: "recent response" hint variant — remember when speaking ended.
       if (currentState === 'speaking' && s !== 'speaking') {
-        lastSpokeAtRef.current = Date.now();
+        lastSpokeAtRef.current = clock();
       }
       currentState = s;
-      const pointerAction = pointerReturn.assistantStateChanged(
+      const pointerAction = choreographer.assistantStateChanged(
         s,
-        gen,
         cfgRef.current?.fullRealtimeMode ?? false,
       );
       setAssistantState(s);
       bumpActivity();
-      syncHoverEnabled(); // M15: a physical PTT hold suppresses interaction
+      hoverCtrl.syncEnabled(); // M15: a physical PTT hold suppresses interaction
       if (s === 'error') {
         setErrorFlash(true);
-        after(ERROR_FLASH_MS, () => setErrorFlash(false));
-        // A failed/cancelled turn must not leave a stale caption on screen:
-        // fade whatever is showing and drop it.
-        if (captionTimer !== null) {
-          clearTimeout(captionTimer);
-          captionTimer = null;
-        }
-        setCaption((c) => (c && !c.fading ? { ...c, fading: true } : c));
-        after(CAPTION_FADE_MS, () => setCaption(null));
+        uiTimers.set('errorFlash', ERROR_FLASH_MS, () => setErrorFlash(false));
+        captions.flushForError();
       }
-      if (pointerAction === 'home') void goHome(gen);
-      else if (pointerAction === 'schedule') scheduleHome(gen);
+      choreographer.applyReturnAction(pointerAction);
     };
 
     // --------------------------------------------------------------- init --
-    flight.jumpTo(restPos(), REST_ROT);
-    updatePlacement(restPos());
+    choreographer.jumpToRest();
     bumpActivity();
     void clicky.getAssistantState().then((s) => {
       currentState = s;
-      pointerReturn.assistantStateChanged(s, gen, cfgRef.current?.fullRealtimeMode ?? false);
+      choreographer.assistantStateChanged(s, cfgRef.current?.fullRealtimeMode ?? false);
       setAssistantState(s);
     });
 
     const offPointer = clicky.onPointer((cmd) => {
       bumpActivity();
       if (cmd.type === 'animate') {
-        if (cmd.points.length > 0) void runPoints(cmd.points);
+        if (cmd.points.length > 0) choreographer.runPoints(cmd.points);
       } else if (cmd.type === 'idle') {
-        void goHome();
+        void choreographer.goHome();
       } else {
         // hide: fade the buddy out entirely.
-        gen += 1;
-        clearTimers();
-        if (homeTimer !== null) {
-          clearTimeout(homeTimer);
-          homeTimer = null;
-        }
-        flight.cancel();
-        setPulses([]);
-        setVisible(false);
-        applyMode('rest');
+        choreographer.hide();
       }
     });
 
@@ -427,440 +291,26 @@ function App(): React.JSX.Element {
 
     const offCaption = clicky.onCaption((update) => {
       bumpActivity();
-      if (captionTimer !== null) {
-        clearTimeout(captionTimer);
-        captionTimer = null;
-      }
-      if (update.text.length === 0 && !update.done) {
-        setCaption(null);
-        return;
-      }
-      setCaption({ itemId: update.itemId, text: update.text, fading: false });
-      if (update.done) {
-        captionTimer = setTimeout(() => {
-          setCaption((c) => (c && c.itemId === update.itemId ? { ...c, fading: true } : c));
-          captionTimer = setTimeout(() => {
-            setCaption((c) => (c && c.itemId === update.itemId ? null : c));
-          }, CAPTION_FADE_MS);
-        }, CAPTION_LINGER_MS);
-      }
+      captions.handleUpdate(update);
     });
 
     // Blink: instant class flip (~130ms closed) at a random 3.5–6.5s cadence.
     // JS-driven on purpose — see the .buddy-eyes comment in overlay.css.
-    let blinkTimer: ReturnType<typeof setTimeout> | null = null;
     const scheduleBlink = (): void => {
-      blinkTimer = setTimeout(
-        () => {
-          if (visible) {
-            setBlink(true);
-            setTimeout(() => setBlink(false), 130);
-          }
-          scheduleBlink();
-        },
-        3500 + Math.random() * 3000,
-      );
+      uiTimers.set('blink', BLINK_MIN_GAP_MS + Math.random() * BLINK_GAP_JITTER_MS, () => {
+        if (choreographer.isVisible) {
+          setBlink(true);
+          uiTimers.set('blinkClose', BLINK_CLOSED_MS, () => setBlink(false));
+        }
+        scheduleBlink();
+      });
     };
     scheduleBlink();
 
     // =========================================================== M15 hover --
-    // Mouse observation arrives only while main forwards mousemove to this
-    // window (i.e. only while it hosts the buddy) or while it is interactive.
-    // Budget: when the cursor is far from the buddy the per-event cost is one
-    // squared-distance compare; processing is rAF-throttled otherwise.
-    const hover = new HoverMachine();
-    let hoverEnabled = true;
-    let lastCursor: Vec | null = null;
-    let hoverRaf = 0;
-    let hoverDeadline: ReturnType<typeof setTimeout> | null = null;
-    let hintFadeTimer: ReturnType<typeof setTimeout> | null = null;
-    let interactiveNow = false; // as confirmed by main via overlay:interactive
-    let drag: { grabDx: number; grabDy: number; sx: number; sy: number; moved: boolean } | null =
-      null;
-    let lastRegionSentAt = 0;
-    let lastZone: HoverZone = 'far';
-    let lastHintVisible = false;
-    let lastEyeCss = '';
-    const FAR_GATE_SQ = (AWARE_RADIUS + 40) ** 2;
-
-    // ---------------------------------------------------- M19 agent helpers --
-    let agentsNow: AgentSummary[] = [];
-    let helperView: HelperView = { shown: [], overflow: [] };
-    /** Absolute sprite/pebble centers (window-local DIP), parallel to keys. */
-    let helperTargets: Vec[] = [];
-    /** Agent id (or OVERFLOW_KEY) per slot. */
-    let helperKeys: string[] = [];
-    let hoveredHelper: string | null = null;
-    let helperTimer: ReturnType<typeof setTimeout> | null = null;
-    let helperPending: string | null = null;
-    /** One-shot timer for the next celebrate->depart->gone phase boundary. */
-    let helperSweepTimer: ReturnType<typeof setTimeout> | null = null;
-
-    /** (Re)arm a recompute at the next finished-helper phase boundary. */
-    function scheduleHelperSweep(delayOverrideMs?: number): void {
-      if (helperSweepTimer !== null) {
-        clearTimeout(helperSweepTimer);
-        helperSweepTimer = null;
-      }
-      const now = Date.now();
-      const next =
-        delayOverrideMs !== undefined
-          ? now + delayOverrideMs
-          : nextHelperTransition(agentsNow, now, hoveredHelper ?? undefined);
-      if (next === null) return;
-      helperSweepTimer = setTimeout(
-        () => {
-          helperSweepTimer = null;
-          recomputeHelpers();
-        },
-        Math.max(60, next - now + 30),
-      );
-    }
-
-    /** Cluster anchor = the buddy REST spot; content extends toward the roomy
-     *  side of the screen (same edge thresholds as updatePlacement). */
-    function clusterGeom(): { anchor: Vec; dir: 1 | -1; vdir: 1 | -1 } {
-      const anchor = restPos();
-      return {
-        anchor,
-        dir: anchor.x < 420 ? 1 : -1,
-        vdir: anchor.y < 180 ? 1 : -1,
-      };
-    }
-
-    /** Push the current sprite/card geometry into the hover machine. */
-    function syncAux(): void {
-      const aux =
-        helperTargets.length > 0
-          ? {
-              targets: helperTargets,
-              targetRadius: HELPER_HIT_RADIUS,
-              rect: hoveredHelper !== null ? cardRectRef.current : null,
-            }
-          : null;
-      applyHoverEffects(hover.setAux(aux, Date.now()));
-    }
-
-    function commitHelperHover(key: string | null): void {
-      if (helperTimer !== null) {
-        clearTimeout(helperTimer);
-        helperTimer = null;
-      }
-      helperPending = null;
-      if (key === hoveredHelper) return;
-      hoveredHelper = key;
-      setHelperHover(key);
-      syncAux();
-      // A hover release may unfreeze an overdue departure (the hovered helper
-      // is exempt from the linger clock) — sweep again shortly.
-      if (key === null) scheduleHelperSweep(250);
-      else scheduleHelperSweep();
-    }
-
-    /** Re-derive visible helpers + slot geometry (agents / anchor changed). */
-    function recomputeHelpers(): void {
-      const now = Date.now();
-      setNowTick(now);
-      helperView = selectHelpers(agentsNow, now, hoveredHelper ?? undefined);
-      const count = helperView.shown.length + (helperView.overflow.length > 0 ? 1 : 0);
-      if (count === 0) {
-        helperTargets = [];
-        helperKeys = [];
-        setCluster(null);
-        commitHelperHover(null);
-        syncAux();
-        scheduleHelperSweep();
-        return;
-      }
-      const geom = clusterGeom();
-      const slots = helperSlots(count, geom.dir, geom.vdir);
-      helperKeys = [
-        ...helperView.shown.map((a) => a.id),
-        ...(helperView.overflow.length > 0 ? [OVERFLOW_KEY] : []),
-      ];
-      helperTargets = slots.map((s) => ({ x: geom.anchor.x + s.x, y: geom.anchor.y + s.y }));
-      setCluster(geom);
-      // A hovered helper that vanished entirely (seen / expired) drops its card.
-      if (hoveredHelper !== null && !helperKeys.includes(hoveredHelper)) {
-        const stillListed =
-          hoveredHelper !== OVERFLOW_KEY &&
-          [...helperView.shown, ...helperView.overflow].some((a) => a.id === hoveredHelper);
-        if (!stillListed) commitHelperHover(null);
-      }
-      syncAux();
-      updateHelperHover();
-      scheduleHelperSweep();
-    }
-
-    /** Cursor -> hovered helper, with show/hide grace timers (anti-flicker +
-     *  time to travel from a sprite into its card). */
-    function updateHelperHover(): void {
-      let want: string | null = null;
-      if (lastCursor !== null && helperTargets.length > 0 && (hoverEnabled || interactiveNow)) {
-        let bestD = Infinity;
-        for (let i = 0; i < helperTargets.length; i++) {
-          const t = helperTargets[i];
-          if (!t) continue;
-          const d = dist(lastCursor, t);
-          if (d <= HELPER_HIT_RADIUS && d < bestD) {
-            bestD = d;
-            want = helperKeys[i] ?? null;
-          }
-        }
-        // Not on a sprite, but still inside the open card: keep it open.
-        if (want === null && hoveredHelper !== null && cardRectRef.current !== null) {
-          const r = cardRectRef.current;
-          const padded = {
-            x: r.x - AUX_PAD,
-            y: r.y - AUX_PAD,
-            width: r.width + AUX_PAD * 2,
-            height: r.height + AUX_PAD * 2,
-          };
-          if (insideRect(lastCursor, padded)) want = hoveredHelper;
-        }
-      }
-      if (want === hoveredHelper) {
-        if (helperTimer !== null) {
-          clearTimeout(helperTimer);
-          helperTimer = null;
-          helperPending = null;
-        }
-        return;
-      }
-      // Switching directly between helpers: no delay.
-      if (want !== null && hoveredHelper !== null) {
-        commitHelperHover(want);
-        return;
-      }
-      if (helperPending === want && helperTimer !== null) return;
-      if (helperTimer !== null) clearTimeout(helperTimer);
-      helperPending = want;
-      helperTimer = setTimeout(
-        () => {
-          helperTimer = null;
-          const key = helperPending;
-          helperPending = null;
-          commitHelperHover(key);
-        },
-        want === null ? CARD_HIDE_DELAY_MS : CARD_SHOW_DELAY_MS,
-      );
-    }
-    // ------------------------------------------------ end M19 agent helpers --
-
-    function sendStatus(): void {
-      clicky.sendHover({
-        kind: 'status',
-        status: {
-          zone: hover.currentZone,
-          hint: hover.hintIsVisible,
-          dragging: hover.isDragging,
-          buddy: { x: buddyPos.x, y: buddyPos.y },
-        },
-      });
-    }
-
-    function applyHoverEffects(fx: HoverEffects): void {
-      // Interactive flip requests (dwell) / SAFETY-CRITICAL releases (exit).
-      if (fx.requestInteractive) {
-        const now = Date.now();
-        // During a drag these are throttled region-refresh keepalives.
-        if (!hover.isDragging || now - lastRegionSentAt >= DRAG_REGION_SEND_MS) {
-          lastRegionSentAt = now;
-          clicky.sendHover({ kind: 'dwell', region: fx.region });
-        }
-      }
-      if (fx.releaseInteractive) {
-        clicky.sendHover({ kind: 'exit' });
-      }
-
-      // Zone visuals (perk-up / awareness) — only on transitions.
-      if (fx.zone !== lastZone) {
-        lastZone = fx.zone;
-        setHoverZone(fx.zone);
-        bumpActivity(); // hovering resumes the idle-bob battery saver
-        sendStatus();
-      }
-
-      // Hint bubble show/fade edges.
-      if (fx.hintVisible !== lastHintVisible) {
-        lastHintVisible = fx.hintVisible;
-        if (hintFadeTimer !== null) {
-          clearTimeout(hintFadeTimer);
-          hintFadeTimer = null;
-        }
-        if (fx.hintVisible) {
-          setHintState('shown');
-        } else {
-          setHintState((s) => (s === 'shown' ? 'fading' : s));
-          hintFadeTimer = setTimeout(() => setHintState('hidden'), HINT_FADE_MS);
-        }
-        sendStatus();
-      }
-
-      // Eye tracking: transform-only pupil offset, quantized in eyeOffset so
-      // repeated mousemoves that don't visibly change the gaze are free.
-      const offset = eyeOffset(fx.zone === 'far' ? null : lastCursor, buddyPos);
-      const css = offset.x === 0 && offset.y === 0 ? '' : `translate(${offset.x}px, ${offset.y}px)`;
-      if (css !== lastEyeCss) {
-        lastEyeCss = css;
-        const pupils = pupilsRef.current;
-        if (pupils) pupils.style.transform = css;
-      }
-
-      // Pending hint/dwell deadlines -> timer tick (cursor may sit still).
-      if (hoverDeadline !== null) {
-        clearTimeout(hoverDeadline);
-        hoverDeadline = null;
-      }
-      if (fx.nextDeadline !== null) {
-        hoverDeadline = setTimeout(
-          () => {
-            hoverDeadline = null;
-            applyHoverEffects(hover.tick(buddyPos, Date.now()));
-          },
-          Math.max(0, fx.nextDeadline - Date.now()),
-        );
-      }
-    }
-
-    function processHover(): void {
-      applyHoverEffects(hover.update(lastCursor, buddyPos, Date.now()));
-      updateHelperHover(); // M19: sprite/card hover rides the same cursor feed
-    }
-
-    function syncHoverEnabled(): void {
-      const enabled = hoverInteractionEnabled({
-        visible,
-        atRest: currentMode === 'rest',
-        state: currentState,
-        fullRealtimeMode: cfgRef.current?.fullRealtimeMode ?? false,
-      });
-      if (enabled === hoverEnabled) return;
-      hoverEnabled = enabled;
-      if (!enabled && drag !== null) drag = null; // drop a drag mid-flight/PTT
-      if (!enabled) commitHelperHover(null); // M19: card must not linger
-      applyHoverEffects(hover.setEnabled(enabled, Date.now()));
-    }
-
-    function endDrag(): void {
-      drag = null;
-      setDragging(false);
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-      const snapped = snapRest(buddyPos, vw, vh);
-      // Persist FIRST (main updates settings + re-pushes hover config), then
-      // glide to the snapped spot. setDragging(false) re-enables region-exit.
-      clicky.sendBuddyMove(restToFrac(snapped, vw, vh));
-      applyHoverEffects(hover.setDragging(false, Date.now()));
-      void flight.flyTo(snapped, { settleRot: REST_ROT, duration: 260 }).then((done) => {
-        if (!done) return;
-        updatePlacement(snapped);
-        // Re-evaluate now that the buddy settled: if the cursor stayed at the
-        // release point (far from the snapped spot) this releases the
-        // interactive flip immediately instead of leaving a stale region.
-        applyHoverEffects(hover.tick(buddyPos, Date.now()));
-      });
-      sendStatus();
-    }
-
-    const onHoverMouseMove = (e: MouseEvent): void => {
-      lastCursor = { x: e.clientX, y: e.clientY };
-      if (!hoverEnabled && !interactiveNow) return;
-
-      // Drag: move the buddy with the cursor (imperative, no re-render).
-      if (drag !== null) {
-        if (!drag.moved) {
-          const moved = Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > DRAG_THRESHOLD;
-          if (moved) {
-            drag.moved = true;
-            setDragging(true);
-            applyHoverEffects(hover.setDragging(true, Date.now()));
-            sendStatus();
-          }
-        }
-        if (drag.moved) {
-          flight.jumpTo({ x: e.clientX + drag.grabDx, y: e.clientY + drag.grabDy }, REST_ROT);
-        }
-        processHover();
-        return;
-      }
-
-      // Interactive: run the exit check SYNCHRONOUSLY on every move — click-
-      // through must be restored the instant the cursor leaves the region.
-      if (interactiveNow || hover.isInteractive) {
-        processHover();
-        return;
-      }
-
-      // Passive observation: do nothing when far from the buddy (budget), and
-      // rAF-throttle the rest.
-      const dx = e.clientX - buddyPos.x;
-      const dy = e.clientY - buddyPos.y;
-      if (hover.currentZone === 'far' && dx * dx + dy * dy > FAR_GATE_SQ) return;
-      if (hoverRaf === 0) {
-        hoverRaf = requestAnimationFrame(() => {
-          hoverRaf = 0;
-          processHover();
-        });
-      }
-    };
-
-    const onHoverMouseOut = (e: MouseEvent): void => {
-      // relatedTarget null = the cursor left the window (display edge).
-      if (e.relatedTarget === null) {
-        lastCursor = null;
-        processHover();
-      }
-    };
-
-    const onHoverMouseDown = (e: MouseEvent): void => {
-      if (!interactiveNow || e.button !== 0) return;
-      const half = HOVER_RADIUS + REGION_PAD;
-      if (Math.abs(e.clientX - buddyPos.x) > half || Math.abs(e.clientY - buddyPos.y) > half) {
-        return;
-      }
-      drag = {
-        grabDx: buddyPos.x - e.clientX,
-        grabDy: buddyPos.y - e.clientY,
-        sx: e.clientX,
-        sy: e.clientY,
-        moved: false,
-      };
-      e.preventDefault();
-    };
-
-    const onHoverMouseUp = (e: MouseEvent): void => {
-      if (drag === null || e.button !== 0) return;
-      const wasDrag = drag.moved;
-      if (wasDrag) {
-        endDrag();
-      } else {
-        drag = null;
-        // CLICK on the buddy -> main toggles the control panel.
-        clicky.sendBuddyClick();
-        bumpActivity();
-      }
-    };
-
-    const offInteractive = clicky.onInteractive(({ interactive: on }) => {
-      interactiveNow = on;
-      setInteractive(on);
-      if (!on) {
-        // Main force-restored click-through (exit event, safety poll, PTT,
-        // pointer routing). Reconcile: abort any drag (persisting the spot)
-        // and resync the machine if it still thinks it is interactive.
-        if (drag !== null && drag.moved) {
-          endDrag();
-        } else {
-          drag = null;
-        }
-        if (hover.isInteractive) {
-          hover.setDragging(false, Date.now());
-          applyHoverEffects(hover.update(null, buddyPos, Date.now()));
-          lastCursor = null;
-        }
-      }
-    });
+    const offInteractive = clicky.onInteractive(({ interactive: on }) =>
+      hoverCtrl.setInteractiveFromMain(on),
+    );
 
     const applyHoverConfig = (cfg: OverlayHoverConfig): void => {
       const first = cfgRef.current === null;
@@ -869,27 +319,22 @@ function App(): React.JSX.Element {
       // The config can arrive after the initial assistant-state read. Re-run
       // the pointer rendezvous so a realtime `listening` state is not left
       // classified with push-to-talk semantics because of that startup race.
-      const pointerAction = pointerReturn.assistantStateChanged(
-        currentState,
-        gen,
-        cfg.fullRealtimeMode,
+      choreographer.applyReturnAction(
+        choreographer.assistantStateChanged(currentState, cfg.fullRealtimeMode),
       );
-      if (pointerAction === 'home') void goHome(gen);
-      else if (pointerAction === 'schedule') scheduleHome(gen);
-      syncHoverEnabled();
-      recomputeHelpers(); // M19: the cluster is anchored at the rest spot
-      if (currentMode !== 'rest' || hover.isDragging) return;
+      hoverCtrl.syncEnabled();
+      helpers.recompute(); // M19: the cluster is anchored at the rest spot
+      if (choreographer.mode !== 'rest' || hoverCtrl.isDragging) return;
       const target = restPos();
       const cur = flight.currentPose.pos;
-      if (Math.hypot(target.x - cur.x, target.y - cur.y) <= 2) return;
-      if (!visible || first) {
+      if (Math.hypot(target.x - cur.x, target.y - cur.y) <= REST_REANCHOR_EPSILON_PX) return;
+      if (!choreographer.isVisible || first) {
         // Hidden overlays and the boot-time config just re-anchor silently.
-        flight.jumpTo(target, REST_ROT);
-        updatePlacement(target);
+        choreographer.jumpToRest();
       } else {
-        void goHome();
+        void choreographer.goHome();
       }
-      sendStatus(); // keep the debug/QA buddy position truthful post-anchor
+      hoverCtrl.sendStatus(); // keep the debug/QA buddy position truthful post-anchor
     };
     const offHoverConfig = clicky.onHoverConfig(applyHoverConfig);
     // Belt-and-braces vs the did-finish-load push (subscription race).
@@ -900,39 +345,43 @@ function App(): React.JSX.Element {
       })
       .catch(() => {});
 
-    window.addEventListener('mousemove', onHoverMouseMove, { passive: true });
-    window.addEventListener('mouseout', onHoverMouseOut, { passive: true });
-    window.addEventListener('mousedown', onHoverMouseDown);
-    window.addEventListener('mouseup', onHoverMouseUp);
-    sendStatus(); // initial snapshot (buddy rest position) for debug/QA
+    const onMouseMove = (e: MouseEvent): void => hoverCtrl.onMouseMove(e.clientX, e.clientY);
+    const onMouseOut = (e: MouseEvent): void => {
+      // relatedTarget null = the cursor left the window (display edge).
+      if (e.relatedTarget === null) hoverCtrl.onCursorLeftWindow();
+    };
+    const onMouseDown = (e: MouseEvent): void => {
+      if (hoverCtrl.onMouseDown(e.clientX, e.clientY, e.button)) e.preventDefault();
+    };
+    const onMouseUp = (e: MouseEvent): void => hoverCtrl.onMouseUp(e.button);
+    window.addEventListener('mousemove', onMouseMove, { passive: true });
+    window.addEventListener('mouseout', onMouseOut, { passive: true });
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mouseup', onMouseUp);
+    // M20: main-side cursor feed — Windows' forward:true mousemove delivery
+    // proved unreliable, so main streams cursor positions while this window
+    // hosts the buddy at rest. Same HoverMachine entry points as real events;
+    // the feed pauses while interactive (real DOM events take over).
+    const offCursor = clicky.onCursor((pos) => {
+      if (pos === null) hoverCtrl.onCursorLeftWindow();
+      else hoverCtrl.onMouseMove(pos.x, pos.y);
+    });
+    hoverCtrl.sendStatus(); // initial snapshot (buddy rest position) for debug/QA
     // ------------------------------------------------------- end M15 hover --
 
     // ------------------------------------------- M19 agent helpers wiring --
-    const offAgents = clicky.onAgents((list) => {
-      agentsNow = list;
-      setAgents(list);
-      recomputeHelpers();
-    });
+    const offAgents = clicky.onAgents((list) => helpers.setAgents(list));
     // Bootstrap for late-created overlays (display hotplug) — push wins races.
     void clicky
       .getAgents()
-      .then((list) => {
-        if (agentsNow.length === 0 && list.length > 0) {
-          agentsNow = list;
-          setAgents(list);
-          recomputeHelpers();
-        }
-      })
+      .then((list) => helpers.bootstrap(list))
       .catch(() => {});
-    auxResyncRef.current = syncAux;
+    helpersRef.current = helpers;
     // --------------------------------------- end M19 agent helpers wiring --
 
     const onResize = (): void => {
-      if (currentMode === 'rest') {
-        flight.jumpTo(restPos(), REST_ROT);
-        updatePlacement(restPos());
-      }
-      recomputeHelpers(); // M19: re-anchor the cluster
+      if (choreographer.mode === 'rest') choreographer.jumpToRest();
+      helpers.recompute(); // M19: re-anchor the cluster
     };
     window.addEventListener('resize', onResize);
 
@@ -944,24 +393,20 @@ function App(): React.JSX.Element {
       // M15 hover teardown.
       offInteractive();
       offHoverConfig();
-      window.removeEventListener('mousemove', onHoverMouseMove);
-      window.removeEventListener('mouseout', onHoverMouseOut);
-      window.removeEventListener('mousedown', onHoverMouseDown);
-      window.removeEventListener('mouseup', onHoverMouseUp);
-      if (hoverRaf !== 0) cancelAnimationFrame(hoverRaf);
-      if (hoverDeadline !== null) clearTimeout(hoverDeadline);
-      if (hintFadeTimer !== null) clearTimeout(hintFadeTimer);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseout', onMouseOut);
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mouseup', onMouseUp);
+      offCursor(); // M20 cursor feed
       // M19 agent-helper teardown.
       offAgents();
-      if (helperSweepTimer !== null) clearTimeout(helperSweepTimer);
-      if (helperTimer !== null) clearTimeout(helperTimer);
-      auxResyncRef.current = null;
+      helpersRef.current = null;
       window.removeEventListener('resize', onResize);
-      clearTimers();
-      if (homeTimer !== null) clearTimeout(homeTimer);
-      if (captionTimer !== null) clearTimeout(captionTimer);
-      if (blinkTimer !== null) clearTimeout(blinkTimer);
-      if (bobTimer !== null) clearTimeout(bobTimer);
+      hoverCtrl.dispose();
+      helpers.dispose();
+      captions.dispose();
+      choreographer.dispose();
+      uiTimers.clearAll();
       flight.cancel();
     };
   }, []);
@@ -977,8 +422,8 @@ function App(): React.JSX.Element {
     } else {
       cardRectRef.current = null;
     }
-    auxResyncRef.current?.();
-  }, [helperHover, agents, cluster]);
+    helpersRef.current?.syncAux();
+  }, [helperHover, helperView, cluster]);
 
   // M19: tick the card's elapsed phrase while one is open.
   useEffect(() => {
@@ -988,7 +433,11 @@ function App(): React.JSX.Element {
   }, [helperHover]);
 
   // M15: state-aware hover hint copy (null = suppressed: non-idle states,
-  // captions in progress — an error caption is never replaced).
+  // captions in progress — an error caption is never replaced). The clock and
+  // lastSpokeAt ref are deliberately sampled at render time: the "want more?"
+  // recency variant only needs to be right when the hint (re)appears, and
+  // every render that matters is already driven by hover-state changes.
+  /* eslint-disable react-hooks/refs, react-hooks/purity */
   const hint =
     hintState !== 'hidden' && mode === 'rest'
       ? hintText({
@@ -1002,6 +451,7 @@ function App(): React.JSX.Element {
           agentHover: helperHover !== null, // M19: the card IS the hint
         })
       : null;
+  /* eslint-enable react-hooks/refs, react-hooks/purity */
 
   return (
     <>
@@ -1055,7 +505,7 @@ function App(): React.JSX.Element {
       </div>
       {cluster !== null && (
         <AgentCluster
-          view={selectHelpers(agents, nowTick, helperHover ?? undefined)}
+          view={helperView}
           anchor={cluster.anchor}
           dir={cluster.dir}
           vdir={cluster.vdir}

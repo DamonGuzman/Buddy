@@ -5,9 +5,12 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 import type { IpcRendererEvent } from 'electron';
-import type { MainToPanelChannel, MainToPanelEvents, PanelApi, Unsubscribe } from '../shared/ipc';
+import type { MainToPanelEvents, PanelApi, Unsubscribe } from '../shared/ipc';
 
-function subscribe<C extends MainToPanelChannel>(
+// SANDBOX CONSTRAINT: duplicated per preload ON PURPOSE — a shared value
+// import becomes a rollup chunk sandboxed preloads cannot require (the
+// preload silently fails to load and the renderer is dead). See overlay.ts.
+function subscribe<C extends Extract<keyof MainToPanelEvents, string>>(
   channel: C,
   cb: (payload: MainToPanelEvents[C]) => void,
 ): Unsubscribe {
@@ -16,8 +19,9 @@ function subscribe<C extends MainToPanelChannel>(
   return () => ipcRenderer.removeListener(channel, listener);
 }
 
+// M21: the chat panel's transcript/composer/agents accessors retired with
+// the panel — this window is the hidden audio host + settings surface.
 const api: PanelApi = {
-  onTranscript: (cb) => subscribe('panel:transcript', cb),
   onSessionStatus: (cb) => subscribe('panel:session-status', cb),
   onAssistantState: (cb) => subscribe('panel:assistant-state', cb),
   onSettings: (cb) => subscribe('panel:settings', cb),
@@ -29,25 +33,14 @@ const api: PanelApi = {
   onRuntime: (cb) => subscribe('panel:runtime', cb),
   // M17 addition (integration-approved): Codex sign-in state push.
   onCodexSignin: (cb) => subscribe('panel:codex-signin', cb),
-  // M18 addition (integration-approved): agent list push (full-list upsert).
-  onAgents: (cb) => subscribe('panel:agents', cb),
-  // M19 addition (integration-approved): overlay helper click -> agents view.
-  onShowAgents: (cb) => subscribe('panel:show-agents', () => cb()),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),
   getRuntime: () => ipcRenderer.invoke('panel:get-runtime'),
   getCodexSigninState: () => ipcRenderer.invoke('codex:signin-state'),
   signInToCodex: () => ipcRenderer.invoke('codex:sign-in'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
-  askText: (text) => ipcRenderer.invoke('panel:ask-text', text),
   listMics: () => ipcRenderer.invoke('mic:list'),
   selectMic: (deviceId) => ipcRenderer.invoke('mic:select', deviceId),
-
-  // M18 additions (integration-approved): agent mode (docs/AGENT-MODE.md §6.2).
-  listAgents: () => ipcRenderer.invoke('agents:list'),
-  cancelAgent: (id) => ipcRenderer.invoke('agents:cancel', id),
-  cancelAllAgents: () => ipcRenderer.invoke('agents:cancel-all'),
-  markAgentSeen: (id) => ipcRenderer.invoke('agents:mark-seen', id),
 
   sendAudioChunk: (chunk) => ipcRenderer.send('audio:chunk', chunk),
 

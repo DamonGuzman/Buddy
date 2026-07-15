@@ -11,12 +11,9 @@ import { CAPTURE_MAX_EDGE } from '../src/shared/constants';
 import {
   clampToDisplay,
   mapModelPoint,
-  mapPoints,
   mapPointToScreen,
-  mapScreenshotPoint,
   normalizeModelPoint,
   physicalSize,
-  resizeRatio,
 } from '../src/main/coords';
 import type { CaptureMeta, Rect } from '../src/shared/types';
 
@@ -206,9 +203,8 @@ describe('edges, rounding, clamping', () => {
     expect(clampToDisplay({ x: 1921, y: -0.001 }, meta)).toEqual({ x: 1920, y: 0 });
   });
 
-  it('resizeRatio and physicalSize agree with the fixture math', () => {
+  it('physicalSize agrees with the fixture math', () => {
     expect(physicalSize(meta)).toEqual({ width: 3840, height: 2160 });
-    expect(resizeRatio(meta)).toBeCloseTo(2048 / 3840, 10);
   });
 
   it('throws on corrupt meta', () => {
@@ -259,36 +255,5 @@ describe('model-input validation (normalizeModelPoint / mapModelPoint)', () => {
     const mapped = mapModelPoint({ x: 999999, y: 360 }, left);
     expect(mapped.local.x).toBe(1920);
     expect(mapped.global.x).toBe(0); // -1920 + 1920
-  });
-});
-
-describe('compat surface (M1 pointer plumbing)', () => {
-  const captures = [
-    makeMeta(rect(0, 0, 1920, 1080), 2, { screenIndex: 0, displayId: 10 }),
-    makeMeta(rect(-1920, 0, 1920, 1080), 1, { screenIndex: 1, displayId: 20, isActive: false }),
-  ];
-
-  it('mapScreenshotPoint returns the M1 {local, global, label} shape', () => {
-    // captures[0] is 4K@200%: image 2048x1152, so 1024,576 is the center
-    const mapped = mapScreenshotPoint({ x: 1024, y: 576, label: 'x' }, captures[0]!);
-    expect(mapped.local).toEqual({ x: 960, y: 540 });
-    expect(mapped.global).toEqual({ x: 960, y: 540 });
-    expect(mapped.label).toBe('x');
-  });
-
-  it('mapPoints resolves the meta by screenIndex', () => {
-    // captures[1] is 1080p@100%: image 1920x1080 (1:1)
-    const [p] = mapPoints([{ x: 1920, y: 1080 }], 1, captures);
-    expect(p!.local.x).toBeCloseTo(1920, 6);
-    expect(p!.global.x).toBeCloseTo(0, 6);
-  });
-
-  it('mapPoints clamps model overshoot defensively', () => {
-    const [p] = mapPoints([{ x: 999999, y: 360 }], 0, captures);
-    expect(p!.local.x).toBe(1920);
-  });
-
-  it('mapPoints throws on unknown screenIndex', () => {
-    expect(() => mapPoints([{ x: 1, y: 1 }], 7, captures)).toThrow(/unknown screenIndex 7/);
   });
 });

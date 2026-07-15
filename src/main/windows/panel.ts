@@ -1,39 +1,54 @@
 /**
- * Panel window: ~380x520 frameless control panel toggled from the tray.
- * Hides on blur. Positioned near the tray (bottom-right work area).
+ * Settings + audio-host window (M21: the chat panel is GONE — no transcript,
+ * no composer, no agents view; the whisper and the overlay carry those).
+ * This ~380x520 frameless window survives for exactly two jobs:
  *
- * M5: the window is created at app start and kept alive hidden, so the panel
- * renderer exists to capture microphone audio the moment the push-to-talk
- * hotkey goes down — even if the user never opened the panel.
- * `backgroundThrottling: false` keeps AudioWorklets running while hidden.
+ * 1. HIDDEN AUDIO HOST — `start()` pre-creates the window at app-ready and
+ *    keeps it alive so its renderer can capture microphone audio the moment
+ *    the push-to-talk hotkey goes down, and play the model's voice.
+ *    `backgroundThrottling: false` keeps AudioWorklets running while hidden.
+ * 2. SETTINGS SURFACE — shown from the tray's Settings item (plus the
+ *    first-run and actionable-error showOnce budgets); hides on blur.
  *
- * Env flags (dev/testing):
- * - CLICKY_SHOW_PANEL=1  → show the panel on launch (it still hides on blur).
- * - CLICKY_KEEP_PANEL_OPEN=1 → don't hide on blur (visual QA only).
- * - CLICKY_TEST_CAPTURE=1 → after load, send a capture start/stop cycle to the
- *                          hidden renderer and mirror its console to stdout
- *                          (proves hidden-window mic capture end-to-end).
- * - CLICKY_USER_DATA=dir  → use a separate userData dir (settings + the
- *                          single-instance lock), so parallel dev instances
- *                          don't fight over the lock. Applied in index.ts
- *                          bootstrap, before the single-instance lock (M6).
+ * The dev/QA env flags (CLICKY_SHOW_PANEL, CLICKY_KEEP_PANEL_OPEN,
+ * CLICKY_TEST_CAPTURE, CLICKY_TEST_MIC) are read by the composition root
+ * (index.ts via env.ts) and arrive here as PanelManagerOptions.
  */
 
-import { app, BrowserWindow, screen } from 'electron';
+import { app, screen } from 'electron';
+import type { BrowserWindow } from 'electron';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { PANEL_HEIGHT, PANEL_WIDTH } from '../../shared/constants';
 import type { MainToPanelChannel, MainToPanelEvents } from '../../shared/ipc';
-import { CrashLoopGuard, lockdownNavigation, recoverOnRenderProcessGone } from './harden';
+import {
+  createHardenedWindow,
+  hardenedWebPreferences,
+  loadRendererPage,
+  TASKBAR_SAFE_TOPMOST_LEVEL,
+} from './common';
+import {
+  CRASH_LOOP_MAX_RECREATES,
+  CRASH_LOOP_WINDOW_MS,
+  CrashLoopGuard,
+  recoverOnRenderProcessGone,
+} from './harden';
+import { wireCaptureTest } from './panel-capture-test';
+import type { PanelCaptureTestOptions } from './panel-capture-test';
 
 const MARGIN = 12;
 
-const SHOW_ON_LAUNCH = process.env['CLICKY_SHOW_PANEL'] === '1';
-const KEEP_PANEL_OPEN = process.env['CLICKY_KEEP_PANEL_OPEN'] === '1';
-const TEST_CAPTURE = process.env['CLICKY_TEST_CAPTURE'] === '1';
-
 /** Delay before the first-run auto-show (lets the tray/overlays settle). */
 const FIRST_RUN_SHOW_DELAY_MS = 1500;
+
+export interface PanelManagerOptions {
+  /** CLICKY_SHOW_PANEL=1: show the panel on launch (it still hides on blur). */
+  showOnLaunch?: boolean;
+  /** CLICKY_KEEP_PANEL_OPEN=1: don't hide on blur (visual QA only). */
+  keepOpenOnBlur?: boolean;
+  /** CLICKY_TEST_CAPTURE=1: hidden-window mic capture QA (panel-capture-test.ts). */
+  captureTest?: PanelCaptureTestOptions | null;
+}
 
 /**
  * Module-level handle so sibling main modules (e.g. conversation-side "show
@@ -41,25 +56,14 @@ const FIRST_RUN_SHOW_DELAY_MS = 1500;
  * without bootstrap wiring changes.
  */
 let activePanel: PanelManager | null = null;
-/**
- * M11: one auto-show budget PER REASON (error kind or 'first-run') instead of
- * a single boolean — the first-run discoverability show no longer consumes
- * the error budget, and each error kind can surface the panel once per run.
- */
-const shownForReason = new Set<string>();
 
 /**
  * Show the panel at most once per app run PER REASON (an error-catalog kind,
- * or 'first-run'). First-run discoverability + hidden-failure surfacing: the
- * panel otherwise only ever opens via a tray click.
- * Uses the focus-less show — this fires while the user may be mid-typing
- * elsewhere, and Windows' focus-steal prevention would otherwise demote the
- * window (drop topmost + bury it at the bottom of the z-order).
+ * or 'first-run'). Delegates to the live PanelManager (which owns the M11
+ * per-reason budget).
  */
 export function showPanelOnce(reason = 'first-run'): void {
-  if (shownForReason.has(reason) || !activePanel) return;
-  shownForReason.add(reason);
-  activePanel.showInactive();
+  activePanel?.showOnce(reason);
 }
 
 /**
@@ -74,11 +78,45 @@ export function togglePanel(): void {
 
 export class PanelManager {
   private win: BrowserWindow | null = null;
-  private crashGuard = new CrashLoopGuard(3, 5 * 60_000, 'panel');
+  private crashGuard = new CrashLoopGuard(CRASH_LOOP_MAX_RECREATES, CRASH_LOOP_WINDOW_MS, 'panel');
   /** M11: crash recovery gave up — index.ts surfaces it via the tray. */
   private fatalCb: (() => void) | null = null;
   /** M11: fired on every panel did-finish-load (transcript replay etc.). */
   private rendererReadyCb: (() => void) | null = null;
+  /**
+   * M11: one auto-show budget PER REASON (error kind or 'first-run') instead
+   * of a single boolean — the first-run discoverability show no longer
+   * consumes the error budget, and each error kind can surface the panel once
+   * per run.
+   */
+  private readonly shownForReason = new Set<string>();
+
+  constructor(private readonly options: PanelManagerOptions = {}) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- module-level singleton handle (see showPanelOnce/togglePanel)
+    activePanel = this;
+  }
+
+  /**
+   * Pre-create the (hidden) window as soon as the app is ready so the
+   * renderer is alive for hotkey-driven mic capture and permission pre-warm.
+   */
+  start(): void {
+    void app.whenReady().then(() => {
+      // First run: no settings file yet (SettingsStore only writes on first
+      // save). Deliberately a bare fs check — settings.ts internals stay
+      // private. Auto-show the panel shortly after boot so a brand-new user
+      // discovers the UI (it otherwise hides behind a tray icon).
+      const firstRun = !existsSync(join(app.getPath('userData'), 'settings.json'));
+      const win = this.ensureWindow();
+      if (this.options.showOnLaunch) {
+        win.webContents.once('did-finish-load', () => this.show());
+      } else if (firstRun) {
+        win.webContents.once('did-finish-load', () => {
+          setTimeout(() => this.showOnce(), FIRST_RUN_SHOW_DELAY_MS);
+        });
+      }
+    });
+  }
 
   /**
    * M11: called when the panel renderer crashed repeatedly and recovery gave
@@ -93,27 +131,6 @@ export class PanelManager {
    *  crash-recreate) — main replays the transcript ring + status snapshots. */
   onRendererReady(cb: () => void): void {
     this.rendererReadyCb = cb;
-  }
-
-  constructor() {
-    activePanel = this;
-    // Pre-create the (hidden) window as soon as the app is ready so the
-    // renderer is alive for hotkey-driven mic capture and permission pre-warm.
-    void app.whenReady().then(() => {
-      // First run: no settings file yet (SettingsStore only writes on first
-      // save). Deliberately a bare fs check — settings.ts internals stay
-      // private. Auto-show the panel shortly after boot so a brand-new user
-      // discovers the UI (it otherwise hides behind a tray icon).
-      const firstRun = !existsSync(join(app.getPath('userData'), 'settings.json'));
-      const win = this.ensureWindow();
-      if (SHOW_ON_LAUNCH) {
-        win.webContents.once('did-finish-load', () => this.show());
-      } else if (firstRun) {
-        win.webContents.once('did-finish-load', () => {
-          setTimeout(() => showPanelOnce(), FIRST_RUN_SHOW_DELAY_MS);
-        });
-      }
-    });
   }
 
   isVisible(): boolean {
@@ -145,21 +162,17 @@ export class PanelManager {
   }
 
   /**
-   * Windows silently drops the real HWND topmost bit when a background
-   * process shows a window (focus-steal prevention / fullscreen-app
-   * protection), while Electron's cached always-on-top state still says true
-   * — so a plain setAlwaysOnTop(true) no-ops. Toggle it off and re-assert at
-   * the same elevated z-band the overlay uses (which observably survives
-   * those demotions), then verify once more a beat later.
+   * Auto-surface the panel at most once per app run per `reason` (first-run
+   * discoverability + hidden-failure surfacing: the panel otherwise only ever
+   * opens via a tray click). Uses the focus-less show — this fires while the
+   * user may be mid-typing elsewhere, and Windows' focus-steal prevention
+   * would otherwise demote the window (drop topmost + bury it at the bottom
+   * of the z-order).
    */
-  private reassertTopmost(win: BrowserWindow): void {
-    win.setAlwaysOnTop(false);
-    win.setAlwaysOnTop(true, 'screen-saver');
-    setTimeout(() => {
-      if (!win.isDestroyed() && win.isVisible() && !win.isAlwaysOnTop()) {
-        win.setAlwaysOnTop(true, 'screen-saver');
-      }
-    }, 300);
+  showOnce(reason = 'first-run'): void {
+    if (this.shownForReason.has(reason)) return;
+    this.shownForReason.add(reason);
+    this.showInactive();
   }
 
   hide(): void {
@@ -179,13 +192,30 @@ export class PanelManager {
 
   // -------------------------------------------------------------------------
 
+  /**
+   * Windows silently drops the real HWND topmost bit when a background
+   * process shows a window (focus-steal prevention / fullscreen-app
+   * protection), while Electron's cached always-on-top state still says true
+   * — so a plain setAlwaysOnTop(true) no-ops. Toggle it off and re-assert in
+   * the taskbar-safe topmost band, then verify once more a beat later.
+   */
+  private reassertTopmost(win: BrowserWindow): void {
+    win.setAlwaysOnTop(false);
+    win.setAlwaysOnTop(true, TASKBAR_SAFE_TOPMOST_LEVEL);
+    setTimeout(() => {
+      if (!win.isDestroyed() && win.isVisible() && !win.isAlwaysOnTop()) {
+        win.setAlwaysOnTop(true, TASKBAR_SAFE_TOPMOST_LEVEL);
+      }
+    }, 300);
+  }
+
   private ensureWindow(): BrowserWindow {
     if (this.win && !this.win.isDestroyed()) return this.win;
 
     // Dev/unpacked runs: give the window the buddy icon (packaged builds get
     // it from the exe resources via electron-builder's win.icon).
     const icoPath = join(app.getAppPath(), 'build', 'icon.ico');
-    const win = new BrowserWindow({
+    const win = createHardenedWindow({
       width: PANEL_WIDTH,
       height: PANEL_HEIGHT,
       frame: false,
@@ -197,18 +227,11 @@ export class PanelManager {
       show: false,
       alwaysOnTop: true,
       ...(existsSync(icoPath) ? { icon: icoPath } : {}),
-      webPreferences: {
-        preload: join(__dirname, '../preload/panel.js'),
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        // Keep the renderer (and its AudioWorklets) running at full speed
-        // while the window is hidden — mic capture must work unseen.
-        backgroundThrottling: false,
-      },
+      // Keep the renderer (and its AudioWorklets) running at full speed
+      // while the window is hidden — mic capture must work unseen.
+      webPreferences: hardenedWebPreferences('panel.js'),
     });
 
-    lockdownNavigation(win);
     // Crash recovery: a dead panel renderer silently kills mic capture AND
     // model-voice playback (both live in this renderer). Recreate, preserving
     // visibility (bounded by crashGuard).
@@ -243,94 +266,25 @@ export class PanelManager {
     win.webContents.on('did-finish-load', () => this.rendererReadyCb?.());
 
     win.on('blur', () => {
-      if (KEEP_PANEL_OPEN) return; // explicit visual QA mode: keep the panel up
+      if (this.options.keepOpenOnBlur) return; // explicit visual QA mode: keep the panel up
       if (!win.isDestroyed()) win.hide();
     });
     win.on('closed', () => {
       this.win = null;
     });
 
-    if (TEST_CAPTURE) this.wireCaptureTest(win);
-
-    if (process.env['ELECTRON_RENDERER_URL']) {
-      void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/panel/index.html`);
-    } else {
-      void win.loadFile(join(__dirname, '../renderer/panel/index.html'));
+    if (this.options.captureTest) {
+      wireCaptureTest(
+        win,
+        (payload) => this.send('audio:capture', payload),
+        this.options.captureTest,
+      );
     }
+
+    loadRendererPage(win, 'panel');
 
     this.win = win;
     return win;
-  }
-
-  /**
-   * CLICKY_TEST_CAPTURE=1: mirror renderer console lines to stdout and run a
-   * start→(6s)→stop capture cycle against the hidden window, so hidden-window
-   * mic capture can be verified from a terminal without the hotkey wiring.
-   */
-  private wireCaptureTest(win: BrowserWindow): void {
-    win.webContents.on('console-message', (details) => {
-      console.log(`[panel-console] ${details.message}`);
-    });
-    win.webContents.once('did-finish-load', () => {
-      setTimeout(() => {
-        void (async () => {
-          // CLICKY_TEST_MIC=<label substring> → select that device first via
-          // the real renderer-side flow (enumerateDevices + clicky.selectMic).
-          const micMatch = process.env['CLICKY_TEST_MIC'];
-          if (micMatch) {
-            const picked: unknown = await win.webContents.executeJavaScript(
-              `(async () => {
-                 const devs = await navigator.mediaDevices.enumerateDevices();
-                 const m = devs.find(
-                   (d) =>
-                     d.kind === 'audioinput' &&
-                     d.label.toLowerCase().includes(${JSON.stringify(micMatch.toLowerCase())}),
-                 );
-                 if (m) await window.clicky.selectMic(m.deviceId);
-                 return m
-                   ? m.label
-                   : 'no match in: ' +
-                       devs
-                         .filter((d) => d.kind === 'audioinput')
-                         .map((d) => d.label || d.deviceId)
-                         .join(' | ');
-               })()`,
-            );
-            console.log('[capture-test] selected mic:', picked ?? '(no match, using default)');
-          }
-          console.log(
-            '[capture-test] sending audio:capture start (window hidden:',
-            !win.isVisible(),
-            ')',
-          );
-          this.send('audio:capture', { command: 'start' });
-          setTimeout(() => {
-            console.log('[capture-test] sending audio:capture stop');
-            this.send('audio:capture', { command: 'stop' });
-            // Phase 2: synthetic tone through the same worklet pipeline
-            // (nonzero-signal proof independent of mic hardware).
-            setTimeout(() => {
-              console.log('[capture-test] starting dev tone capture');
-              void win.webContents.executeJavaScript(
-                `window.__clickyDev && window.__clickyDev.captureTone()`,
-              );
-              setTimeout(() => {
-                console.log('[capture-test] stopping dev tone capture');
-                void win.webContents.executeJavaScript(
-                  `window.__clickyDev && window.__clickyDev.stopCapture()`,
-                );
-                // Phase 3: playback QA (gapless + flush + stale-item drop).
-                void win.webContents
-                  .executeJavaScript(
-                    `window.__clickyDev ? window.__clickyDev.playbackQa() : 'dev hooks unavailable'`,
-                  )
-                  .then((marks) => console.log('[capture-test] playback drain marks (ms):', marks));
-              }, 3000);
-            }, 1000);
-          }, 6000);
-        })();
-      }, 2500);
-    });
   }
 
   /** Bottom-right of the primary display's work area — near the Windows tray. */

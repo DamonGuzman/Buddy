@@ -18,6 +18,10 @@
  *                 — sent on an item's first rendered quantum, every ~0.25s of
  *                   rendered audio, and once with done=true when the item
  *                   ends (superseded, cleared, or silent for >0.5s).
+ *
+ * Message shapes are mirrored as TS types in ../audio/worklet-messages.ts —
+ * kept in sync by hand, because this file loads standalone via
+ * audioWorklet.addModule and cannot import.
  */
 
 /** Post a 'played' block after this many accumulated samples (~0.25s @24kHz). */

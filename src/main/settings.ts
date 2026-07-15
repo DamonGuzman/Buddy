@@ -4,6 +4,11 @@
  * The raw API key never leaves this module except through `getApiKey()`
  * (main-process consumers only). Renderers only ever see `Settings`
  * (renderer-safe view with `apiKeyPresent`).
+ *
+ * Every persisted user preference is declared ONCE in `PREF_FIELDS`
+ * (default + on-disk validation); defaults, file loading, and patch
+ * application all iterate that table. `get()` stays an explicit projection so
+ * the renderer-visible snapshot keeps its historical key order.
  */
 
 import { app, safeStorage } from 'electron';
@@ -13,6 +18,7 @@ import { MODEL_IDS } from '../shared/constants';
 import { DEFAULT_SETTINGS, applySettingsPatch } from '../shared/types';
 import type { BuddyRest, CodexSignInState, Settings, SettingsPatch } from '../shared/types';
 import { getCodexAuthProvider } from './auth/codex-auth';
+import { shouldImportApiKeyFromEnv } from './env';
 
 /** M17: signed-out fallback when the Codex auth provider is unavailable. */
 const CODEX_SIGNED_OUT: CodexSignInState = {
@@ -22,8 +28,73 @@ const CODEX_SIGNED_OUT: CodexSignInState = {
   expiresAt: null,
 };
 
+/** The user-preference keys persisted verbatim (everything patchable but the key). */
+type PrefKey = Exclude<keyof SettingsPatch, 'apiKey'>;
+type Prefs = Pick<Settings, PrefKey>;
+
+/** One persisted preference: its default and how to validate a stored value. */
+interface PrefField<K extends PrefKey> {
+  default: Prefs[K];
+  /** Narrow an untrusted persisted JSON value; anything invalid falls back. */
+  load: (raw: unknown, fallback: Prefs[K]) => Prefs[K];
+}
+
+const loadString = (raw: unknown, fallback: string): string =>
+  typeof raw === 'string' ? raw : fallback;
+const loadBoolean = (raw: unknown, fallback: boolean): boolean =>
+  typeof raw === 'boolean' ? raw : fallback;
+
+/**
+ * THE declarative field table: key -> {default, validate}. Adding a persisted
+ * preference means adding one entry here (plus the shared Settings/Patch
+ * schema); load, defaults, and set() pick it up automatically.
+ */
+const PREF_FIELDS: { readonly [K in PrefKey]: PrefField<K> } = {
+  // M8.6: validate against the full model list — a stored 'mini' choice
+  // must survive the default flipping to the full model.
+  model: {
+    default: DEFAULT_SETTINGS.model,
+    load: (raw, fallback) =>
+      MODEL_IDS.includes(raw as Settings['model']) ? (raw as Settings['model']) : fallback,
+  },
+  voice: { default: DEFAULT_SETTINGS.voice, load: loadString },
+  captionsEnabled: { default: DEFAULT_SETTINGS.captionsEnabled, load: loadBoolean },
+  micDeviceId: { default: DEFAULT_SETTINGS.micDeviceId, load: loadString },
+  fullRealtimeMode: { default: DEFAULT_SETTINGS.fullRealtimeMode, load: loadBoolean },
+  // M20 addition: whisper quiet mode (text-only answers).
+  voiceMuted: { default: DEFAULT_SETTINGS.voiceMuted, load: loadBoolean },
+  // M15 addition (orchestrator-approved): validate the persisted rest.
+  buddyRest: { default: DEFAULT_SETTINGS.buddyRest, load: (raw) => parseBuddyRest(raw) },
+  preferApiKeyGrounding: { default: DEFAULT_SETTINGS.preferApiKeyGrounding, load: loadBoolean },
+  computerUseEnabled: { default: DEFAULT_SETTINGS.computerUseEnabled, load: loadBoolean },
+};
+
+/** Table order doubles as the persisted-file field order (after the key blob). */
+const PREF_KEYS = Object.keys(PREF_FIELDS) as readonly PrefKey[];
+
+function loadPref<K extends PrefKey>(key: K, raw: unknown): Prefs[K] {
+  const field = PREF_FIELDS[key];
+  return field.load(raw, field.default);
+}
+
+function setPref<K extends PrefKey>(target: Prefs, key: K, value: Prefs[K]): void {
+  target[key] = value;
+}
+
+function defaultPrefs(): Prefs {
+  const prefs = {} as Prefs;
+  for (const key of PREF_KEYS) setPref(prefs, key, PREF_FIELDS[key].default);
+  return prefs;
+}
+
+function loadPrefs(parsed: Partial<Record<PrefKey, unknown>>): Prefs {
+  const prefs = {} as Prefs;
+  for (const key of PREF_KEYS) setPref(prefs, key, loadPref(key, parsed[key]));
+  return prefs;
+}
+
 /** On-disk shape. `apiKeyEncrypted` is a base64 safeStorage blob. */
-interface SettingsFile {
+interface SettingsFile extends Prefs {
   version: 3;
   apiKeyEncrypted: string | null;
   /**
@@ -32,15 +103,6 @@ interface SettingsFile {
    * cleared when a new key is stored (or the key is cleared).
    */
   keyUnreadable?: boolean;
-  model: Settings['model'];
-  voice: string;
-  captionsEnabled: boolean;
-  micDeviceId: string;
-  fullRealtimeMode: boolean;
-  // M15 addition (orchestrator-approved): user-defined buddy rest position.
-  buddyRest: BuddyRest | null;
-  preferApiKeyGrounding: boolean;
-  computerUseEnabled: boolean;
 }
 
 const FILE_NAME = 'settings.json';
@@ -78,6 +140,7 @@ export class SettingsStore {
     this.file = this.load();
     if (this.needsMigration) this.persist();
     // M15 addition (orchestrator-approved): see getSettingsStore above.
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     activeStore = this;
   }
 
@@ -92,6 +155,7 @@ export class SettingsStore {
       captionsEnabled: this.file.captionsEnabled,
       micDeviceId: this.file.micDeviceId,
       fullRealtimeMode: this.file.fullRealtimeMode,
+      voiceMuted: this.file.voiceMuted,
       hotkeyLabel: DEFAULT_SETTINGS.hotkeyLabel,
       // M15 addition (orchestrator-approved).
       buddyRest: this.file.buddyRest,
@@ -138,18 +202,11 @@ export class SettingsStore {
       this.file.apiKeyEncrypted =
         patch.apiKey === null || patch.apiKey === '' ? null : this.encrypt(patch.apiKey);
       // M11: a freshly stored (or cleared) key resolves an unreadable blob.
+      // Assigned silently — set() persists + notifies once, below.
       this.file.keyUnreadable = false;
     }
     const merged = applySettingsPatch(this.get(), patch);
-    this.file.model = merged.model;
-    this.file.voice = merged.voice;
-    this.file.captionsEnabled = merged.captionsEnabled;
-    this.file.micDeviceId = merged.micDeviceId;
-    this.file.fullRealtimeMode = merged.fullRealtimeMode;
-    // M15 addition (orchestrator-approved).
-    this.file.buddyRest = merged.buddyRest;
-    this.file.preferApiKeyGrounding = merged.preferApiKeyGrounding;
-    this.file.computerUseEnabled = merged.computerUseEnabled;
+    for (const key of PREF_KEYS) setPref(this.file, key, merged[key]);
     this.persist();
     this.notify();
     return this.get();
@@ -161,24 +218,28 @@ export class SettingsStore {
     try {
       const key = safeStorage.decryptString(Buffer.from(this.file.apiKeyEncrypted, 'base64'));
       // A previously flagged blob decrypts again (rare, but heal the flag).
-      if (this.file.keyUnreadable === true) {
-        this.file.keyUnreadable = false;
-        this.persist();
-        this.notify();
-      }
+      this.setKeyUnreadable(false);
       return key;
     } catch (err) {
       console.error('[settings] failed to decrypt api key:', err);
       // M11: flag the dead blob (once) so the UI stops claiming a key is
-      // present-and-working while every turn fails. Persisted + notified so
-      // the panel snapshot reflects it immediately and across restarts.
-      if (this.file.keyUnreadable !== true) {
-        this.file.keyUnreadable = true;
-        this.persist();
-        this.notify();
-      }
+      // present-and-working while every turn fails.
+      this.setKeyUnreadable(true);
       return null;
     }
+  }
+
+  /**
+   * M11: the one owner of the keyUnreadable heal/flag transition. Persisted +
+   * notified ONCE PER TRANSITION (tests pin no persist/notify churn on
+   * repeated failing or healthy decrypts) so the panel snapshot reflects it
+   * immediately and across restarts.
+   */
+  private setKeyUnreadable(flag: boolean): void {
+    if ((this.file.keyUnreadable === true) === flag) return;
+    this.file.keyUnreadable = flag;
+    this.persist();
+    this.notify();
   }
 
   onChange(cb: (settings: Settings) => void): () => void {
@@ -224,7 +285,7 @@ export class SettingsStore {
    * variable. The plaintext is removed from this process after import.
    */
   private prepareApiKeyFromEnvironment(): boolean {
-    if (process.env['CLICKY_IMPORT_API_KEY_FROM_ENV'] !== '1') return false;
+    if (!shouldImportApiKeyFromEnv()) return false;
     const apiKey = process.env['OPENAI_API_KEY']?.trim() ?? '';
     if (apiKey === '') return false;
 
@@ -263,15 +324,7 @@ export class SettingsStore {
       version: 3,
       apiKeyEncrypted: null,
       keyUnreadable: false,
-      model: DEFAULT_SETTINGS.model,
-      voice: DEFAULT_SETTINGS.voice,
-      captionsEnabled: DEFAULT_SETTINGS.captionsEnabled,
-      micDeviceId: DEFAULT_SETTINGS.micDeviceId,
-      fullRealtimeMode: DEFAULT_SETTINGS.fullRealtimeMode,
-      // M15 addition (orchestrator-approved).
-      buddyRest: DEFAULT_SETTINGS.buddyRest,
-      preferApiKeyGrounding: DEFAULT_SETTINGS.preferApiKeyGrounding,
-      computerUseEnabled: DEFAULT_SETTINGS.computerUseEnabled,
+      ...defaultPrefs(),
     };
     try {
       if (!existsSync(this.path)) return fallback;
@@ -281,32 +334,7 @@ export class SettingsStore {
         version: 3,
         apiKeyEncrypted: typeof parsed.apiKeyEncrypted === 'string' ? parsed.apiKeyEncrypted : null,
         keyUnreadable: parsed.keyUnreadable === true,
-        // M8.6: validate against the full model list — a stored 'mini' choice
-        // must survive the default flipping to the full model.
-        model: MODEL_IDS.includes(parsed.model as Settings['model'])
-          ? (parsed.model as Settings['model'])
-          : fallback.model,
-        voice: typeof parsed.voice === 'string' ? parsed.voice : fallback.voice,
-        captionsEnabled:
-          typeof parsed.captionsEnabled === 'boolean'
-            ? parsed.captionsEnabled
-            : fallback.captionsEnabled,
-        micDeviceId:
-          typeof parsed.micDeviceId === 'string' ? parsed.micDeviceId : fallback.micDeviceId,
-        fullRealtimeMode:
-          typeof parsed.fullRealtimeMode === 'boolean'
-            ? parsed.fullRealtimeMode
-            : fallback.fullRealtimeMode,
-        // M15 addition (orchestrator-approved): validate the persisted rest.
-        buddyRest: parseBuddyRest(parsed.buddyRest),
-        preferApiKeyGrounding:
-          typeof parsed.preferApiKeyGrounding === 'boolean'
-            ? parsed.preferApiKeyGrounding
-            : fallback.preferApiKeyGrounding,
-        computerUseEnabled:
-          typeof parsed.computerUseEnabled === 'boolean'
-            ? parsed.computerUseEnabled
-            : fallback.computerUseEnabled,
+        ...loadPrefs(parsed),
       };
     } catch (err) {
       console.error('[settings] failed to load, using defaults:', err);

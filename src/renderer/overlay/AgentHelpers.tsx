@@ -26,6 +26,7 @@ import {
 } from './agents-ui';
 import type { HelperView } from './agents-ui';
 import type { Vec } from './hover';
+import { TriangleSvg } from './TriangleSvg';
 import type { AgentSummary } from '../../shared/types';
 
 export interface AgentClusterProps {
@@ -195,29 +196,16 @@ function HelperSvg({
   id: string;
   tint: { light: string; dark: string };
 }): React.JSX.Element {
-  const gid = `helper-grad-${id}`;
   return (
-    <svg className="helper-svg" width={22} height={22} viewBox="0 0 40 40" aria-hidden="true">
-      <defs>
-        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor={tint.light} />
-          <stop offset="1" stopColor={tint.dark} />
-        </linearGradient>
-      </defs>
-      <path
-        d="M20 7 L34 32.5 L6 32.5 Z"
-        fill={`url(#${gid})`}
-        stroke={`url(#${gid})`}
-        strokeWidth={7}
-        strokeLinejoin="round"
-      />
-      <g className="helper-eyes">
-        <circle cx={14.8} cy={24.5} r={3.1} fill="#ffffff" />
-        <circle cx={25.2} cy={24.5} r={3.1} fill="#ffffff" />
-        <circle cx={15.5} cy={25.1} r={1.55} fill="#1f2b3f" />
-        <circle cx={25.9} cy={25.1} r={1.55} fill="#1f2b3f" />
-      </g>
-    </svg>
+    <TriangleSvg
+      svgClassName="helper-svg"
+      size={22}
+      gradientId={`helper-grad-${id}`}
+      gradientTop={tint.light}
+      gradientBottom={tint.dark}
+      eyesClassName="helper-eyes"
+      pupilFill="#1f2b3f"
+    />
   );
 }
 

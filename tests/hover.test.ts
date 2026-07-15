@@ -25,10 +25,14 @@ import {
   eyeOffset,
   hoverInteractionEnabled,
   hintText,
+  PLACEMENT_EDGE_X,
+  PLACEMENT_EDGE_Y,
   insideAux,
   insideRect,
   mergedRegion,
+  padRect,
   paddedRegion,
+  placementFor,
   restFromFrac,
   restToFrac,
   snapRest,
@@ -70,6 +74,30 @@ describe('zoneFor / eyeOffset / paddedRegion', () => {
     expect(r).toEqual({ x: 500 - half, y: 500 - half, width: half * 2, height: half * 2 });
     expect(insideRect(BUDDY, r)).toBe(true);
     expect(insideRect({ x: 500 + half + 1, y: 500 }, r)).toBe(false);
+  });
+
+  it('padRect grows a rect by pad on every side', () => {
+    expect(padRect({ x: 10, y: 20, width: 30, height: 40 }, 5)).toEqual({
+      x: 5,
+      y: 15,
+      width: 40,
+      height: 50,
+    });
+  });
+});
+
+describe('placementFor', () => {
+  it('grows content toward the roomy side using the named edge thresholds', () => {
+    expect(placementFor({ x: PLACEMENT_EDGE_X - 1, y: PLACEMENT_EDGE_Y - 1 })).toEqual({
+      h: 'left',
+      v: 'below',
+    });
+    expect(placementFor({ x: PLACEMENT_EDGE_X, y: PLACEMENT_EDGE_Y })).toEqual({
+      h: 'right',
+      v: 'above',
+    });
+    expect(placementFor({ x: 1844, y: 960 })).toEqual({ h: 'right', v: 'above' });
+    expect(placementFor({ x: 76, y: 960 })).toEqual({ h: 'left', v: 'above' });
   });
 });
 
@@ -198,13 +226,17 @@ describe('hintText', () => {
     interactive: false,
   };
 
-  it('idle default copy uses the lowercased hotkey label', () => {
-    expect(hintText(base)).toEqual({ text: 'hold ctrl+alt (left alt) and talk to me' });
+  it('idle default copy uses the lowercased hotkey label and teaches the tap', () => {
+    expect(hintText(base)).toEqual({
+      text: 'hold ctrl+alt (left alt) and talk to me',
+      sub: 'or tap it to type',
+    });
   });
 
-  it('uses toggle copy in full realtime mode', () => {
+  it('uses toggle copy in full realtime mode (typing goes via the buddy click)', () => {
     expect(hintText({ ...base, fullRealtimeMode: true })).toEqual({
       text: 'press ctrl+alt (left alt) to start realtime mode',
+      sub: 'or click me to type',
     });
   });
 
@@ -220,31 +252,31 @@ describe('hintText', () => {
     expect(hintText({ ...base, captionShowing: true })).toBeNull();
   });
 
-  it('appends the muted panel line once the dwell flip is armed', () => {
-    expect(hintText({ ...base, interactive: true })?.sub).toBe('click me to open the panel');
+  it('switches to the click invitation once the dwell flip is armed (M20: whisper)', () => {
+    expect(hintText({ ...base, interactive: true })?.sub).toBe('click me to type instead');
   });
 });
 
 describe('HoverMachine: hint + dwell timing', () => {
-  it('shows the hint after HINT_DELAY_MS and dwell-arms after DWELL_MS', () => {
+  it('dwell-arms after DWELL_MS, then the hint shows (M20: dwell leads)', () => {
     const m = new HoverMachine();
     let t = 1000;
     let fx = m.update(ON_BUDDY, BUDDY, t);
     expect(fx.zone).toBe('hover');
     expect(fx.hintVisible).toBe(false);
     expect(fx.requestInteractive).toBe(false);
-    expect(fx.nextDeadline).toBe(t + HINT_DELAY_MS);
-
-    t += HINT_DELAY_MS;
-    fx = m.tick(BUDDY, t);
-    expect(fx.hintVisible).toBe(true);
-    expect(fx.requestInteractive).toBe(false);
-    expect(fx.nextDeadline).toBe(1000 + DWELL_MS);
+    expect(fx.nextDeadline).toBe(t + DWELL_MS);
 
     t = 1000 + DWELL_MS;
     fx = m.tick(BUDDY, t);
     expect(fx.requestInteractive).toBe(true);
     expect(m.isInteractive).toBe(true);
+    expect(fx.hintVisible).toBe(false); // hint keeps its own (later) schedule
+    expect(fx.nextDeadline).toBe(1000 + HINT_DELAY_MS);
+
+    t = 1000 + HINT_DELAY_MS;
+    fx = m.tick(BUDDY, t);
+    expect(fx.hintVisible).toBe(true);
     expect(fx.nextDeadline).toBeNull();
   });
 
@@ -254,9 +286,9 @@ describe('HoverMachine: hint + dwell timing', () => {
     let fx = m.update(AWARE, BUDDY, 1100); // left before hint
     expect(fx.zone).toBe('aware');
     expect(fx.hintVisible).toBe(false);
-    // Re-enter: the clock restarts.
+    // Re-enter: the clock restarts (M20: the dwell deadline now leads).
     fx = m.update(ON_BUDDY, BUDDY, 1200);
-    expect(fx.nextDeadline).toBe(1200 + HINT_DELAY_MS);
+    expect(fx.nextDeadline).toBe(1200 + DWELL_MS);
     fx = m.tick(BUDDY, 1200 + DWELL_MS - 1);
     expect(fx.requestInteractive).toBe(false);
   });
@@ -483,5 +515,14 @@ describe('HoverMachine: dragging', () => {
     expect(fx.releaseInteractive).toBe(true);
     expect(m.isInteractive).toBe(false);
     expect(m.isDragging).toBe(false);
+  });
+
+  it('the cursor leaving the window mid-drag does NOT release (drag owns the mouse)', () => {
+    const m = new HoverMachine();
+    const t = armAndDrag(m);
+    const fx = m.update(null, BUDDY, t + 100);
+    expect(fx.releaseInteractive).toBe(false);
+    expect(m.isInteractive).toBe(true);
+    expect(m.isDragging).toBe(true);
   });
 });

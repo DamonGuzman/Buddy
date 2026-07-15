@@ -18,11 +18,40 @@
  *   node tools/mock-realtime/reject-server.js --port 8125 \
  *     --error-code insufficient_quota --error-message "You exceeded your current quota..."
  */
+// @ts-check
 'use strict';
 
 const { createServer } = require('node:http');
 const { WebSocketServer } = require('ws');
 
+/**
+ * @typedef {object} RejectServerPreSettleError
+ * @property {string} code
+ * @property {string} message
+ * @property {string} [type] defaults to 'invalid_request_error'
+ * @property {number} [closeCode] defaults to 1013 (the live quota-rejection close code)
+ * @property {string} [closeReason]
+ */
+
+/**
+ * @typedef {object} RejectServerOptions
+ * @property {string} [host]
+ * @property {number} [port] 0 (the default) = ephemeral port
+ * @property {number} [status] reject the WS upgrade with this HTTP status
+ * @property {RejectServerPreSettleError} [preSettleError]
+ *   accept the upgrade, send one pre-settle error event, then close
+ * @property {(line: string) => void} [log]
+ */
+
+/**
+ * @typedef {object} RejectServerHandle
+ * @property {string} host
+ * @property {number} port
+ * @property {string} url
+ * @property {() => Promise<void>} close
+ */
+
+/** @type {Record<number, string>} */
 const STATUS_TEXT = {
   400: 'Bad Request',
   401: 'Unauthorized',
@@ -34,10 +63,8 @@ const STATUS_TEXT = {
 };
 
 /**
- * @param {{ host?: string, port?: number, status?: number,
- *           preSettleError?: { code: string, message: string, type?: string,
- *                              closeCode?: number, closeReason?: string },
- *           log?: (line: string) => void }} [options]
+ * @param {RejectServerOptions} [options]
+ * @returns {Promise<RejectServerHandle>}
  */
 function createRejectServer(options = {}) {
   const host = options.host || '127.0.0.1';
@@ -85,7 +112,9 @@ function createRejectServer(options = {}) {
 
     server.on('error', reject);
     server.listen(port, host, () => {
-      const boundPort = server.address().port;
+      const address = /** @type {import('node:net').AddressInfo} */ (server.address());
+      const boundPort = address.port;
+      /** @type {RejectServerHandle} */
       const handle = {
         host,
         port: boundPort,
@@ -110,12 +139,14 @@ module.exports = { createRejectServer };
 // ---------------------------------------------------------------------------
 if (require.main === module) {
   const args = process.argv.slice(2);
+  /** @param {string} name */
   const get = (name) => {
     const idx = args.indexOf(name);
     return idx !== -1 ? args[idx + 1] : undefined;
   };
   const status = get('--status') ? Number(get('--status')) : undefined;
   const code = get('--error-code');
+  /** @type {RejectServerOptions} */
   const opts = {
     port: get('--port') ? Number(get('--port')) : 8125,
     log: (line) => console.log(line),

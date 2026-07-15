@@ -3,6 +3,7 @@ out/
 dist/
 *.local
 *.log
+*.tsbuildinfo
 .DS_Store
 
 # M8.5 eval harness: generated audio + run artifacts (evidence files force-added per run)

@@ -1,4 +1,6 @@
 import { describeKind } from '../errors';
+import { agentModelOverride } from '../env';
+import { asRecord, errorMessage, pushCapped } from '../util/guards';
 import type { AgentSummary, AgentStep } from '../../shared/types';
 import { agentToolDefinitions, findAgentTool } from './tools';
 import type {
@@ -12,8 +14,18 @@ import {
   AGENT_BACKEND_TIMEOUT_MS,
   AGENT_DEFAULT_MODEL,
   AGENT_REASONING_EFFORT,
+  AGENT_REQUEST_MAX_ATTEMPTS,
+  AGENT_RETRY_BASE_DELAY_MS,
   AGENT_STEP_LOG_CAP,
-} from './types';
+} from './config';
+import {
+  buildInitialMessage,
+  cloneAgentSummary,
+  concise,
+  delay,
+  isTerminal,
+  stripLinks,
+} from './summary-text';
 
 const INSTRUCTIONS = `you are a background research subagent working for buddy. complete the user's task independently.
 use web search when current facts matter, fetch important sources when useful, and keep concise notes.
@@ -22,16 +34,29 @@ you are read-only: do not claim to send, edit, purchase, log in, run programs, o
 when finished, give a clear self-contained answer with the useful conclusion first and no raw urls.
 do not ask the user questions unless the task is genuinely impossible from the supplied context.`;
 
+/**
+ * Pure retry policy for one backend round: retry only failed results the
+ * backend marked retryable (or generic backend-down blips), and never past
+ * AGENT_REQUEST_MAX_ATTEMPTS. Quota / sign-in failures stop immediately.
+ */
+export function shouldRetry(result: AgentBackendResult, attempt: number): boolean {
+  if (result.ok || attempt >= AGENT_REQUEST_MAX_ATTEMPTS - 1) return false;
+  return result.retryable || result.errorKind === 'agent_backend_down';
+}
+
 export interface AgentRunnerOptions {
   brief: AgentBrief;
   backend: AgentBackend;
   onUpdate(summary: AgentSummary): void;
+  /** Backend model id; defaults to CLICKY_AGENT_MODEL, then AGENT_DEFAULT_MODEL. */
+  model?: string;
   now?: () => number;
 }
 
 export class AgentRunner {
   private readonly controller = new AbortController();
   private readonly now: () => number;
+  private readonly model: string;
   private readonly sources = new Set<string>();
   private scratchpad = '';
   private fetches = 0;
@@ -41,6 +66,7 @@ export class AgentRunner {
 
   constructor(private readonly options: AgentRunnerOptions) {
     this.now = options.now ?? Date.now;
+    this.model = options.model ?? agentModelOverride() ?? AGENT_DEFAULT_MODEL;
     this.summary = {
       id: options.brief.id,
       task: options.brief.task,
@@ -93,21 +119,19 @@ export class AgentRunner {
   }
 
   private async requestWithRetry(history: ResponseItem[]): Promise<AgentBackendResult> {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 0; attempt < AGENT_REQUEST_MAX_ATTEMPTS; attempt += 1) {
       const timeout = AbortSignal.timeout(AGENT_BACKEND_TIMEOUT_MS);
       const signal = AbortSignal.any([this.controller.signal, timeout]);
       const result = await this.options.backend.request({
-        model: process.env['CLICKY_AGENT_MODEL'] || AGENT_DEFAULT_MODEL,
+        model: this.model,
         instructions: INSTRUCTIONS,
         input: history,
         tools: agentToolDefinitions(),
         effort: AGENT_REASONING_EFFORT,
         signal,
       });
-      const canRetry =
-        !result.ok && (result.retryable || result.errorKind === 'agent_backend_down');
-      if (result.ok || !canRetry || attempt === 1 || this.controller.signal.aborted) return result;
-      await delay(500 * (attempt + 1), this.controller.signal);
+      if (!shouldRetry(result, attempt) || this.controller.signal.aborted) return result;
+      await delay(AGENT_RETRY_BASE_DELAY_MS * (attempt + 1), this.controller.signal);
     }
     return {
       ok: false,
@@ -122,11 +146,7 @@ export class AgentRunner {
     if (!tool) return JSON.stringify({ error: `unknown tool: ${name}` });
     let args: Record<string, unknown>;
     try {
-      const parsed: unknown = JSON.parse(argsJson || '{}');
-      args =
-        parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
-          ? (parsed as Record<string, unknown>)
-          : {};
+      args = asRecord(JSON.parse(argsJson || '{}')) ?? {};
     } catch {
       return JSON.stringify({ error: 'arguments were not valid json' });
     }
@@ -153,13 +173,13 @@ export class AgentRunner {
     try {
       return await tool.execute(args, ctx);
     } catch (error) {
-      return JSON.stringify({ error: error instanceof Error ? error.message : String(error) });
+      return JSON.stringify({ error: errorMessage(error) });
     }
   }
 
   private addStep(kind: AgentStep['kind'], label: string): void {
-    const steps = [...this.summary.steps, { kind, label, at: this.now() }];
-    this.patch({ steps: steps.slice(-AGENT_STEP_LOG_CAP) });
+    const step: AgentStep = { kind, label, at: this.now() };
+    this.patch({ steps: pushCapped([...this.summary.steps], step, AGENT_STEP_LOG_CAP) });
   }
 
   private finishDone(text: string): AgentSummary {
@@ -188,70 +208,10 @@ export class AgentRunner {
   }
   private finish(patch: Partial<AgentSummary>): AgentSummary {
     this.patch({ ...patch, finishedAt: this.now(), sources: [...this.sources], unseen: true });
-    return {
-      ...this.summary,
-      steps: [...this.summary.steps],
-      sources: [...(this.summary.sources ?? [])],
-    };
+    return cloneAgentSummary(this.summary);
   }
   private patch(patch: Partial<AgentSummary>): void {
     Object.assign(this.summary, patch);
-    this.options.onUpdate({
-      ...this.summary,
-      steps: [...this.summary.steps],
-      sources: [...(this.summary.sources ?? [])],
-    });
+    this.options.onUpdate(cloneAgentSummary(this.summary));
   }
-}
-
-function buildInitialMessage(brief: AgentBrief): ResponseItem {
-  const content: ResponseItem[] = [
-    {
-      type: 'input_text',
-      text: [
-        `task: ${brief.task}`,
-        brief.why ? `why/context: ${brief.why}` : '',
-        brief.recentTranscript ? `recent conversation:\n${brief.recentTranscript}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n\n'),
-    },
-  ];
-  if (brief.screenshot)
-    content.push({
-      type: 'input_image',
-      image_url: `data:image/jpeg;base64,${brief.screenshot.jpegBase64}`,
-    });
-  return { type: 'message', role: 'user', content };
-}
-function isTerminal(status: AgentSummary['status']): boolean {
-  return ['done', 'failed', 'timed_out', 'cancelled'].includes(status);
-}
-function concise(text: string): string {
-  const clean = text.trim();
-  if (clean.length <= 500) return clean;
-  const cut = clean.slice(0, 500);
-  const sentence = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
-  return `${cut.slice(0, sentence > 180 ? sentence + 1 : 497).trim()}…`;
-}
-function stripLinks(text: string): string {
-  return text
-    .replace(/\[([^\]]+)\]\(https?:\/\/[^)]+\)/gi, '$1')
-    .replace(/https?:\/\/\S+/gi, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/ {2,}/g, ' ')
-    .trim();
-}
-function delay(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
-  });
 }

@@ -2,26 +2,41 @@
  * Scripted scenarios for the mock Realtime server. QA extends this file:
  * add an entry to SCENARIOS below — first `matches(turn)` wins.
  *
- * A `turn` is everything the client sent since the previous response.create:
- *   {
- *     userTexts: string[],      // input_text parts that are NOT the "context:" framing part
- *     contextText: string,      // the "context:" framing part, if any
- *     imageCount: number,       // input_image parts attached
- *     screen0: {w,h} | null,    // parsed from "screen0 is WxH pixels" in the context part
- *     committedAudio: boolean,  // input_audio_buffer.commit happened this turn
- *     toolOutputs: {callId, output}[], // function_call_output items received this turn
- *   }
- *
- * The `io` helper streams protocol events with realistic pacing:
- *   io.speak(text)                    -> transcript deltas (word by word) + tone audio deltas
- *   io.functionCall(name, args)       -> output_item.added + argument deltas + done; returns call_id
- *   io.error(message, code)           -> error event
- *   io.done(status)                   -> response.done with plausible usage
- *   io.sleep(ms), io.cancelled()      -> pacing / cancel check
+ * A `Turn` (typed in ./turn-state.js) is everything the client sent since the
+ * previous response.create; the `ScenarioIo` helper (implemented in
+ * ./server.js) streams protocol events with realistic pacing.
  */
+// @ts-check
 'use strict';
 
-/** Center of screen 0 if the client described its dimensions, else 500,400. */
+/** @typedef {import('./turn-state').Turn} Turn */
+
+/**
+ * Protocol-event streaming helpers handed to every scenario `run`.
+ * @typedef {object} ScenarioIo
+ * @property {(text: string) => Promise<void>} speak
+ *   transcript deltas (word by word) + tone audio deltas
+ * @property {(name: string, args: object | string) => Promise<string>} functionCall
+ *   output_item.added + argument deltas + done; returns call_id.
+ *   Pass a STRING to stream it verbatim (e.g. deliberately malformed JSON).
+ * @property {(message: string, code?: string) => void} error error event
+ * @property {(status: string) => Promise<void>} done response.done with plausible usage
+ * @property {(ms: number) => Promise<void>} sleep pacing
+ * @property {() => boolean} cancelled cancel check
+ */
+
+/**
+ * @typedef {object} Scenario
+ * @property {string} name
+ * @property {string} description
+ * @property {(turn: Turn) => boolean} matches first match in SCENARIOS wins
+ * @property {(io: ScenarioIo, turn: Turn) => Promise<void>} run
+ */
+
+/**
+ * Center of screen 0 if the client described its dimensions, else 500,400.
+ * @param {Turn} turn
+ */
 function centerOfScreen0(turn) {
   if (turn.screen0) {
     return { x: Math.round(turn.screen0.w / 2), y: Math.round(turn.screen0.h / 2) };
@@ -29,10 +44,12 @@ function centerOfScreen0(turn) {
   return { x: 500, y: 400 };
 }
 
+/** @param {Turn} turn */
 function userTextOf(turn) {
   return turn.userTexts.join(' ').toLowerCase();
 }
 
+/** @type {Scenario[]} */
 const SCENARIOS = [
   {
     name: 'follow-up',
@@ -160,9 +177,14 @@ const SCENARIOS = [
   },
 ];
 
-/** First matching scenario (the fallback always matches). */
+/**
+ * First matching scenario (the fallback always matches, so this never
+ * returns undefined).
+ * @param {Turn} turn
+ * @returns {Scenario}
+ */
 function pickScenario(turn) {
-  return SCENARIOS.find((s) => s.matches(turn));
+  return /** @type {Scenario} */ (SCENARIOS.find((s) => s.matches(turn)));
 }
 
 module.exports = { SCENARIOS, pickScenario, centerOfScreen0 };

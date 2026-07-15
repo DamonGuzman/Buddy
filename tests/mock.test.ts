@@ -1,6 +1,7 @@
 /**
- * Mock Realtime server tests: raw-WebSocket protocol conformance, tone audio
- * synthesis, and the `npm run mock` CLI entry point.
+ * Mock Realtime server tests: pure per-turn input accumulation (turn-state),
+ * raw-WebSocket protocol conformance, tone audio synthesis, and the
+ * `npm run mock` CLI entry point.
  */
 
 import { createRequire } from 'node:module';
@@ -8,10 +9,12 @@ import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
+import type * as mockServerModule from '../tools/mock-realtime/server';
+import type * as turnStateModule from '../tools/mock-realtime/turn-state';
 
 const require = createRequire(import.meta.url);
-const mock =
-  require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
+const mock = require('../tools/mock-realtime/server') as typeof mockServerModule;
+const turnState = require('../tools/mock-realtime/turn-state') as typeof turnStateModule;
 type MockServer = Awaited<ReturnType<typeof mock.createMockServer>>;
 
 interface AnyEvent {
@@ -62,6 +65,62 @@ class RawClient {
     this.ws.close();
   }
 }
+
+describe('turn-state accumulation', () => {
+  it('starts fresh with no input', () => {
+    expect(turnState.freshTurn()).toEqual({
+      userTexts: [],
+      contextText: '',
+      imageCount: 0,
+      screen0: null,
+      committedAudio: false,
+      toolOutputs: [],
+    });
+  });
+
+  it('separates the "context:" framing part (with screen0 dims) from user text', () => {
+    const turn = turnState.freshTurn();
+    turnState.accumulateItem(turn, {
+      type: 'message',
+      role: 'user',
+      content: [
+        { type: 'input_text', text: 'context: 2 screenshot(s). screen0 is 1920x1080 pixels.' },
+        { type: 'input_image', image_url: 'data:image/jpeg;base64,AAAA' },
+        { type: 'input_image', image_url: 'data:image/jpeg;base64,BBBB' },
+        { type: 'input_text', text: 'where is the button?' },
+      ],
+    });
+    expect(turn.contextText).toContain('context:');
+    expect(turn.screen0).toEqual({ w: 1920, h: 1080 });
+    expect(turn.userTexts).toEqual(['where is the button?']);
+    expect(turn.imageCount).toBe(2);
+  });
+
+  it('context part without screen dims leaves screen0 null', () => {
+    const turn = turnState.freshTurn();
+    turnState.accumulateItem(turn, {
+      type: 'message',
+      content: [{ type: 'input_text', text: 'context: no screenshots this turn.' }],
+    });
+    expect(turn.contextText).toBe('context: no screenshots this turn.');
+    expect(turn.screen0).toBeNull();
+  });
+
+  it('collects function_call_output items and ignores unknown shapes', () => {
+    const turn = turnState.freshTurn();
+    turnState.accumulateItem(turn, {
+      type: 'function_call_output',
+      call_id: 'call_1',
+      output: '{"ok":true}',
+    });
+    turnState.accumulateItem(turn, undefined);
+    turnState.accumulateItem(turn, { type: 'mystery' });
+    turnState.accumulateItem(turn, { type: 'message', content: [null, { type: 'input_audio' }] });
+    expect(turn.toolOutputs).toEqual([{ callId: 'call_1', output: '{"ok":true}' }]);
+    expect(turn.userTexts).toEqual([]);
+    expect(turn.imageCount).toBe(0);
+  });
+});
 
 describe('tone synthesis', () => {
   it('produces ~1.5s of non-silent pcm16@24kHz', () => {

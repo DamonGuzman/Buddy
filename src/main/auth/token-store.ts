@@ -25,7 +25,7 @@ export interface StoredCodexTokens {
   refreshToken: string;
   accountId: string;
   planType: string;
-  /** Unix seconds — access-token expiry (decoded from the JWT at save time). */
+  /** Unix milliseconds — access-token expiry (decoded from the JWT at save time). */
   expiresAt: number;
 }
 

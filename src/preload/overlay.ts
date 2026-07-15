@@ -5,18 +5,21 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 import type { IpcRendererEvent } from 'electron';
-import type {
-  MainToOverlayChannel,
-  MainToOverlayEvents,
-  OverlayApi,
-  Unsubscribe,
-} from '../shared/ipc';
+import type { MainToOverlayEvents, OverlayApi, Unsubscribe } from '../shared/ipc';
+import { parseOverlayParams } from '../renderer/overlay/query-params';
 
-function subscribe<C extends MainToOverlayChannel>(
+// SANDBOX CONSTRAINT: sandboxed preloads must bundle to a SINGLE file. A
+// value import shared by more than one preload entry becomes a rollup chunk
+// ("./chunks/subscribe-*.js") the sandbox cannot require — the preload then
+// silently fails to load, window.clicky never exists, and the renderer is
+// dead (invisible buddy / dead panel). So the tiny subscriber idiom is
+// duplicated per preload instead of shared. Type-only imports are safe.
+function subscribe<C extends Extract<keyof MainToOverlayEvents, string>>(
   channel: C,
   cb: (payload: MainToOverlayEvents[C]) => void,
 ): Unsubscribe {
-  const listener = (_event: IpcRendererEvent, payload: MainToOverlayEvents[C]): void => cb(payload);
+  const listener = (_event: IpcRendererEvent, payload: MainToOverlayEvents[C]): void =>
+    cb(payload);
   ipcRenderer.on(channel, listener);
   return () => ipcRenderer.removeListener(channel, listener);
 }
@@ -25,10 +28,9 @@ function subscribe<C extends MainToOverlayChannel>(
 // this file is typechecked under the node tsconfig (no DOM lib) — hence the cast.
 const pageSearch =
   (globalThis as unknown as { location?: { search: string } }).location?.search ?? '';
-const screenIndex = Number(new URLSearchParams(pageSearch).get('screenIndex') ?? '0');
 
 const api: OverlayApi = {
-  screenIndex: Number.isFinite(screenIndex) ? screenIndex : 0,
+  screenIndex: parseOverlayParams(pageSearch).screenIndex,
   onPointer: (cb) => subscribe('overlay:pointer', cb),
   onAssistantState: (cb) => subscribe('overlay:assistant-state', cb),
   onCaption: (cb) => subscribe('overlay:caption', cb),
@@ -41,6 +43,8 @@ const api: OverlayApi = {
   sendHover: (evt) => ipcRenderer.send('overlay:hover', evt),
   sendBuddyClick: () => ipcRenderer.send('overlay:buddy-click', null),
   sendBuddyMove: (rest) => ipcRenderer.send('overlay:buddy-move', rest),
+  // M20 addition: main-side cursor feed (forward:true fallback).
+  onCursor: (cb) => subscribe('overlay:cursor', cb),
   // M19 additions (integration-approved): agent helpers on the overlay.
   onAgents: (cb) => subscribe('overlay:agents', cb),
   getAgents: () => ipcRenderer.invoke('agents:list'),

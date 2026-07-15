@@ -8,27 +8,57 @@
  *
  * Scenarios live in ./scenarios.js and are keyed on the user's input text
  * (input_text parts, excluding the "context:" framing part) or on committed
- * audio. Every spoken response streams transcript deltas word-by-word and
- * REAL pcm16@24kHz audio deltas (a short three-note melody).
+ * audio; per-turn input accumulation is pure and lives in ./turn-state.js.
+ * Every spoken response streams transcript deltas word-by-word and REAL
+ * pcm16@24kHz audio deltas (a short three-note melody).
  */
+// @ts-check
 'use strict';
 
 const { WebSocketServer } = require('ws');
 const { synthesizeMelodyPcm16 } = require('./audio');
 const { pickScenario } = require('./scenarios');
+const { freshTurn, accumulateItem } = require('./turn-state');
+
+/** @typedef {import('./turn-state').Turn} Turn */
+/** @typedef {import('./scenarios').ScenarioIo} ScenarioIo */
+/**
+ * Pacing/logging shared by every connection of one server instance.
+ * @typedef {object} PacedOptions
+ * @property {number} wordDelayMs
+ * @property {number} audioChunkDelayMs
+ * @property {(line: string) => void} log
+ */
 
 const DEFAULT_PORT = 8123;
 const DEFAULT_HOST = '127.0.0.1';
 
+// The session audio format is pcm16@24kHz mono: 24000 samples/s * 2 bytes
+// per sample = 48000 bytes/s, i.e. 48 bytes per millisecond.
+const BYTES_PER_MS = 48;
+// M9: real-API strictness — the live endpoint rejects commits under 100ms of
+// audio. Mirror it so the quick barge-in tap regression (docs/EVAL.md §8.3
+// follow-up) stays covered.
+const MIN_COMMIT_MS = 100;
+const MIN_COMMIT_BYTES = MIN_COMMIT_MS * BYTES_PER_MS; // 4800 bytes
+// Each response.output_audio.delta carries 0.25s of tone audio.
+const AUDIO_CHUNK_BYTES = 250 * BYTES_PER_MS; // 12000 bytes
+
 let idCounter = 0;
+/** @param {string} prefix */
 function nextId(prefix) {
   idCounter += 1;
   return `${prefix}_mock_${idCounter}`;
 }
 
+/** @param {number} ms */
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Plausible usage numbers for response.done. */
+/**
+ * Plausible usage numbers for response.done.
+ * @param {Turn} turn
+ * @param {number} transcriptWords
+ */
 function makeUsage(turn, transcriptWords) {
   const imageTokens = (turn.imageCount || 0) * 260;
   const audioIn = turn.committedAudio ? 42 : 0;
@@ -48,26 +78,22 @@ function makeUsage(turn, transcriptWords) {
   };
 }
 
-function freshTurn() {
-  return {
-    userTexts: [],
-    contextText: '',
-    imageCount: 0,
-    screen0: null,
-    committedAudio: false,
-    toolOutputs: [],
-  };
-}
-
+/**
+ * @param {import('ws').WebSocket} ws
+ * @param {MockServerState} server
+ * @param {PacedOptions} options
+ */
 function handleConnection(ws, server, options) {
   const log = options.log;
+  /** @param {Record<string, unknown>} evt */
   const send = (evt) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ event_id: nextId('event'), ...evt }));
   };
 
   let turn = freshTurn();
   let appendedAudioBytes = 0;
-  let active = null; // { cancelled, done } for the streaming response
+  /** @type {{ cancelled: boolean, done: boolean } | null} */
+  let active = null; // state of the streaming response
 
   send({ type: 'session.created', session: { id: nextId('sess'), type: 'realtime' } });
 
@@ -105,10 +131,7 @@ function handleConnection(ws, server, options) {
         break;
 
       case 'input_audio_buffer.commit': {
-        // M9: real-API strictness — the live endpoint rejects commits under
-        // 100ms of audio (4800 bytes of pcm16@24kHz). Mirror it so the quick
-        // barge-in tap regression (docs/EVAL.md §8.3 follow-up) stays covered.
-        if (appendedAudioBytes < 4800) {
+        if (appendedAudioBytes < MIN_COMMIT_BYTES) {
           log(`[mock-realtime] rejected commit: only ${appendedAudioBytes} bytes buffered`);
           send({
             type: 'error',
@@ -117,7 +140,8 @@ function handleConnection(ws, server, options) {
               code: 'input_audio_buffer_commit_empty',
               message:
                 'Error committing input audio buffer: buffer too small. ' +
-                `Expected at least 100ms of audio, but buffer only has ${(appendedAudioBytes / 48).toFixed(2)}ms of audio.`,
+                `Expected at least ${MIN_COMMIT_MS}ms of audio, but buffer only has ` +
+                `${(appendedAudioBytes / BYTES_PER_MS).toFixed(2)}ms of audio.`,
             },
           });
           appendedAudioBytes = 0;
@@ -132,34 +156,15 @@ function handleConnection(ws, server, options) {
           item_id: itemId,
           content_index: 0,
           transcript: `(mock transcript of ${appendedAudioBytes} audio bytes)`,
-          usage: { type: 'duration', seconds: appendedAudioBytes / 48000 },
+          usage: { type: 'duration', seconds: appendedAudioBytes / (BYTES_PER_MS * 1000) },
         });
         appendedAudioBytes = 0;
         break;
       }
 
-      case 'conversation.item.create': {
-        const item = msg.item || {};
-        if (item.type === 'message' && Array.isArray(item.content)) {
-          for (const part of item.content) {
-            if (!part) continue;
-            if (part.type === 'input_text' && typeof part.text === 'string') {
-              if (part.text.startsWith('context:')) {
-                turn.contextText = part.text;
-                const dims = /screen0 is (\d+)x(\d+) pixels/.exec(part.text);
-                if (dims) turn.screen0 = { w: Number(dims[1]), h: Number(dims[2]) };
-              } else {
-                turn.userTexts.push(part.text);
-              }
-            } else if (part.type === 'input_image') {
-              turn.imageCount += 1;
-            }
-          }
-        } else if (item.type === 'function_call_output') {
-          turn.toolOutputs.push({ callId: item.call_id, output: item.output });
-        }
+      case 'conversation.item.create':
+        accumulateItem(turn, msg.item);
         break;
-      }
 
       case 'response.create': {
         // F1 fix (M4 hardening): the REAL API rejects response.create while a
@@ -201,6 +206,14 @@ function handleConnection(ws, server, options) {
   });
 }
 
+/**
+ * @param {import('./scenarios').Scenario} scenario
+ * @param {Turn} turn
+ * @param {string} responseId
+ * @param {{ cancelled: boolean, done: boolean }} state
+ * @param {(evt: Record<string, unknown>) => void} send
+ * @param {PacedOptions} options
+ */
 async function runResponse(scenario, turn, responseId, state, send, options) {
   send({ type: 'response.created', response: { id: responseId, status: 'in_progress' } });
   send({
@@ -214,6 +227,7 @@ async function runResponse(scenario, turn, responseId, state, send, options) {
   let spokenWords = 0;
   let doneSent = false;
 
+  /** @type {ScenarioIo} */
   const io = {
     sleep,
     cancelled: () => state.cancelled,
@@ -245,8 +259,7 @@ async function runResponse(scenario, turn, responseId, state, send, options) {
       });
 
       const tone = synthesizeMelodyPcm16();
-      const chunkBytes = 12000; // 0.25s of pcm16@24kHz
-      for (let offset = 0; offset < tone.length; offset += chunkBytes) {
+      for (let offset = 0; offset < tone.length; offset += AUDIO_CHUNK_BYTES) {
         if (state.cancelled) return;
         send({
           type: 'response.output_audio.delta',
@@ -254,7 +267,7 @@ async function runResponse(scenario, turn, responseId, state, send, options) {
           item_id: itemId,
           output_index: 0,
           content_index: 0,
-          delta: tone.subarray(offset, offset + chunkBytes).toString('base64'),
+          delta: tone.subarray(offset, offset + AUDIO_CHUNK_BYTES).toString('base64'),
         });
         await sleep(options.audioChunkDelayMs);
       }
@@ -336,14 +349,30 @@ async function runResponse(scenario, turn, responseId, state, send, options) {
 }
 
 /**
+ * The resolved server handle (see server.d.ts for the public typing).
+ * @typedef {object} MockServerState
+ * @property {import('ws').WebSocketServer} wss
+ * @property {string} host
+ * @property {number} port
+ * @property {string} url
+ * @property {Array<{ type: string, [k: string]: unknown }>} sessionUpdates
+ * @property {Array<{ type: string, [k: string]: unknown }>} clientEvents
+ * @property {number} connectionCount
+ * @property {() => void} dropAllConnections
+ * @property {() => Promise<void>} close
+ */
+
+/**
  * Start the mock server.
  * @param {{ port?: number, host?: string, wordDelayMs?: number,
  *           audioChunkDelayMs?: number, log?: (line: string) => void }} [options]
+ * @returns {Promise<MockServerState>}
  */
 function createMockServer(options = {}) {
   const host = options.host || DEFAULT_HOST;
   const port = options.port ?? DEFAULT_PORT;
   const log = options.log || (() => {});
+  /** @type {PacedOptions} */
   const paced = {
     wordDelayMs: options.wordDelayMs ?? 40,
     audioChunkDelayMs: options.audioChunkDelayMs ?? 30,
@@ -352,6 +381,7 @@ function createMockServer(options = {}) {
 
   return new Promise((resolve, reject) => {
     const wss = new WebSocketServer({ host, port });
+    /** @type {MockServerState} */
     const server = {
       wss,
       host,
@@ -374,7 +404,8 @@ function createMockServer(options = {}) {
       },
     };
     wss.on('listening', () => {
-      server.port = wss.address().port;
+      const address = /** @type {import('node:net').AddressInfo} */ (wss.address());
+      server.port = address.port;
       server.url = `ws://${host}:${server.port}`;
       log(`[mock-realtime] listening on ${server.url}`);
       resolve(server);

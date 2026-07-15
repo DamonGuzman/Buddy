@@ -10,50 +10,64 @@ import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RealtimeSession } from '../src/main/realtime/session';
-import type { RealtimeSessionOptions, ToolCall } from '../src/main/realtime/session';
+import type { RealtimeSessionEvents, RealtimeSessionOptions } from '../src/main/realtime/session';
 import type { PointAtArgs } from '../src/main/realtime/protocol';
 import { getSessionInstructions, getToolDefinitions } from '../src/main/persona';
-import type { CaptureMeta, SessionStatus } from '../src/shared/types';
+import type { CaptureMeta } from '../src/shared/types';
+import type * as MockRealtime from '../tools/mock-realtime/server';
 
 const require = createRequire(import.meta.url);
-const mock =
-  require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
+const mock = require('../tools/mock-realtime/server') as typeof MockRealtime;
 type MockServer = Awaited<ReturnType<typeof mock.createMockServer>>;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-type Loose = {
-  on(event: string, cb: (payload: unknown) => void): unknown;
-  off(event: string, cb: (payload: unknown) => void): unknown;
-};
+type SessionEvent = keyof RealtimeSessionEvents;
+/** Single payload of a session event; zero-arg events (e.g. 'response-requested') yield undefined. */
+type EventPayload<E extends SessionEvent> = RealtimeSessionEvents[E] extends [infer P]
+  ? P
+  : undefined;
+/**
+ * The one seam where the listener meets Node's generic emitter typing: a
+ * zero-arg listener is assignable to every event's listener slot, so this
+ * widening (unlike the old `as unknown as Loose`) can never lie about the
+ * event names or payload shapes, which stay fully typed at the call sites.
+ */
+type AnyListener = () => void;
 
-function waitFor<T>(
+function waitForEvent<E extends SessionEvent>(
   session: RealtimeSession,
-  event: string,
-  predicate: (payload: T) => boolean = () => true,
+  event: E,
+  predicate: (payload: EventPayload<E>) => boolean = () => true,
   timeoutMs = 5000,
-): Promise<T> {
-  const emitter = session as unknown as Loose;
-  return new Promise<T>((resolve, reject) => {
+): Promise<EventPayload<E>> {
+  return new Promise<EventPayload<E>>((resolve, reject) => {
     const timer = setTimeout(() => {
-      emitter.off(event, handler);
+      session.off(event, handler as AnyListener);
       reject(new Error(`timed out waiting for '${event}'`));
     }, timeoutMs);
-    const handler = (payload: unknown): void => {
-      if (!predicate(payload as T)) return;
+    const handler = (...args: RealtimeSessionEvents[E]): void => {
+      const payload = args[0] as EventPayload<E>;
+      if (!predicate(payload)) return;
       clearTimeout(timer);
-      emitter.off(event, handler);
-      resolve(payload as T);
+      session.off(event, handler as AnyListener);
+      resolve(payload);
     };
-    emitter.on(event, handler);
+    session.on(event, handler as AnyListener);
   });
 }
 
-function collect<T>(session: RealtimeSession, event: string): T[] {
-  const items: T[] = [];
-  (session as unknown as Loose).on(event, (payload) => items.push(payload as T));
+function collectEvents<E extends SessionEvent>(
+  session: RealtimeSession,
+  event: E,
+): Array<EventPayload<E>> {
+  const items: Array<EventPayload<E>> = [];
+  const handler = (...args: RealtimeSessionEvents[E]): void => {
+    items.push(args[0] as EventPayload<E>);
+  };
+  session.on(event, handler as AnyListener);
   return items;
 }
 
@@ -103,7 +117,7 @@ describe('RealtimeSession against the mock server', () => {
 
   it('connects lazily and completes the session.update handshake', async () => {
     const session = makeSession();
-    const statuses = collect<SessionStatus>(session, 'status');
+    const statuses = collectEvents(session, 'status');
     expect(session.status().state).toBe('disconnected');
     expect(session.usingMock).toBe(true);
 
@@ -143,9 +157,9 @@ describe('RealtimeSession against the mock server', () => {
 
   it('commits server-VAD audio, then adds fresh screen context before responding', async () => {
     const session = makeSession({ turnDetection: 'server_vad' });
-    const speechStarts = collect<{ itemId: string }>(session, 'speech-started');
-    const speechStops = collect<{ itemId: string }>(session, 'speech-stopped');
-    const audioCommits = collect<{ itemId: string }>(session, 'audio-committed');
+    const speechStarts = collectEvents(session, 'speech-started');
+    const speechStops = collectEvents(session, 'speech-stopped');
+    const audioCommits = collectEvents(session, 'audio-committed');
     let requested = 0;
     session.on('response-requested', () => (requested += 1));
 
@@ -187,7 +201,7 @@ describe('RealtimeSession against the mock server', () => {
     );
 
     await vi.waitFor(() => expect(audioCommits).toEqual([{ itemId: 'vad_user_1' }]));
-    const donePromise = waitFor<{ responseId: string; status: string }>(session, 'response-done');
+    const donePromise = waitForEvent(session, 'response-done');
     await session.respondToVadTurn([IMAGE]);
     const done = await donePromise;
     expect(done.status).toBe('completed');
@@ -208,19 +222,12 @@ describe('RealtimeSession against the mock server', () => {
 
   it('text turn: transcript deltas accumulate to the full text, audio arrives as ArrayBuffers', async () => {
     const session = makeSession();
-    const transcripts = collect<{ itemId: string; text: string; done: boolean }>(
-      session,
-      'assistant-transcript',
-    );
-    const audio = collect<{ itemId: string; chunk: ArrayBuffer }>(session, 'audio-delta');
-    const audioDone = collect<{ itemId: string }>(session, 'audio-done');
+    const transcripts = collectEvents(session, 'assistant-transcript');
+    const audio = collectEvents(session, 'audio-delta');
+    const audioDone = collectEvents(session, 'audio-done');
 
     await session.askText('hello there');
-    const done = await waitFor<{
-      responseId: string;
-      status: string;
-      usage?: { total_tokens?: number };
-    }>(session, 'response-done');
+    const done = await waitForEvent(session, 'response-done');
 
     expect(done.status).toBe('completed');
     expect(done.usage?.total_tokens).toBeGreaterThan(0);
@@ -250,7 +257,7 @@ describe('RealtimeSession against the mock server', () => {
     await session.injectUserAndRespond(
       '<system_reminder>review the completed background work</system_reminder>',
     );
-    await waitFor(session, 'response-done');
+    await waitForEvent(session, 'response-done');
 
     const events = server.clientEvents.slice(before) as Array<Record<string, unknown>>;
     const created = events.find((event) => event['type'] === 'conversation.item.create') as
@@ -278,7 +285,7 @@ describe('RealtimeSession against the mock server', () => {
 
     await userTurn;
     await expect(automatedTurn).rejects.toThrow('a realtime response is already active');
-    await waitFor(session, 'response-done');
+    await waitForEvent(session, 'response-done');
 
     const creates = server.clientEvents
       .slice(before)
@@ -368,17 +375,13 @@ describe('RealtimeSession against the mock server', () => {
       urlOverride: `ws://127.0.0.1:${port}`,
     });
     session.on('error', () => {});
-    const audio = collect<{ itemId: string; chunk: ArrayBuffer }>(session, 'audio-delta');
+    const audio = collectEvents(session, 'audio-delta');
     try {
       await session.askText('first');
       await vi.waitFor(() => expect(audio.map((item) => item.itemId)).toContain('old_initial'));
       session.cancelResponse();
       await session.askText('second');
-      await waitFor<{ responseId: string }>(
-        session,
-        'response-done',
-        (done) => done.responseId === 'resp_new',
-      );
+      await waitForEvent(session, 'response-done', (done) => done.responseId === 'resp_new');
       expect(audio.map((item) => item.itemId)).toEqual(['old_initial', 'new_audio']);
     } finally {
       session.close();
@@ -392,23 +395,19 @@ describe('RealtimeSession against the mock server', () => {
     session.appendAudio(new ArrayBuffer(4800));
     session.appendAudio(new ArrayBuffer(4800));
 
-    const userTranscript = waitFor<{ itemId: string; text: string }>(session, 'user-transcript');
+    const userTranscript = waitForEvent(session, 'user-transcript');
     await session.commitAudioAndRespond([], '');
 
     expect((await userTranscript).text).toContain('9600 audio bytes');
-    const transcript = await waitFor<{ text: string; done: boolean }>(
-      session,
-      'assistant-transcript',
-      (t) => t.done,
-    );
+    const transcript = await waitForEvent(session, 'assistant-transcript', (t) => t.done);
     expect(transcript.text).toContain('point at something');
-    await waitFor(session, 'response-done');
+    await waitForEvent(session, 'response-done');
   });
 
   it('point_at flow: validated tool call -> sendToolOutput -> follow-up response', async () => {
     const session = makeSession();
-    const toolCall = waitFor<ToolCall>(session, 'tool-call');
-    const dones = collect<{ status: string }>(session, 'response-done');
+    const toolCall = waitForEvent(session, 'tool-call');
+    const dones = collectEvents(session, 'response-done');
 
     await session.askText('please point at the button', [IMAGE], 'the user is on their desktop');
     const call = await toolCall;
@@ -421,7 +420,7 @@ describe('RealtimeSession against the mock server', () => {
     await vi.waitFor(() => expect(dones).toHaveLength(1));
     expect(dones[0]!.status).toBe('completed');
 
-    const followUp = waitFor<{ text: string; done: boolean }>(
+    const followUp = waitForEvent(
       session,
       'assistant-transcript',
       (t) => t.done && t.text.includes('there it is'),
@@ -434,9 +433,9 @@ describe('RealtimeSession against the mock server', () => {
 
   it('"two" turn delivers two sequential validated point_at calls', async () => {
     const session = makeSession();
-    const calls = collect<ToolCall>(session, 'tool-call');
+    const calls = collectEvents(session, 'tool-call');
     await session.askText('point at two things', [IMAGE]);
-    await waitFor(session, 'response-done');
+    await waitForEvent(session, 'response-done');
     expect(calls).toHaveLength(2);
     expect(calls.map((c) => (c.args as PointAtArgs).label)).toEqual([
       'the first thing',
@@ -453,10 +452,10 @@ describe('RealtimeSession against the mock server', () => {
 
   it('server error event surfaces via onError and the error state, then recovers', async () => {
     const session = makeSession();
-    const errors = collect<Error>(session, 'error');
-    const dones = collect<{ status: string }>(session, 'response-done');
+    const errors = collectEvents(session, 'error');
+    const dones = collectEvents(session, 'response-done');
 
-    const errored = waitFor<SessionStatus>(session, 'status', (s) => s.state === 'error');
+    const errored = waitForEvent(session, 'status', (s) => s.state === 'error');
     await session.askText('cause an error');
     const status = await errored;
     expect(status.error).toContain('mock scenario error');
@@ -478,11 +477,11 @@ describe('RealtimeSession against the mock server', () => {
     const before = server.connectionCount;
 
     server.dropAllConnections();
-    await waitFor<SessionStatus>(session, 'status', (s) => s.state === 'disconnected');
+    await waitForEvent(session, 'status', (s) => s.state === 'disconnected');
 
     // A new turn triggers a fresh connection + handshake, then completes.
     await session.askText('hello after the drop');
-    const done = await waitFor<{ status: string }>(session, 'response-done');
+    const done = await waitForEvent(session, 'response-done');
     expect(done.status).toBe('completed');
     expect(server.connectionCount).toBe(before + 1);
     expect(session.status().state).toBe('ready');
@@ -491,7 +490,7 @@ describe('RealtimeSession against the mock server', () => {
   it('keep-warm idle timeout closes gracefully (no error state)', async () => {
     const session = makeSession({ idleTimeoutMs: 150 });
     await session.connect();
-    const status = await waitFor<SessionStatus>(session, 'status', (s) => s.state !== 'ready');
+    const status = await waitForEvent(session, 'status', (s) => s.state !== 'ready');
     expect(status.state).toBe('disconnected');
     expect(status.error).toBeUndefined();
   });
@@ -502,9 +501,9 @@ describe('RealtimeSession against the mock server', () => {
 
   it('M4: tool outputs mid-response defer a SINGLE continue until response.done', async () => {
     const session = makeSession();
-    const errors = collect<Error>(session, 'error');
-    const requested = collect<unknown>(session, 'response-requested');
-    const dones = collect<{ status: string }>(session, 'response-done');
+    const errors = collectEvents(session, 'error');
+    const requested = collectEvents(session, 'response-requested');
+    const dones = collectEvents(session, 'response-done');
     // Emulate the conversation layer: output + continue per tool call. The
     // two-points scenario delivers BOTH calls while the response is still
     // in_progress — an immediate response.create would be rejected by the
@@ -513,7 +512,7 @@ describe('RealtimeSession against the mock server', () => {
       session.sendToolOutput(call.callId, { ok: true });
       session.continueResponse();
     });
-    const followUp = waitFor<{ text: string; done: boolean }>(
+    const followUp = waitForEvent(
       session,
       'assistant-transcript',
       (t) => t.done && t.text.includes('there it is'),
@@ -530,8 +529,8 @@ describe('RealtimeSession against the mock server', () => {
 
   it('M9: a rejected tiny commit (<100ms audio) synthesizes a failed response-done and recovers', async () => {
     const session = makeSession();
-    const errors = collect<Error>(session, 'error');
-    const dones = collect<{ status: string }>(session, 'response-done');
+    const errors = collectEvents(session, 'error');
+    const dones = collectEvents(session, 'response-done');
 
     // 2400 bytes of pcm16@24kHz = 50ms — under the server's 100ms minimum.
     session.appendAudio(new ArrayBuffer(2400));
@@ -557,10 +556,10 @@ describe('RealtimeSession against the mock server', () => {
 
   it('M3: malformed tool args reject internally and the continue is counted via response-requested', async () => {
     const session = makeSession();
-    const errors = collect<Error>(session, 'error');
-    const toolCalls = collect<ToolCall>(session, 'tool-call');
-    const requested = collect<unknown>(session, 'response-requested');
-    const dones = collect<{ status: string }>(session, 'response-done');
+    const errors = collectEvents(session, 'error');
+    const toolCalls = collectEvents(session, 'tool-call');
+    const requested = collectEvents(session, 'response-requested');
+    const dones = collectEvents(session, 'response-done');
     await session.askText('send me garbage arguments');
     // Main response + the rejection's follow-up response both complete.
     await vi.waitFor(() => expect(dones).toHaveLength(2), { timeout: 10_000 });
@@ -597,9 +596,9 @@ describe('RealtimeSession resilience (F1)', () => {
     const server = await mock.createMockServer({ port: 0, wordDelayMs: 25, audioChunkDelayMs: 25 });
     const session = makeStandaloneSession(server.url);
     try {
-      const dones = collect<{ status: string }>(session, 'response-done');
+      const dones = collectEvents(session, 'response-done');
       await session.askText('hello there');
-      await waitFor(session, 'assistant-transcript'); // response is streaming
+      await waitForEvent(session, 'assistant-transcript'); // response is streaming
       server.dropAllConnections();
       // Without the fix: responseActive stays true forever (keep-warm dead,
       // eternal reconnect) and no response-done ever arrives.
@@ -621,14 +620,14 @@ describe('RealtimeSession resilience (F1)', () => {
     try {
       await session.connect();
       await first.close(); // server goes away entirely
-      await waitFor<SessionStatus>(session, 'status', (s) => s.state === 'disconnected');
+      await waitForEvent(session, 'status', (s) => s.state === 'disconnected');
 
       // A hold streams chunks while the endpoint is unreachable: they queue,
       // and the auto-connect attempt fails.
       session.appendAudio(new ArrayBuffer(4800));
       session.appendAudio(new ArrayBuffer(4800));
       session.appendAudio(new ArrayBuffer(4800));
-      await waitFor<SessionStatus>(session, 'status', (s) => s.state === 'error');
+      await waitForEvent(session, 'status', (s) => s.state === 'error');
 
       // The turn fails -> the conversation clears the held audio.
       session.clearAudio();
@@ -636,7 +635,7 @@ describe('RealtimeSession resilience (F1)', () => {
       // The endpoint comes back; the NEXT turn must not deliver stale audio.
       second = await mock.createMockServer({ port, wordDelayMs: 1, audioChunkDelayMs: 1 });
       await session.askText('hello');
-      await waitFor(session, 'response-done');
+      await waitForEvent(session, 'response-done');
 
       const appends = second.clientEvents.filter((e) => e.type === 'input_audio_buffer.append');
       expect(appends).toHaveLength(0); // repro delivered 3 stale appends here

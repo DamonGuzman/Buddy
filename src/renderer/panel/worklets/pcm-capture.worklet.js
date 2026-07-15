@@ -6,9 +6,13 @@
  * 60ms @ 24kHz = 1440 samples = 2880 bytes per chunk. Int16Array uses the
  * platform's byte order, which is little-endian on every platform Electron
  * ships on — matching the `pcm16` (LE) wire format.
+ *
+ * Message shapes are mirrored as TS types in ../audio/worklet-messages.ts,
+ * and CHUNK_SAMPLES mirrors ../audio/pcm.ts — kept in sync by hand, because
+ * this file loads standalone via audioWorklet.addModule and cannot import.
  */
 
-const CHUNK_SAMPLES = 1440; // 60ms @ 24kHz
+const CHUNK_SAMPLES = 1440; // 60ms @ 24kHz — mirrors audio/pcm.ts CHUNK_SAMPLES
 
 class PcmCaptureProcessor extends AudioWorkletProcessor {
   constructor() {

@@ -8,16 +8,11 @@
  */
 
 import type { AssistantState, Rect } from '../../shared/types';
+import type { Vec } from './flight-math';
 
-/**
- * Local Vec (structurally identical to flight.ts's Vec). Deliberately NOT
- * imported from ./flight: this module must stay importable under the node
- * tsconfig (unit tests) and flight.ts uses DOM globals.
- */
-export interface Vec {
-  x: number;
-  y: number;
-}
+// Vec's one owner is flight-math.ts (pure, importable under the node
+// tsconfig — never from ./flight, which uses DOM globals).
+export type { Vec } from './flight-math';
 
 // ---------------------------------------------------------------------------
 // Tuning constants
@@ -31,8 +26,16 @@ export const HOVER_RADIUS = 22;
 export const REGION_PAD = 14;
 /** Hover this long before the hint bubble shows (anti-flicker). */
 export const HINT_DELAY_MS = 250;
-/** Hover this long before the overlay is flipped interactive. */
-export const DWELL_MS = 500;
+/**
+ * Hover this long before the overlay is flipped interactive.
+ * M20: 500 → 150. The buddy perks up the instant the cursor lands (which
+ * reads as "clickable NOW"), but humans click ~200-300ms after arriving —
+ * faster than a 500ms dwell, so clicks fell through the still-click-through
+ * overlay and "clicking did nothing". 150ms still filters pass-throughs (a
+ * moving cursor spends <100ms inside the 22px footprint) while arming before
+ * any deliberate click can land.
+ */
+export const DWELL_MS = 150;
 /** Max pupil offset for eye tracking, px. */
 export const MAX_PUPIL_OFFSET = 1.5;
 /** Drag starts once the cursor moved this far from the mousedown point. */
@@ -47,6 +50,14 @@ export const REST_MARGIN_Y_BOTTOM = 120;
 
 export type HoverZone = 'far' | 'aware' | 'hover';
 
+/** Inputs deciding whether the resting Buddy may be observed/dwelled. */
+export interface HoverGateInput {
+  visible: boolean;
+  atRest: boolean;
+  state: AssistantState;
+  fullRealtimeMode: boolean;
+}
+
 /**
  * Whether the renderer may observe/dwell the resting Buddy.
  *
@@ -54,12 +65,7 @@ export type HoverZone = 'far' | 'aware' | 'hover';
  * long-lived ready state in full realtime mode. Only the former must block
  * mouse interaction.
  */
-export function hoverInteractionEnabled(input: {
-  visible: boolean;
-  atRest: boolean;
-  state: AssistantState;
-  fullRealtimeMode: boolean;
-}): boolean {
+export function hoverInteractionEnabled(input: HoverGateInput): boolean {
   return input.visible && input.atRest && (input.state !== 'listening' || input.fullRealtimeMode);
 }
 
@@ -107,6 +113,29 @@ export function insideRect(p: Vec, r: Rect): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Edge-aware placement (caption/hint side, helper-cluster sweep direction)
+// ---------------------------------------------------------------------------
+
+/** Within this many px of the LEFT window edge, content extends rightward. */
+export const PLACEMENT_EDGE_X = 420;
+/** Within this many px of the TOP window edge, content extends downward. */
+export const PLACEMENT_EDGE_Y = 180;
+
+/** Which side of the buddy the caption/hint bubbles (and cluster) grow toward. */
+export interface Placement {
+  h: 'left' | 'right';
+  v: 'above' | 'below';
+}
+
+/** Bubble/cluster placement for a buddy at `pos`: grow toward the roomy side. */
+export function placementFor(pos: Vec): Placement {
+  return {
+    h: pos.x < PLACEMENT_EDGE_X ? 'left' : 'right',
+    v: pos.y < PLACEMENT_EDGE_Y ? 'below' : 'above',
+  };
+}
+
+// ---------------------------------------------------------------------------
 // M19 agent helpers: auxiliary hover geometry (helper sprites + agent card)
 // ---------------------------------------------------------------------------
 
@@ -132,7 +161,8 @@ export interface AuxHoverGeometry {
   rect: Rect | null;
 }
 
-function padRect(r: Rect, pad: number): Rect {
+/** Grow a rect by `pad` on every side. */
+export function padRect(r: Rect, pad: number): Rect {
   return { x: r.x - pad, y: r.y - pad, width: r.width + pad * 2, height: r.height + pad * 2 };
 }
 
@@ -271,7 +301,15 @@ export function hintText(input: HintTextInput): { text: string; sub?: string } |
     : recent
       ? `want more? hold ${hk} and ask me anything`
       : `hold ${hk} and talk to me`;
-  return input.interactive ? { text, sub: 'click me to open the panel' } : { text };
+  // M20 discoverability: the sub always teaches the text path — the whisper
+  // is invisible until found. Realtime mode has no hotkey tap (the press
+  // toggles the session), so there the buddy click is the only door.
+  const sub = input.interactive
+    ? 'click me to type instead'
+    : input.fullRealtimeMode
+      ? 'or click me to type'
+      : 'or tap it to type';
+  return { text, sub };
 }
 
 // ---------------------------------------------------------------------------
@@ -390,16 +428,19 @@ export class HoverMachine {
     let releaseInteractive = false;
 
     if (!this.enabled || this.cursor === null) {
-      if (this.interactive && !this.dragging) {
-        this.interactive = false;
-        releaseInteractive = true;
-      }
-      // A disable mid-drag (e.g. push-to-talk) also force-releases: safety
-      // beats drag continuity.
-      if (this.interactive && !this.enabled) {
-        this.interactive = false;
-        this.dragging = false;
-        releaseInteractive = true;
+      if (this.interactive) {
+        if (!this.enabled) {
+          // A disable (flight start / push-to-talk) force-releases even
+          // mid-drag: safety beats drag continuity.
+          this.interactive = false;
+          this.dragging = false;
+          releaseInteractive = true;
+        } else if (!this.dragging) {
+          // Cursor left the window: release — unless a drag owns the mouse
+          // (releasing mid-drag would eat the mouseup elsewhere).
+          this.interactive = false;
+          releaseInteractive = true;
+        }
       }
       this.zone = 'far';
       this.hoverSince = null;
@@ -460,7 +501,14 @@ export class HoverMachine {
         requestInteractive = true;
       }
       this.zone = zone;
-      const nextDeadline = this.interactive ? null : this.hintShown ? dwellAt : hintAt;
+      // M20: DWELL_MS (150) now precedes HINT_DELAY_MS (250) — the countdown
+      // order is no longer fixed, so the next tick is whichever pending
+      // deadline comes first (the old `hintShown ? dwellAt : hintAt` chain
+      // silently delayed the dwell to the hint tick for a stationary cursor).
+      const pending: number[] = [];
+      if (!this.hintShown) pending.push(hintAt);
+      if (!this.interactive) pending.push(dwellAt);
+      const nextDeadline = pending.length === 0 ? null : Math.min(...pending);
       return {
         zone,
         hintVisible: this.hintShown,

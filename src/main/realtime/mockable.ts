@@ -4,7 +4,8 @@
  * to tools/mock-realtime instead (no auth headers).
  */
 
-import { ENV_MOCK_URL, REALTIME_BASE_URL } from '../../shared/constants';
+import { REALTIME_BASE_URL } from '../../shared/constants';
+import { mockRealtimeUrl } from '../env';
 
 export interface RealtimeEndpoint {
   url: string;
@@ -20,8 +21,8 @@ export function resolveEndpoint(
   if (urlOverride !== undefined && urlOverride.length > 0) {
     return { url: urlOverride, isMock: true };
   }
-  const mockUrl = env[ENV_MOCK_URL];
-  if (mockUrl !== undefined && mockUrl.length > 0) {
+  const mockUrl = mockRealtimeUrl(env);
+  if (mockUrl !== null) {
     return { url: mockUrl, isMock: true };
   }
   return { url: `${REALTIME_BASE_URL}?model=${encodeURIComponent(model)}`, isMock: false };

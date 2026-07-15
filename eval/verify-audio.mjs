@@ -34,7 +34,7 @@ function goertzel(samples, start, n, freq, sampleRate) {
   const k = Math.round((n * freq) / sampleRate);
   const w = (2 * Math.PI * k) / n;
   const coeff = 2 * Math.cos(w);
-  let s0 = 0;
+  let s0;
   let s1 = 0;
   let s2 = 0;
   for (let i = 0; i < n; i++) {

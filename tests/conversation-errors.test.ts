@@ -14,6 +14,8 @@
 
 import { createRequire } from 'node:module';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { ConversationDeps } from '../src/main/conversation';
+import type * as MockRealtime from '../tools/mock-realtime/server';
 
 const showPanelCalls = vi.hoisted(() => [] as string[]);
 
@@ -47,8 +49,7 @@ const { Conversation } = await import('../src/main/conversation');
 const { describeKind } = await import('../src/main/errors');
 
 const require = createRequire(import.meta.url);
-const mock =
-  require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
+const mock = require('../tools/mock-realtime/server') as typeof MockRealtime;
 const rejectMod = require('../tools/mock-realtime/reject-server') as {
   createRejectServer: (opts?: {
     port?: number;
@@ -62,7 +63,7 @@ type MockServer = Awaited<ReturnType<typeof mock.createMockServer>>;
 // ---------------------------------------------------------------------------
 
 interface FakeDeps {
-  deps: { settings: never; overlays: never; panel: never; codexAuth: never };
+  deps: ConversationDeps;
   captions: { itemId: string; text: string; done: boolean }[];
   flags: { apiKeyUnreadable: boolean; settingsWereReset: boolean; captionsEnabled: boolean };
 }
@@ -70,37 +71,32 @@ interface FakeDeps {
 function fakeDeps(): FakeDeps {
   const flags = { apiKeyUnreadable: false, settingsWereReset: false, captionsEnabled: false };
   const captions: FakeDeps['captions'] = [];
-  const settings = {
-    get: () => ({
-      apiKeyPresent: false,
-      apiKeyUnreadable: flags.apiKeyUnreadable,
-      model: 'gpt-realtime-2.1-mini',
-      voice: 'marin',
-      captionsEnabled: flags.captionsEnabled,
-      micDeviceId: '',
-      hotkeyLabel: 'Ctrl+Alt',
-    }),
-    getApiKey: () => null,
-    settingsWereReset: () => flags.settingsWereReset,
-    onChange: () => () => {},
-  };
-  const overlays = {
-    broadcast: (channel: string, payload: unknown) => {
-      if (channel === 'overlay:caption') captions.push(payload as FakeDeps['captions'][number]);
-    },
-    routePointer: () => {},
-    count: () => 0,
-  };
-  const panel = { send: () => {} };
-  // Keep these realtime error tests independent of the developer machine's
-  // ~/.codex/auth.json sign-in state.
-  const codexAuth = { getCodexAuth: () => null, getBearer: async () => '' };
   return {
     deps: {
-      settings: settings as never,
-      overlays: overlays as never,
-      panel: panel as never,
-      codexAuth: codexAuth as never,
+      settings: {
+        get: () => ({
+          apiKeyUnreadable: flags.apiKeyUnreadable,
+          model: 'gpt-realtime-2.1-mini',
+          voice: 'marin',
+          captionsEnabled: flags.captionsEnabled,
+          voiceMuted: false,
+          fullRealtimeMode: false,
+          computerUseEnabled: false,
+          preferApiKeyGrounding: false,
+        }),
+        getApiKey: () => null,
+        settingsWereReset: () => flags.settingsWereReset,
+      },
+      overlays: {
+        broadcast: (channel, payload) => {
+          if (channel === 'overlay:caption') captions.push(payload as FakeDeps['captions'][number]);
+        },
+        routePointer: () => {},
+      },
+      panel: { send: () => {} },
+      // Keep these realtime error tests independent of the developer machine's
+      // ~/.codex/auth.json sign-in state.
+      codexAuth: { getCodexAuth: () => null, getBearer: async () => '' },
     },
     captions,
     flags,

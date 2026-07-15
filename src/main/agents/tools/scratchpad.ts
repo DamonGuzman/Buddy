@@ -1,4 +1,5 @@
 import type { AgentToolSpec } from '../types';
+import { AGENT_TOOL_TIMEOUT_MS } from '../config';
 
 export const scratchpadTool: AgentToolSpec = {
   definition: {
@@ -11,7 +12,7 @@ export const scratchpadTool: AgentToolSpec = {
       required: ['text'],
     },
   },
-  timeoutMs: 15_000,
+  timeoutMs: AGENT_TOOL_TIMEOUT_MS,
   stepKind: 'note',
   stepLabel: () => 'updated private research notes',
   async execute(args, ctx) {

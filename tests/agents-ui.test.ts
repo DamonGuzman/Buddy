@@ -6,13 +6,20 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  CARD_HIDE_DELAY_MS,
+  CARD_SHOW_DELAY_MS,
   FINISHED_LINGER_MS,
   HELPER_ARC_RADIUS,
   HELPER_DEPART_MS,
+  HELPER_HIT_RADIUS,
   HELPER_TINTS,
   MAX_HELPER_SPRITES,
+  OVERFLOW_KEY,
+  desiredHelperHover,
   elapsedPhrase,
+  helperHoverStep,
   helperPhase,
+  helperSlotViews,
   helperSlots,
   helperStatus,
   helperTint,
@@ -21,7 +28,9 @@ import {
   sourcesPhrase,
   truncate,
 } from '../src/renderer/overlay/agents-ui';
-import type { AgentSummary } from '../src/shared/types';
+import type { HelperSlot } from '../src/renderer/overlay/agents-ui';
+import { AUX_PAD } from '../src/renderer/overlay/hover';
+import type { AgentSummary, Rect } from '../src/shared/types';
 
 const NOW = 10_000_000;
 
@@ -158,6 +167,103 @@ describe('helperSlots', () => {
       expect(mirroredX[i]).toEqual({ x: -s.x + 0, y: s.y });
       expect(mirroredY[i]).toEqual({ x: s.x, y: -s.y + 0 });
     });
+  });
+});
+
+describe('helperSlotViews', () => {
+  it('fuses shown agents + the overflow pebble into keyed absolute slots', () => {
+    const view = selectHelpers(
+      [
+        agent({ id: 'r1', createdAt: NOW - 40_000 }),
+        agent({ id: 'r2', createdAt: NOW - 30_000 }),
+        agent({ id: 'r3', createdAt: NOW - 20_000 }),
+        agent({ id: 'f1', status: 'done', unseen: true, finishedAt: NOW - 2_000 }),
+      ],
+      NOW,
+    );
+    const anchor = { x: 900, y: 500 };
+    const slots = helperSlotViews(view, anchor, -1, -1);
+    expect(slots.map((s) => s.key)).toEqual(['r1', 'r2', 'r3', OVERFLOW_KEY]);
+    const offsets = helperSlots(4, -1, -1);
+    slots.forEach((s, i) => {
+      expect(s.pos).toEqual({
+        x: anchor.x + (offsets[i]?.x ?? NaN),
+        y: anchor.y + (offsets[i]?.y ?? NaN),
+      });
+    });
+  });
+
+  it('no overflow -> exactly one slot per shown agent', () => {
+    const view = selectHelpers([agent({ id: 'only' })], NOW);
+    expect(helperSlotViews(view, { x: 0, y: 0 }, 1, 1).map((s) => s.key)).toEqual(['only']);
+  });
+});
+
+describe('desiredHelperHover', () => {
+  const SLOTS: HelperSlot[] = [
+    { key: 'a', pos: { x: 900, y: 452 } },
+    { key: 'b', pos: { x: 870, y: 462 } },
+  ];
+  const base = { slots: SLOTS, hovered: null, cardRect: null, enabled: true };
+
+  it('picks the NEAREST sprite within the hit radius', () => {
+    expect(desiredHelperHover({ ...base, cursor: { x: 900, y: 452 } })).toBe('a');
+    // Between the two but closer to b.
+    expect(desiredHelperHover({ ...base, cursor: { x: 878, y: 460 } })).toBe('b');
+    // On the hit-radius boundary still counts.
+    expect(desiredHelperHover({ ...base, cursor: { x: 900, y: 452 - HELPER_HIT_RADIUS } })).toBe(
+      'a',
+    );
+    expect(
+      desiredHelperHover({ ...base, cursor: { x: 900, y: 452 - HELPER_HIT_RADIUS - 1 } }),
+    ).toBeNull();
+  });
+
+  it('a cursor inside the padded open card keeps the hovered helper', () => {
+    const card: Rect = { x: 582, y: 380, width: 248, height: 120 };
+    const onCard = { x: 600, y: 400 };
+    expect(desiredHelperHover({ ...base, cursor: onCard, hovered: 'a', cardRect: card })).toBe('a');
+    // The AUX_PAD ring around the card counts too (matches the aux hit test).
+    expect(
+      desiredHelperHover({
+        ...base,
+        cursor: { x: 582 - AUX_PAD + 1, y: 400 },
+        hovered: 'a',
+        cardRect: card,
+      }),
+    ).toBe('a');
+    expect(
+      desiredHelperHover({
+        ...base,
+        cursor: { x: 582 - AUX_PAD - 2, y: 400 },
+        hovered: 'a',
+        cardRect: card,
+      }),
+    ).toBeNull();
+    // The card only holds an EXISTING hover — it never starts one.
+    expect(desiredHelperHover({ ...base, cursor: onCard, cardRect: card })).toBeNull();
+  });
+
+  it('nothing when the cursor is gone, no slots exist, or hovering is ineligible', () => {
+    expect(desiredHelperHover({ ...base, cursor: null })).toBeNull();
+    expect(desiredHelperHover({ ...base, cursor: { x: 900, y: 452 }, slots: [] })).toBeNull();
+    expect(desiredHelperHover({ ...base, cursor: { x: 900, y: 452 }, enabled: false })).toBeNull();
+  });
+});
+
+describe('helperHoverStep (anti-flicker rules)', () => {
+  it('holds when nothing changes (cancels any pending switch)', () => {
+    expect(helperHoverStep(null, null)).toEqual({ kind: 'hold' });
+    expect(helperHoverStep('a', 'a')).toEqual({ kind: 'hold' });
+  });
+
+  it('switches directly between helpers with no delay', () => {
+    expect(helperHoverStep('b', 'a')).toEqual({ kind: 'commit' });
+  });
+
+  it('defers show/hide by their grace delays', () => {
+    expect(helperHoverStep('a', null)).toEqual({ kind: 'defer', delayMs: CARD_SHOW_DELAY_MS });
+    expect(helperHoverStep(null, 'a')).toEqual({ kind: 'defer', delayMs: CARD_HIDE_DELAY_MS });
   });
 });
 

@@ -12,6 +12,8 @@
 
 import { createRequire } from 'node:module';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { ConversationDeps } from '../src/main/conversation';
+import type * as MockRealtime from '../tools/mock-realtime/server';
 
 const captureAllDisplaysMock = vi.hoisted(() =>
   vi.fn<() => Promise<Array<Record<string, unknown>>>>(() => Promise.resolve([])),
@@ -44,8 +46,7 @@ vi.mock('../src/main/windows/overlay', () => ({}));
 const { Conversation, MIN_COMMIT_AUDIO_MS } = await import('../src/main/conversation');
 
 const require = createRequire(import.meta.url);
-const mock =
-  require('../tools/mock-realtime/server') as typeof import('../tools/mock-realtime/server');
+const mock = require('../tools/mock-realtime/server') as typeof MockRealtime;
 type MockServer = Awaited<ReturnType<typeof mock.createMockServer>>;
 
 // ---------------------------------------------------------------------------
@@ -57,26 +58,24 @@ function fakeDeps(
     sendAudio: (chunk: ArrayBuffer) => void;
   },
   fullRealtimeMode = false,
-) {
-  const settings = {
-    get: () => ({
-      apiKeyPresent: false,
-      model: 'gpt-realtime-2.1-mini',
-      voice: 'marin',
-      captionsEnabled: false,
-      micDeviceId: '',
-      fullRealtimeMode,
-      hotkeyLabel: 'Ctrl+Alt',
-    }),
-    getApiKey: () => null,
-    onChange: () => () => {},
-  };
-  const overlays = { broadcast: () => {}, routePointer: () => {}, count: () => 0 };
-  const panel = { send: () => {} };
+): ConversationDeps {
   return {
-    settings: settings as never,
-    overlays: overlays as never,
-    panel: panel as never,
+    settings: {
+      get: () => ({
+        model: 'gpt-realtime-2.1-mini',
+        voice: 'marin',
+        captionsEnabled: false,
+        voiceMuted: false,
+        fullRealtimeMode,
+        computerUseEnabled: false,
+        preferApiKeyGrounding: false,
+        apiKeyUnreadable: false,
+      }),
+      getApiKey: () => null,
+      settingsWereReset: () => false,
+    },
+    overlays: { broadcast: () => {}, routePointer: () => {} },
+    panel: { send: () => {} },
     ...(phoneAudio ? { phoneAudio } : {}),
   };
 }
@@ -155,6 +154,49 @@ describe('Conversation: quick barge-in tap commit guard (M9)', () => {
     // The mock answers and the turn settles back to idle (no error state).
     await vi.waitFor(() => expect(conversation.assistantState()).toBe('idle'), { timeout: 10_000 });
     expect(conversation.turnTimingsHistory().length).toBeGreaterThan(0);
+  });
+
+  it('a tap never interrupts: no playback stop while the barge-in is deferred (M20)', async () => {
+    const capture = vi.fn();
+    const playback = vi.fn();
+    const sendAudio = vi.fn();
+    const conversation = new Conversation(fakeDeps({ capture, playback, sendAudio }));
+    conversations.push(conversation);
+
+    conversation.holdStart();
+    conversation.handleAudioChunk(chunkOfMs(50)); // parked, never appended
+    nowOffset = 100; // released fast — a tap (whisper summon)
+    conversation.holdEnd();
+
+    // Outlive the deferral timer: a leaked commit would stop playback late.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(playback).not.toHaveBeenCalled();
+    const appends = server.clientEvents.filter((e) => e.type === 'input_audio_buffer.append');
+    expect(appends).toHaveLength(0); // parked audio was dropped, not sent
+    expect(conversation.assistantState()).toBe('idle');
+  });
+
+  it('a real hold still barges in (playback stop) once committed (M20)', async () => {
+    const capture = vi.fn();
+    const playback = vi.fn();
+    const sendAudio = vi.fn();
+    const conversation = new Conversation(fakeDeps({ capture, playback, sendAudio }));
+    conversations.push(conversation);
+
+    conversation.holdStart();
+    for (let i = 0; i < 6; i++) conversation.handleAudioChunk(chunkOfMs(60));
+    nowOffset = 400; // outlived the tap window — holdEnd force-commits
+    conversation.holdEnd();
+
+    expect(playback).toHaveBeenCalledWith('stop');
+    await vi.waitFor(
+      () => {
+        const commits = server.clientEvents.filter((e) => e.type === 'input_audio_buffer.commit');
+        expect(commits).toHaveLength(1);
+      },
+      { timeout: 5_000 },
+    );
+    await vi.waitFor(() => expect(conversation.assistantState()).toBe('idle'), { timeout: 10_000 });
   });
 
   it('routes capture and response PCM through the disposable phone transport', async () => {

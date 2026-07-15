@@ -12,26 +12,27 @@
  * stale list can't drop a cancelled response whose FIRST chunk never reached
  * the renderer (no itemId known yet), so 'audio:playback' commands carry the
  * new epoch floor and any delta tagged with an older epoch is dropped by the
- * PlaybackEpochGate. The epoch part of the command is consumed by this
- * module's own onPlayback subscription (the frozen App wiring only forwards
- * the command string to control()).
+ * PlaybackEpochGate. The panel wiring (hooks/use-panel-wiring.ts) forwards
+ * the command AND the epoch floor into control().
  *
  * F1 fix (battery): the AudioContext is suspended shortly after the queue
  * drains and resumed on the next enqueue — mirroring what mic capture does —
  * so an idle Clicky doesn't keep the audio render thread spinning.
  *
- * M8.5 addition (orchestrator-approved): playback tap. The worklet streams
- * back the samples it ACTUALLY rendered ('played' blocks); this class
- * accumulates per-item stats {samplesPlayed, rms, peak, underruns}, keeps a
- * ring buffer of the last ~15s of played audio, and reports both to main via
- * 'audio:playback-stats' (on first play, ~1s cadence, and on item done) and
- * 'audio:playback-ring' (Int16 PCM, on item done).
+ * M8.5 addition (orchestrator-approved): playback tap — see ./playback-tap.ts.
+ * This class forwards the worklet's 'played' blocks to the injected tap.
+ *
+ * Stats and failures are reported through the injected `PlaybackPort` (the
+ * preload `clicky` in production — see ./engines.ts), which keeps this engine
+ * free of preload imports, side-effect-free to import, and node-testable.
  */
 
-import { clicky } from '../clicky';
 import { PlaybackEpochGate } from './epoch-gate';
-import type { AudioOutputDelta, PlaybackCommand, PlaybackStatsUpdate } from '../../../shared/types';
-import playerWorkletUrl from '../worklets/pcm-player.worklet.js?url&no-inline';
+import { PlaybackTap } from './playback-tap';
+import { CHUNK_SAMPLES, int16ToFloat32, SAMPLE_RATE } from './pcm';
+import { parsePlayerWorkletMessage, type PlayerWorkletCommand } from './worklet-messages';
+import type { PlaybackPort } from './port';
+import type { AudioOutputDelta, PlaybackCommand } from '../../../shared/types';
 
 const STALE_IDS_MAX = 64;
 /**
@@ -40,30 +41,6 @@ const STALE_IDS_MAX = 64;
  * flushes before the render thread stops.
  */
 const SUSPEND_AFTER_DRAIN_MS = 1_500;
-/** Played-audio ring buffer length: 15s @ 24kHz mono. */
-const RING_SAMPLES = 15 * 24_000;
-/** Minimum interval between non-final stats IPC sends per item. */
-const STATS_INTERVAL_MS = 1_000;
-
-/** Message shape posted by the pcm-player worklet's playback tap. */
-interface PlayedBlock {
-  type: 'played';
-  itemId: string;
-  samples: ArrayBuffer; // Float32
-  underruns: number;
-  firstPlayedAt: number;
-  done: boolean;
-}
-
-interface ItemStatsAccum {
-  samplesPlayed: number;
-  sumSquares: number;
-  peak: number;
-  underruns: number;
-  firstPlayedAt: number;
-  lastSentAt: number;
-  done: boolean;
-}
 
 export class AudioPlayer {
   private ctx: AudioContext | null = null;
@@ -76,21 +53,17 @@ export class AudioPlayer {
   private readonly gate = new PlaybackEpochGate();
   /** F1 (battery): pending context-suspend after the queue drained. */
   private suspendTimer: ReturnType<typeof setTimeout> | null = null;
+  /** M8.5: accounts the samples the worklet actually rendered. */
+  private readonly tap: PlaybackTap;
+  /** M11: playback init failed and main was told (re-armed on recovery). */
+  private initErrorReported = false;
 
-  // ---- playback tap state (M8.5) ----
-  private readonly ring = new Float32Array(RING_SAMPLES);
-  private ringWrite = 0;
-  private ringFilled = 0;
-  private readonly itemStats = new Map<string, ItemStatsAccum>();
-
-  constructor() {
-    // F1 (M2): the App wiring (frozen panel component) forwards only the
-    // command string to control(); the epoch floor rides in here directly.
-    try {
-      clicky.onPlayback(({ epoch }) => this.gate.flush(epoch));
-    } catch (err) {
-      console.warn('[playback] epoch subscription unavailable:', err);
-    }
+  constructor(
+    private readonly port: PlaybackPort,
+    private readonly workletUrl: string,
+    tap?: PlaybackTap,
+  ) {
+    this.tap = tap ?? new PlaybackTap(port);
   }
 
   /** Queue a model audio chunk (drops stale-item and stale-epoch chunks). */
@@ -102,24 +75,25 @@ export class AudioPlayer {
       this.currentItemId = delta.itemId;
     }
     this.cancelSuspend();
-    const pcm = new Int16Array(delta.chunk);
-    const samples = new Float32Array(pcm.length);
-    for (let i = 0; i < pcm.length; i++) samples[i] = (pcm[i] ?? 0) / 32768;
+    const samples = int16ToFloat32(delta.chunk);
     void this.withNode((node) => {
       // F1 (battery): wake the render thread back up for the new audio.
       if (this.ctx !== null && this.ctx.state === 'suspended') {
         void this.ctx.resume().catch(() => undefined);
       }
-      node.port.postMessage({ type: 'chunk', samples: samples.buffer, itemId: delta.itemId }, [
-        samples.buffer,
-      ]);
+      const msg: PlayerWorkletCommand = {
+        type: 'chunk',
+        samples: samples.buffer,
+        itemId: delta.itemId,
+      };
+      node.port.postMessage(msg, [samples.buffer]);
     });
   }
 
   /**
    * 'stop' = halt immediately + clear queue; 'flush' = drop queued audio.
-   * The optional epoch raises the stale-delta floor (M2) — App's wiring calls
-   * this without it; the internal onPlayback subscription covers that path.
+   * The optional epoch raises the stale-delta floor (M2) — the panel wiring
+   * passes the floor that rode in on the 'audio:playback' command.
    */
   control(command: PlaybackCommand, epoch?: number): void {
     void command; // both commands clear the queue and staleify the current item
@@ -128,7 +102,10 @@ export class AudioPlayer {
       this.markStale(this.currentItemId);
       this.currentItemId = null;
     }
-    void this.withNode((node) => node.port.postMessage({ type: 'clear' }));
+    void this.withNode((node) => {
+      const msg: PlayerWorkletCommand = { type: 'clear' };
+      node.port.postMessage(msg);
+    });
   }
 
   /** Notifies when the worklet queue runs empty (playback finished). */
@@ -147,101 +124,16 @@ export class AudioPlayer {
 
   /** Dev-only: enqueue a synthesized tone under a specific itemId (QA). */
   enqueueTone(itemId: string, seconds: number, freq = 440): void {
-    const rate = 24_000;
-    const chunkSamples = 1440; // 60ms, same as capture
-    const total = Math.floor(seconds * rate);
-    for (let start = 0; start < total; start += chunkSamples) {
-      const n = Math.min(chunkSamples, total - start);
+    const total = Math.floor(seconds * SAMPLE_RATE);
+    for (let start = 0; start < total; start += CHUNK_SAMPLES) {
+      const n = Math.min(CHUNK_SAMPLES, total - start);
       const pcm = new Int16Array(n);
       for (let i = 0; i < n; i++) {
-        const t = (start + i) / rate;
+        const t = (start + i) / SAMPLE_RATE;
         const env = Math.min(1, t * 20, (seconds - t) * 20); // fade in/out
         pcm[i] = Math.round(Math.sin(2 * Math.PI * freq * (1 + 0.3 * t) * t) * env * 0.4 * 32767);
       }
       this.enqueue({ chunk: pcm.buffer, itemId });
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // Playback tap (M8.5)
-  // -------------------------------------------------------------------------
-
-  private onPlayedBlock(block: PlayedBlock): void {
-    const samples = new Float32Array(block.samples);
-    let stats = this.itemStats.get(block.itemId);
-    const isFirst = stats === undefined;
-    if (stats === undefined) {
-      stats = {
-        samplesPlayed: 0,
-        sumSquares: 0,
-        peak: 0,
-        underruns: 0,
-        firstPlayedAt: block.firstPlayedAt,
-        lastSentAt: 0,
-        done: false,
-      };
-      this.itemStats.set(block.itemId, stats);
-      // Keep the map bounded (items are short-lived).
-      if (this.itemStats.size > STALE_IDS_MAX) {
-        const oldest = this.itemStats.keys().next().value;
-        if (oldest !== undefined && oldest !== block.itemId) this.itemStats.delete(oldest);
-      }
-    }
-    for (let i = 0; i < samples.length; i++) {
-      const s = samples[i] ?? 0;
-      stats.sumSquares += s * s;
-      const abs = Math.abs(s);
-      if (abs > stats.peak) stats.peak = abs;
-      this.ring[this.ringWrite] = s;
-      this.ringWrite = (this.ringWrite + 1) % RING_SAMPLES;
-    }
-    stats.samplesPlayed += samples.length;
-    this.ringFilled = Math.min(RING_SAMPLES, this.ringFilled + samples.length);
-    stats.underruns = block.underruns;
-    if (block.done) stats.done = true;
-
-    const now = Date.now();
-    if (isFirst || block.done || now - stats.lastSentAt >= STATS_INTERVAL_MS) {
-      stats.lastSentAt = now;
-      this.sendStats(block.itemId, stats);
-    }
-    if (block.done) {
-      this.sendRing();
-      this.itemStats.delete(block.itemId);
-    }
-  }
-
-  private sendStats(itemId: string, s: ItemStatsAccum): void {
-    const update: PlaybackStatsUpdate = {
-      itemId,
-      samplesPlayed: s.samplesPlayed,
-      rms: s.samplesPlayed > 0 ? Math.sqrt(s.sumSquares / s.samplesPlayed) : 0,
-      peak: s.peak,
-      underruns: s.underruns,
-      firstPlayedAt: s.firstPlayedAt,
-      done: s.done,
-    };
-    try {
-      clicky.sendPlaybackStats(update);
-    } catch (err) {
-      console.warn('[playback] stats report failed:', err);
-    }
-  }
-
-  /** Ship the played-audio ring buffer (oldest→newest) as Int16 PCM. */
-  private sendRing(): void {
-    const n = this.ringFilled;
-    if (n === 0) return;
-    const out = new Int16Array(n);
-    const start = (this.ringWrite - n + RING_SAMPLES) % RING_SAMPLES;
-    for (let i = 0; i < n; i++) {
-      const s = this.ring[(start + i) % RING_SAMPLES] ?? 0;
-      out[i] = Math.max(-32768, Math.min(32767, Math.round(s * 32768)));
-    }
-    try {
-      clicky.sendPlaybackRing(out.buffer);
-    } catch (err) {
-      console.warn('[playback] ring report failed:', err);
     }
   }
 
@@ -269,9 +161,6 @@ export class AudioPlayer {
     }
   }
 
-  /** M11: playback init failed and main was told (re-armed on recovery). */
-  private initErrorReported = false;
-
   private async withNode(fn: (node: AudioWorkletNode) => void): Promise<void> {
     try {
       await this.ensure();
@@ -290,7 +179,7 @@ export class AudioPlayer {
       if (!this.initErrorReported) {
         this.initErrorReported = true;
         try {
-          clicky.reportAudioError({
+          this.port.reportAudioError({
             source: 'playback',
             name: err instanceof Error ? err.name : 'Error',
             message: err instanceof Error ? err.message : String(err),
@@ -305,19 +194,21 @@ export class AudioPlayer {
   private ensure(): Promise<void> {
     if (!this.ready) {
       this.ready = (async () => {
-        this.ctx = new AudioContext({ sampleRate: 24_000 });
-        await this.ctx.audioWorklet.addModule(playerWorkletUrl);
+        this.ctx = new AudioContext({ sampleRate: SAMPLE_RATE });
+        await this.ctx.audioWorklet.addModule(this.workletUrl);
         this.node = new AudioWorkletNode(this.ctx, 'pcm-player', {
           numberOfInputs: 0,
           numberOfOutputs: 1,
           outputChannelCount: [1],
         });
-        this.node.port.onmessage = (e: MessageEvent<{ type?: string }>) => {
-          if (e.data?.type === 'drained') {
+        this.node.port.onmessage = (e: MessageEvent<unknown>) => {
+          const msg = parsePlayerWorkletMessage(e.data);
+          if (msg === null) return;
+          if (msg.type === 'drained') {
             this.scheduleSuspend(); // F1 (battery)
             this.onDrainedCb?.();
-          } else if (e.data?.type === 'played') {
-            this.onPlayedBlock(e.data as PlayedBlock);
+          } else {
+            this.tap.onPlayedBlock(msg);
           }
         };
         this.node.connect(this.ctx.destination);
@@ -327,5 +218,3 @@ export class AudioPlayer {
     return this.ready;
   }
 }
-
-export const audioPlayer = new AudioPlayer();

@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { Backoff, RetryTimer } from './util/backoff';
+import { errorMessage } from './util/guards';
 
 export const DEFAULT_PHONE_AUDIO_URL = 'ws://127.0.0.1:3211/clicky';
 export const DEFAULT_PHONE_AUDIO_HEALTH_URL = 'http://127.0.0.1:3211/health';
@@ -30,12 +32,21 @@ export interface PhoneAudioBridgeSupervisorOptions {
   restartMaxMs?: number;
 }
 
+/** Option defaults, resolved once into the supervisor's readonly config. */
 const HEALTH_TIMEOUT_MS = 1_500;
 const MONITOR_MS = 5_000;
 const STARTUP_POLL_MS = 500;
 const STARTUP_GRACE_MS = 30_000;
 const RESTART_MIN_MS = 1_000;
 const RESTART_MAX_MS = 30_000;
+
+/** The tunable knobs after defaulting (config, not per-call fallbacks). */
+interface SupervisorConfig {
+  readonly healthUrl: string;
+  readonly monitorMs: number;
+  readonly startupPollMs: number;
+  readonly startupGraceMs: number;
+}
 
 /**
  * Owns the bundled iPhone audio bridge for the lifetime of Buddy.
@@ -45,29 +56,29 @@ const RESTART_MAX_MS = 30_000;
  * Node mode and supervised with health polling plus bounded restart backoff.
  */
 export class PhoneAudioBridgeSupervisor {
-  private readonly healthUrl: string;
-  private readonly monitorMs: number;
-  private readonly startupPollMs: number;
-  private readonly startupGraceMs: number;
-  private readonly restartMinMs: number;
-  private readonly restartMaxMs: number;
-  private restartMs: number;
+  private readonly config: SupervisorConfig;
+  private readonly restartBackoff: Backoff;
+  /** Single slot shared by the inspect poll and the restart backoff (replace semantics). */
+  private readonly timer = new RetryTimer();
   private child: ChildProcess | null = null;
   private childStartedAt = 0;
-  private timer: ReturnType<typeof setTimeout> | null = null;
   private checking = false;
   private started = false;
   private closed = false;
   private lastStatusKey = '';
+  private logDirReady = false;
 
   constructor(private readonly options: PhoneAudioBridgeSupervisorOptions) {
-    this.healthUrl = options.healthUrl ?? DEFAULT_PHONE_AUDIO_HEALTH_URL;
-    this.monitorMs = options.monitorMs ?? MONITOR_MS;
-    this.startupPollMs = options.startupPollMs ?? STARTUP_POLL_MS;
-    this.startupGraceMs = options.startupGraceMs ?? STARTUP_GRACE_MS;
-    this.restartMinMs = options.restartMinMs ?? RESTART_MIN_MS;
-    this.restartMaxMs = options.restartMaxMs ?? RESTART_MAX_MS;
-    this.restartMs = this.restartMinMs;
+    this.config = {
+      healthUrl: options.healthUrl ?? DEFAULT_PHONE_AUDIO_HEALTH_URL,
+      monitorMs: options.monitorMs ?? MONITOR_MS,
+      startupPollMs: options.startupPollMs ?? STARTUP_POLL_MS,
+      startupGraceMs: options.startupGraceMs ?? STARTUP_GRACE_MS,
+    };
+    this.restartBackoff = new Backoff({
+      minMs: options.restartMinMs ?? RESTART_MIN_MS,
+      maxMs: options.restartMaxMs ?? RESTART_MAX_MS,
+    });
   }
 
   start(): void {
@@ -79,7 +90,7 @@ export class PhoneAudioBridgeSupervisor {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    this.clearTimer();
+    this.timer.clear();
     const child = this.child;
     this.child = null;
     if (child && !child.killed) child.kill();
@@ -100,22 +111,22 @@ export class PhoneAudioBridgeSupervisor {
     if (this.closed) return;
 
     if (healthy) {
-      this.restartMs = this.restartMinMs;
+      this.restartBackoff.reset();
       this.report({ state: 'healthy', owned: this.child !== null });
-      this.scheduleInspect(this.monitorMs);
+      this.scheduleInspect(this.config.monitorMs);
       return;
     }
 
     if (this.child !== null) {
-      if (Date.now() - this.childStartedAt < this.startupGraceMs) {
+      if (Date.now() - this.childStartedAt < this.config.startupGraceMs) {
         this.report({ state: 'starting', owned: true });
-        this.scheduleInspect(this.startupPollMs);
+        this.scheduleInspect(this.config.startupPollMs);
         return;
       }
       this.report({
         state: 'unhealthy',
         owned: true,
-        detail: `health endpoint did not become ready within ${this.startupGraceMs}ms`,
+        detail: `health endpoint did not become ready within ${this.config.startupGraceMs}ms`,
       });
       const child = this.child;
       this.child = null;
@@ -147,7 +158,7 @@ export class PhoneAudioBridgeSupervisor {
         this.report({ state: 'exited', owned: true, detail });
         this.scheduleRestart();
       });
-      this.scheduleInspect(this.startupPollMs);
+      this.scheduleInspect(this.config.startupPollMs);
     } catch (err) {
       const detail = errorMessage(err);
       this.report({ state: 'exited', owned: false, detail });
@@ -160,7 +171,7 @@ export class PhoneAudioBridgeSupervisor {
     if (!existsSync(this.options.entryPath)) {
       throw new Error(`bundled bridge entry missing: ${this.options.entryPath}`);
     }
-    mkdirSync(dirname(this.options.logPath), { recursive: true });
+    this.ensureLogDir();
     return spawn(this.options.executablePath, [this.options.entryPath, '--no-launch'], {
       env: {
         ...process.env,
@@ -177,7 +188,7 @@ export class PhoneAudioBridgeSupervisor {
     const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
     timer.unref?.();
     try {
-      const response = await fetch(this.healthUrl, {
+      const response = await fetch(this.config.healthUrl, {
         cache: 'no-store',
         signal: controller.signal,
       });
@@ -202,29 +213,12 @@ export class PhoneAudioBridgeSupervisor {
 
   private scheduleInspect(delay: number): void {
     if (this.closed) return;
-    this.clearTimer();
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      void this.inspect();
-    }, delay);
-    this.timer.unref?.();
+    this.timer.schedule(delay, () => void this.inspect());
   }
 
   private scheduleRestart(): void {
     if (this.closed) return;
-    this.clearTimer();
-    const delay = this.restartMs;
-    this.restartMs = Math.min(this.restartMaxMs, this.restartMs * 2);
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      this.spawnOwnedBridge();
-    }, delay);
-    this.timer.unref?.();
-  }
-
-  private clearTimer(): void {
-    if (this.timer !== null) clearTimeout(this.timer);
-    this.timer = null;
+    this.timer.schedule(this.restartBackoff.next(), () => this.spawnOwnedBridge());
   }
 
   private report(status: PhoneAudioBridgeStatus): void {
@@ -238,18 +232,21 @@ export class PhoneAudioBridgeSupervisor {
     this.options.onStatus?.(status);
   }
 
+  /** Create the log directory once per run (both spawn and log paths funnel here). */
+  private ensureLogDir(): void {
+    if (this.logDirReady) return;
+    mkdirSync(dirname(this.options.logPath), { recursive: true });
+    this.logDirReady = true;
+  }
+
   private log(message: string): void {
     const line = `[${new Date().toISOString()}] ${message}`;
     console.log(`[phone-audio-supervisor] ${message}`);
     try {
-      mkdirSync(dirname(this.options.logPath), { recursive: true });
+      this.ensureLogDir();
       appendFileSync(this.options.logPath, `${line}\n`, { encoding: 'utf8' });
     } catch {
       /* logging must never take down Buddy */
     }
   }
-}
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

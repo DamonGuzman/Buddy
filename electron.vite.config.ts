@@ -19,6 +19,7 @@ export default defineConfig({
         input: {
           overlay: resolve(__dirname, 'src/preload/overlay.ts'),
           panel: resolve(__dirname, 'src/preload/panel.ts'),
+          whisper: resolve(__dirname, 'src/preload/whisper.ts'),
         },
       },
     },
@@ -39,6 +40,7 @@ export default defineConfig({
         input: {
           overlay: resolve(__dirname, 'src/renderer/overlay/index.html'),
           panel: resolve(__dirname, 'src/renderer/panel/index.html'),
+          whisper: resolve(__dirname, 'src/renderer/whisper/index.html'),
         },
       },
     },

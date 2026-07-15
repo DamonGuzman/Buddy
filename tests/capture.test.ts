@@ -6,6 +6,12 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  buildCaptureMeta,
+  displayPhysicalSize,
+  matchSourcesToDisplays,
+  planResize,
+} from '../src/main/capture-math';
 
 // ---------------------------------------------------------------------------
 // Electron mock (must be declared before importing the module under test)
@@ -82,14 +88,13 @@ vi.mock('electron', () => ({
   },
 }));
 
-const {
-  buildCaptureMeta,
-  captureAllDisplays,
-  displayPhysicalSize,
-  exemptFromCaptureProtection,
-  matchSourcesToDisplays,
-  planResize,
-} = await import('../src/main/capture');
+const { captureAllDisplays, exemptFromCaptureProtection } = await import('../src/main/capture');
+
+/** Collects capture warnings instead of asserting console.warn call shapes. */
+function warningsSpy(): { logger: { warn(message: string): void }; messages: string[] } {
+  const messages: string[] = [];
+  return { logger: { warn: (message: string) => messages.push(message) }, messages };
+}
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -306,16 +311,11 @@ describe('captureAllDisplays', () => {
     mockState.displays = [d1];
     mockState.activeDisplay = d1;
     mockState.sources = [{ display_id: '', name: 'S1', thumbnail: fakeThumbnail(3840, 2160) }];
-    const results = await captureAllDisplays();
+    const { logger, messages } = warningsSpy();
+    const results = await captureAllDisplays(logger);
     expect(results).toHaveLength(1);
     expect(results[0]!.meta.imageW).toBe(2048);
-    expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining('display_id matching failed'),
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-    );
+    expect(messages).toEqual([expect.stringContaining('display_id matching failed')]);
   });
 
   it('does not resize a small display and keeps its native size in meta', async () => {
@@ -338,11 +338,13 @@ describe('captureAllDisplays', () => {
       { display_id: '1', name: 'S1', thumbnail: fakeThumbnail(0, 0) }, // failed grab
       { display_id: '2', name: 'S2', thumbnail: fakeThumbnail(1920, 1080) },
     ];
-    const results = await captureAllDisplays();
+    const { logger, messages } = warningsSpy();
+    const results = await captureAllDisplays(logger);
     expect(results).toHaveLength(1);
     // screenIndex stays aligned with display order even when screen0 is skipped
     expect(results[0]!.meta.screenIndex).toBe(1);
     expect(results[0]!.meta.displayId).toBe(2);
+    expect(messages).toEqual([expect.stringContaining('empty thumbnail for display 1')]);
   });
 
   it('returns [] when there are no displays', async () => {

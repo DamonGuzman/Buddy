@@ -14,19 +14,23 @@ import type {
   AssistantState,
   AudioDeviceError,
   AudioOutputDelta,
+  BuddyRestFraction,
   CaptionUpdate,
-  CaptureCommand,
+  CaptureControl,
+  CaptureIndicatorUpdate,
   CodexSignInState,
   MicDevice,
   OverlayHoverConfig,
   OverlayHoverEvent,
-  PlaybackCommand,
+  OverlayInteractiveUpdate,
+  PlaybackControl,
   PlaybackStatsUpdate,
   PointerCommand,
   RuntimeFlags,
   SessionStatus,
   Settings,
   SettingsPatch,
+  SignInResult,
   TranscriptEntry,
 } from './types';
 
@@ -42,17 +46,23 @@ export interface MainToOverlayEvents {
   /** Streamed caption text for the bubble (full text so far, not deltas). */
   'overlay:caption': CaptionUpdate;
   /** Show/hide the "capture in progress" indicator (always signposted). */
-  'overlay:capture-indicator': { active: boolean };
-  // M15 additions (orchestrator-approved): buddy hover.
+  'overlay:capture-indicator': CaptureIndicatorUpdate;
+  // M15 additions: buddy hover.
   /** Hover config (hotkey label + rest position) on load and settings change. */
   'overlay:hover-config': OverlayHoverConfig;
   /** This overlay window's click-through state flipped (dwell-to-interact). */
-  'overlay:interactive': { interactive: boolean };
-  // M19 addition (integration-approved): agent helpers on the overlay — the
-  // same renderer-safe list the panel gets (full-list upsert, broadcast on
-  // every agent state change; NEVER carries screenshot bytes). Every overlay
-  // receives it; only the buddy-hosting overlay renders the helper sprites.
+  'overlay:interactive': OverlayInteractiveUpdate;
+  // M19 addition: agent helpers on the overlay — the same renderer-safe list
+  // the panel gets (full-list upsert, broadcast on every agent state change;
+  // NEVER carries screenshot bytes). Every overlay receives it; only the
+  // buddy-hosting overlay renders the helper sprites.
   'overlay:agents': AgentSummary[];
+  // M20 addition: main-side cursor feed for the buddy-hosting overlay.
+  // Electron's setIgnoreMouseEvents(true, {forward:true}) proved unreliable
+  // on Windows (zero mousemove delivery on some setups), which silently
+  // killed hover/click on the buddy. Main polls the cursor and streams
+  // window-local DIP positions; null = the cursor left this display.
+  'overlay:cursor': { x: number; y: number } | null;
 }
 
 // ===========================================================================
@@ -71,34 +81,43 @@ export interface MainToPanelEvents {
   'panel:assistant-state': AssistantState;
   /** Settings changed (from any source) — renderer-safe view only. */
   'panel:settings': Settings;
-  // M17 addition (integration-approved): the ChatGPT-subscription (Codex CLI)
-  // sign-in snapshot, pushed on ready and whenever it changes (the CLI's
-  // auth.json can rotate under us). NEVER carries a token. The codex* fields
-  // also ride on 'panel:settings'; this is the lower-latency dedicated push.
+  // M17 addition: the ChatGPT-subscription (Codex CLI) sign-in snapshot,
+  // pushed on ready and whenever it changes (the CLI's auth.json can rotate
+  // under us). NEVER carries a token. The codex* fields also ride on
+  // 'panel:settings'; this is the lower-latency dedicated push.
   'panel:codex-signin': CodexSignInState;
   /** Model audio output for the panel's playback queue. */
   'audio:output': AudioOutputDelta;
-  /**
-   * Playback control: 'stop' halts immediately; 'flush' drops queued audio.
-   * F1 fix (orchestrator-approved), M2: `epoch` is the new playback-epoch
-   * floor — subsequent audio:output deltas tagged with an older epoch are
-   * stale (they belong to a cancelled/superseded response) and are dropped.
-   */
-  'audio:playback': { command: PlaybackCommand; epoch?: number };
-  // M5 addition (orchestrator-approved): main tells the panel renderer to
-  // start/stop mic capture when the push-to-talk hotkey goes down/up.
-  'audio:capture': { command: CaptureCommand };
-  // M11 addition (orchestrator-approved): runtime flags for the panel —
-  // hookAlive (hero hint adapts) + CLICKY_* dev flags (header dev chip).
+  /** Playback control (stop / flush + the M2 playback-epoch floor). */
+  'audio:playback': PlaybackControl;
+  // M5 addition: main tells the panel renderer to start/stop mic capture
+  // when the push-to-talk hotkey goes down/up.
+  'audio:capture': CaptureControl;
+  // M11 addition: runtime flags for the panel — hookAlive (hero hint adapts)
+  // + CLICKY_* dev flags (header dev chip).
   'panel:runtime': RuntimeFlags;
-  // M18 addition (integration-approved): agent-mode mirror — the FULL
-  // renderer-safe agent list, pushed on every state change (full-list upsert;
-  // the panel replaces its list wholesale). Never carries screenshot bytes.
-  'panel:agents': AgentSummary[];
-  // M19 addition (integration-approved): switch the panel to the agents view
-  // (an overlay helper sprite / agent card was clicked; main shows the panel
-  // and sends this so the click lands on the right view).
-  'panel:show-agents': null;
+  // M21: 'panel:agents' and 'panel:show-agents' retired with the control
+  // panel (the agents view is gone; overlay helper clicks summon the
+  // whisper). The remaining panel:* channels serve the settings window +
+  // hidden audio host that inherited the panel's BrowserWindow.
+}
+
+// ===========================================================================
+// 2b. Main -> Whisper renderer (webContents.send / clicky.on*)
+// ===========================================================================
+
+// M20: the whisper — a small floating composer for talking to buddy by text
+// (hotkey tap / buddy click). It mirrors the conversation surfaces the panel
+// already receives; main owns the mirroring (index.ts panel-port wrapper).
+export interface MainToWhisperEvents {
+  /** Transcript upsert mirror (same payloads as 'panel:transcript'). */
+  'whisper:transcript': TranscriptEntry;
+  /** Assistant state mirror (drives the composer's thinking pulse). */
+  'whisper:assistant-state': AssistantState;
+  /** Settings changed — renderer-safe view (voiceMuted + apiKeyPresent). */
+  'whisper:settings': Settings;
+  /** The window was just shown — focus the composer input. */
+  'whisper:shown': null;
 }
 
 // ===========================================================================
@@ -108,28 +127,31 @@ export interface MainToPanelEvents {
 export interface RendererSendEvents {
   /** Mic PCM16 (24kHz mono) chunk captured while the hotkey is held. */
   'audio:chunk': ArrayBuffer;
-  // M8.5 addition (orchestrator-approved): playback tap — the panel reports
-  // per-item played-audio stats (on first play, ~1s cadence, and on done).
+  // M8.5 addition: playback tap — the panel reports per-item played-audio
+  // stats (on first play, ~1s cadence, and on done).
   'audio:playback-stats': PlaybackStatsUpdate;
-  // M8.5 addition (orchestrator-approved): ring buffer of the last ~15s of
-  // PLAYED audio as Int16 PCM (24kHz mono), sent when an item finishes.
+  // M8.5 addition: ring buffer of the last ~15s of PLAYED audio as Int16 PCM
+  // (24kHz mono), sent when an item finishes.
   'audio:playback-ring': ArrayBuffer;
-  // M11 addition (orchestrator-approved): the panel renderer reports audio
-  // device failures (mic capture start / playback init) so main can surface
-  // mic_unavailable / audio_output_failed from the error catalog.
+  // M11 addition: the panel renderer reports audio device failures (mic
+  // capture start / playback init) so main can surface mic_unavailable /
+  // audio_output_failed from the error catalog.
   'audio:capture-error': AudioDeviceError;
-  // M15 additions (orchestrator-approved): buddy hover.
+  // M15 additions: buddy hover.
   /** Hover state machine events: dwell (make interactive) / exit / status. */
   'overlay:hover': OverlayHoverEvent;
   /** The buddy was clicked while interactive -> main toggles the panel. */
   'overlay:buddy-click': null;
   /** Drag-reposition finished: persist this rest fraction for this overlay. */
-  'overlay:buddy-move': { xFrac: number; yFrac: number };
-  // M19 additions (integration-approved): agent helpers on the overlay.
+  'overlay:buddy-move': BuddyRestFraction;
+  // M19 additions: agent helpers on the overlay.
   /** A helper sprite / agent card was clicked -> open the panel agents view. */
   'overlay:agent-click': { id: string };
   /** The agent card's stop affordance was clicked -> cancel that agent. */
   'overlay:agent-cancel': { id: string };
+  // M20 addition: the whisper composer.
+  /** The whisper asked to tuck away (esc / explicit close). */
+  'whisper:hide': null;
 }
 
 // ===========================================================================
@@ -149,18 +171,18 @@ export interface InvokeChannels {
   'mic:select': { args: [deviceId: string]; result: void };
   /** Overlay bootstrap: current assistant state (for late-created windows). */
   'overlay:get-state': { args: []; result: AssistantState };
-  // M11 addition (orchestrator-approved): panel bootstrap for runtime flags
-  // (push updates ride on 'panel:runtime').
+  // M11 addition: panel bootstrap for runtime flags (push updates ride on
+  // 'panel:runtime').
   'panel:get-runtime': { args: []; result: RuntimeFlags };
-  // M17 addition (integration-approved): panel bootstrap for the Codex
-  // sign-in snapshot (push updates ride on 'panel:codex-signin').
+  // M17 addition: panel bootstrap for the Codex sign-in snapshot (push
+  // updates ride on 'panel:codex-signin').
   'codex:signin-state': { args: []; result: CodexSignInState };
   /** Start system-browser ChatGPT sign-in through the local PKCE callback. */
-  'codex:sign-in': { args: []; result: { ok: true } | { ok: false; error: string } };
-  // M15 addition (orchestrator-approved): overlay bootstrap for hover config
-  // (belt-and-braces vs the did-finish-load push; handled in windows/overlay.ts).
+  'codex:sign-in': { args: []; result: SignInResult };
+  // M15 addition: overlay bootstrap for hover config (belt-and-braces vs the
+  // did-finish-load push; handled in windows/overlay.ts).
   'overlay:get-hover-config': { args: []; result: OverlayHoverConfig };
-  // M18 additions (integration-approved): agent mode (docs/AGENT-MODE.md §6.2).
+  // M18 additions: agent mode (docs/AGENT-MODE.md §6.2).
   /** Panel bootstrap: current agent list (push updates ride on 'panel:agents'). */
   'agents:list': { args: []; result: AgentSummary[] };
   /** Stop one agent (Card "stop" affordance). */
@@ -177,6 +199,7 @@ export interface InvokeChannels {
 
 export type MainToOverlayChannel = keyof MainToOverlayEvents;
 export type MainToPanelChannel = keyof MainToPanelEvents;
+export type MainToWhisperChannel = keyof MainToWhisperEvents;
 export type RendererSendChannel = keyof RendererSendEvents;
 export type InvokeChannel = keyof InvokeChannels;
 
@@ -197,21 +220,24 @@ export interface OverlayApi {
   onPointer(cb: (cmd: PointerCommand) => void): Unsubscribe;
   onAssistantState(cb: (state: AssistantState) => void): Unsubscribe;
   onCaption(cb: (update: CaptionUpdate) => void): Unsubscribe;
-  onCaptureIndicator(cb: (payload: { active: boolean }) => void): Unsubscribe;
+  onCaptureIndicator(cb: (payload: CaptureIndicatorUpdate) => void): Unsubscribe;
   getAssistantState(): Promise<AssistantState>;
 
-  // M15 additions (orchestrator-approved): buddy hover.
+  // M15 additions: buddy hover.
   onHoverConfig(cb: (cfg: OverlayHoverConfig) => void): Unsubscribe;
-  onInteractive(cb: (payload: { interactive: boolean }) => void): Unsubscribe;
+  onInteractive(cb: (payload: OverlayInteractiveUpdate) => void): Unsubscribe;
   getHoverConfig(): Promise<OverlayHoverConfig>;
   /** Fire-and-forget hover events (dwell/exit/status). */
   sendHover(evt: OverlayHoverEvent): void;
   /** The buddy was clicked while interactive (main toggles the panel). */
   sendBuddyClick(): void;
   /** Drag finished: persist the new rest fraction for this overlay. */
-  sendBuddyMove(rest: { xFrac: number; yFrac: number }): void;
+  sendBuddyMove(rest: BuddyRestFraction): void;
 
-  // M19 additions (integration-approved): agent helpers on the overlay.
+  // M20 addition: main-side cursor feed (see 'overlay:cursor').
+  onCursor(cb: (pos: { x: number; y: number } | null) => void): Unsubscribe;
+
+  // M19 additions: agent helpers on the overlay.
   onAgents(cb: (agents: AgentSummary[]) => void): Unsubscribe;
   /** Agent list bootstrap (push updates ride on 'overlay:agents'). */
   getAgents(): Promise<AgentSummary[]>;
@@ -221,55 +247,65 @@ export interface OverlayApi {
   sendAgentCancel(id: string): void;
 }
 
-/** Exposed to the panel renderer as `window.clicky`. */
+/**
+ * Exposed to the panel renderer as `window.clicky`. M21: the panel window is
+ * now the hidden AUDIO HOST + the tray-opened SETTINGS surface — the chat
+ * panel's transcript/composer/agents accessors retired with it.
+ */
 export interface PanelApi {
-  onTranscript(cb: (entry: TranscriptEntry) => void): Unsubscribe;
   onSessionStatus(cb: (status: SessionStatus) => void): Unsubscribe;
   onAssistantState(cb: (state: AssistantState) => void): Unsubscribe;
   onSettings(cb: (settings: Settings) => void): Unsubscribe;
   onAudioOutput(cb: (delta: AudioOutputDelta) => void): Unsubscribe;
-  // F1 fix (orchestrator-approved), M2: payload gained the optional epoch.
-  onPlayback(cb: (payload: { command: PlaybackCommand; epoch?: number }) => void): Unsubscribe;
-  // M5 addition (orchestrator-approved): mic capture start/stop from main.
-  onCaptureCommand(cb: (payload: { command: CaptureCommand }) => void): Unsubscribe;
-  // M11 addition (orchestrator-approved): runtime flags (hookAlive + dev flags).
+  // F1 fix, M2: the payload carries the optional playback-epoch floor.
+  onPlayback(cb: (payload: PlaybackControl) => void): Unsubscribe;
+  // M5 addition: mic capture start/stop from main.
+  onCaptureCommand(cb: (payload: CaptureControl) => void): Unsubscribe;
+  // M11 addition: runtime flags (hookAlive + dev flags).
   onRuntime(cb: (flags: RuntimeFlags) => void): Unsubscribe;
-  // M17 addition (integration-approved): Codex sign-in state push.
+  // M17 addition: Codex sign-in state push.
   onCodexSignin(cb: (state: CodexSignInState) => void): Unsubscribe;
-  // M18 addition (integration-approved): agent list push (full-list upsert).
-  onAgents(cb: (agents: AgentSummary[]) => void): Unsubscribe;
-  // M19 addition (integration-approved): switch to the agents view (an
-  // overlay helper sprite / agent card was clicked).
-  onShowAgents(cb: () => void): Unsubscribe;
 
   getSettings(): Promise<Settings>;
-  // M11 addition (orchestrator-approved): runtime flags bootstrap.
+  // M11 addition: runtime flags bootstrap.
   getRuntime(): Promise<RuntimeFlags>;
-  // M17 addition (integration-approved): Codex sign-in state bootstrap.
+  // M17 addition: Codex sign-in state bootstrap.
   getCodexSigninState(): Promise<CodexSignInState>;
-  signInToCodex(): Promise<{ ok: true } | { ok: false; error: string }>;
+  signInToCodex(): Promise<SignInResult>;
   setSettings(patch: SettingsPatch): Promise<Settings>;
-  askText(text: string): Promise<void>;
   listMics(): Promise<MicDevice[]>;
   selectMic(deviceId: string): Promise<void>;
-
-  // M18 additions (integration-approved): agent mode (docs/AGENT-MODE.md §6.2).
-  /** Agent list bootstrap (push updates ride on 'panel:agents'). */
-  listAgents(): Promise<AgentSummary[]>;
-  cancelAgent(id: string): Promise<void>;
-  cancelAllAgents(): Promise<void>;
-  markAgentSeen(id: string): Promise<void>;
 
   /** Stream a mic PCM16 chunk to main (fire-and-forget). */
   sendAudioChunk(chunk: ArrayBuffer): void;
 
-  // M8.5 additions (orchestrator-approved): playback tap reporting.
+  // M8.5 additions: playback tap reporting.
   /** Report played-audio stats for a response item (fire-and-forget). */
   sendPlaybackStats(stats: PlaybackStatsUpdate): void;
   /** Ship the last ~15s of played audio (Int16 PCM 24kHz mono). */
   sendPlaybackRing(ring: ArrayBuffer): void;
 
-  // M11 addition (orchestrator-approved): audio device failure report
-  // (mic capture start failed / playback init failed) — fire-and-forget.
+  // M11 addition: audio device failure report (mic capture start failed /
+  // playback init failed) — fire-and-forget.
   reportAudioError(payload: AudioDeviceError): void;
+}
+
+/** M20: exposed to the whisper renderer as `window.clicky`. */
+export interface WhisperApi {
+  onTranscript(cb: (entry: TranscriptEntry) => void): Unsubscribe;
+  onAssistantState(cb: (state: AssistantState) => void): Unsubscribe;
+  onSettings(cb: (settings: Settings) => void): Unsubscribe;
+  /** The window was just shown — focus the composer input. */
+  onShown(cb: () => void): Unsubscribe;
+
+  /** Bootstrap snapshots (push updates ride on the whisper:* channels). */
+  getSettings(): Promise<Settings>;
+  getAssistantState(): Promise<AssistantState>;
+
+  /** Same pipeline as the panel composer ('panel:ask-text'). */
+  askText(text: string): Promise<void>;
+  /** Toggle quiet mode etc. — only voiceMuted is expected from here. */
+  setSettings(patch: SettingsPatch): Promise<Settings>;
+  /** Tuck the whisper away (esc / close affordance). */
+  hide(): void;
 }

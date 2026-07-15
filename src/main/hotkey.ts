@@ -36,10 +36,18 @@ export interface HotkeyEvents {
   'hold-end': [];
   /** Forced release: watchdog / lock / suspend. Cancel the hold, no turn. */
   'hold-cancel': [reason: HoldCancelReason];
+  /**
+   * M20: a press released within TAP_MAX_MS — the user tapped, they didn't
+   * talk. Fires AFTER the matching 'hold-end' (the conversation's short-hold
+   * path has already cancelled the would-be turn by then). Consumers decide
+   * per mode: push-to-talk taps toggle the whisper composer; full realtime
+   * mode ignores taps (the press itself toggles the open-mic session).
+   */
+  tap: [];
   error: [Error];
 }
 
-interface HotkeyStatus {
+export interface HotkeyStatus {
   hookAlive: boolean;
   holding: boolean;
   error?: string | undefined;
@@ -62,6 +70,13 @@ export interface HotkeyOptions {
 /** A hold longer than this is a swallowed keyup, not a question (C1). */
 export const MAX_HOLD_MS = 30_000;
 
+/**
+ * M20: a release within this window is a 'tap', not a talk. Matches the
+ * conversation's MIN_HOLD_MS accidental-tap guard so a tap can NEVER also
+ * commit a voice turn — the two classifications share one boundary.
+ */
+export const TAP_MAX_MS = 250;
+
 // uiohook keycodes (UiohookKey). Ctrl: both variants. Alt: LEFT ONLY —
 // Right Alt (3640) is AltGr on international layouts and must never trigger.
 const CTRL_KEYCODES = new Set<number>([29 /* L */, 3613 /* R */]);
@@ -72,7 +87,13 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
   private ctrlDown = false;
   private altDown = false;
   private holding = false;
+  /** When the current hold began (Date.now), for tap classification (M20). */
+  private holdStartedAt = 0;
+  /** M20: a non-hotkey key joined the hold — it's a chord, never a tap. */
+  private chordSeen = false;
   private hookAlive = false;
+  /** The hook start() attached its listeners to (stop() must target it). */
+  private hook: UiohookLike | null = null;
   private lastError: string | undefined;
   private watchdog: NodeJS.Timeout | null = null;
 
@@ -83,12 +104,21 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
 
   /** Start the global hook. Never throws; check status().hookAlive. */
   start(): void {
+    // Double-start guard: a second start() on a live hook would attach a
+    // duplicate listener set (every hold would fire twice). A retry after a
+    // FAILED start stays allowed (hookAlive is false).
+    if (this.hookAlive) return;
     try {
       const hook = this.options.hook ?? this.loadUiohook();
+      this.hook = hook;
 
       hook.on('keydown', (e: { keycode: number }) => {
         if (CTRL_KEYCODES.has(e.keycode)) this.ctrlDown = true;
-        if (e.keycode === ALT_LEFT_KEYCODE) this.altDown = true;
+        else if (e.keycode === ALT_LEFT_KEYCODE) this.altDown = true;
+        // M20: any OTHER key while the hotkey is held makes this a keyboard
+        // CHORD (Ctrl+Alt+X app shortcuts, IME switches), never a tap — the
+        // whisper must not pop open every time such a shortcut is used.
+        else if (this.holding) this.chordSeen = true;
         this.evaluate();
       });
       hook.on('keyup', (e: { keycode: number }) => {
@@ -118,20 +148,12 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
     this.altDown = false;
     this.holding = false;
     if (!this.hookAlive) return;
-    if (!this.options.hook) {
-      try {
-        this.loadUiohook().stop();
-      } catch (err) {
-        console.error('[hotkey] failed to stop uiohook:', err);
-      }
-    } else {
-      try {
-        this.options.hook.stop();
-      } catch (err) {
-        console.error('[hotkey] failed to stop hook:', err);
-      }
-    }
     this.hookAlive = false;
+    try {
+      this.hook?.stop();
+    } catch (err) {
+      console.error('[hotkey] failed to stop uiohook:', err);
+    }
   }
 
   /**
@@ -170,19 +192,27 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
   private loadUiohook(): UiohookLike {
     // Lazy require so a broken native module can't crash app startup.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return (require('uiohook-napi') as typeof import('uiohook-napi')).uIOhook;
+    return (require('uiohook-napi') as { uIOhook: UiohookLike }).uIOhook;
   }
 
   private evaluate(): void {
     const shouldHold = this.ctrlDown && this.altDown;
     if (shouldHold && !this.holding) {
       this.holding = true;
+      this.holdStartedAt = Date.now();
+      this.chordSeen = false;
       this.armWatchdog();
       this.emit('hold-start');
     } else if (!shouldHold && this.holding) {
       this.holding = false;
       this.clearWatchdog();
+      const heldMs = Date.now() - this.holdStartedAt;
       this.emit('hold-end');
+      // M20: tap AFTER hold-end so the conversation's short-hold cancel has
+      // already run when tap consumers (whisper toggle) fire. Forced releases
+      // (watchdog/lock/suspend) go through forceCancel and never tap; chords
+      // (Ctrl+Alt+X shortcuts) never tap either.
+      if (heldMs <= TAP_MAX_MS && !this.chordSeen) this.emit('tap');
     }
   }
 

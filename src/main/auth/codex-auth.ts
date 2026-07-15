@@ -32,6 +32,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CodexTokenStore } from './token-store';
 import type { StoredCodexTokens } from './token-store';
+import { CODEX_CLIENT_ID, OAUTH_SCOPE, OAUTH_TOKEN_URL } from './oauth-constants';
+import { asRecord, asString } from '../util/guards';
 import type { CodexSignInState } from '../../shared/types';
 
 // M17 (integration): CodexSignInState now lives in the shared contract so the
@@ -39,10 +41,6 @@ import type { CodexSignInState } from '../../shared/types';
 // main-side importers of `./codex-auth` keep working unchanged.
 export type { CodexSignInState } from '../../shared/types';
 
-/** OAuth client id the Codex CLI registers as (public; not a secret). */
-const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
-const OAUTH_TOKEN_URL = 'https://auth.openai.com/oauth/token';
-const OAUTH_SCOPE = 'openid profile email offline_access';
 /** The auth-claim namespace inside the access-token JWT. */
 const AUTH_CLAIM = 'https://api.openai.com/auth';
 
@@ -76,13 +74,11 @@ export interface CodexAuthOptions {
   refreshTimeoutMs?: number;
 }
 
-/** Raw `~/.codex/auth.json` shape (only the fields we consume). */
-interface CodexAuthFile {
-  tokens?: {
-    access_token?: unknown;
-    refresh_token?: unknown;
-    account_id?: unknown;
-  };
+/** Narrowed `tokens` fields of `~/.codex/auth.json` (null = absent/empty). */
+export interface CodexAuthFileTokens {
+  accessToken: string | null;
+  refreshToken: string | null;
+  accountId: string | null;
 }
 
 /** Decoded pieces of an access-token JWT. */
@@ -203,64 +199,30 @@ export class CodexAuth {
   private async doRefresh(): Promise<CodexAuthInfo | null> {
     // Prefer the freshest refresh_token we hold: our own rotated one, else the
     // CLI file's current one.
-    const fileRefresh = this.readFile()?.refresh_token;
     const refreshToken =
-      this.refreshed?.refreshToken ?? (typeof fileRefresh === 'string' ? fileRefresh : null);
+      this.refreshed?.refreshToken ?? readCodexAuthFile(this.authFilePath)?.refreshToken ?? null;
     if (refreshToken === null || refreshToken.length === 0) return null;
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.refreshTimeoutMs);
-    try {
-      const body = new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-        client_id: CODEX_CLIENT_ID,
-        scope: OAUTH_SCOPE,
-      });
-      const res = await this.fetchImpl(OAUTH_TOKEN_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body.toString(),
-        signal: controller.signal,
-      });
-      if (!res.ok) {
-        console.warn(`[codex-auth] refresh failed: http ${res.status}`);
-        return null;
-      }
-      const payload = (await res.json()) as {
-        access_token?: unknown;
-        refresh_token?: unknown;
-      };
-      const accessToken = typeof payload.access_token === 'string' ? payload.access_token : '';
-      if (accessToken.length === 0) return null;
-      const decoded = decodeAccessToken(accessToken);
-      if (decoded === null) return null;
-      // Rotated refresh token when the server sends one; else keep the current.
-      const nextRefresh =
-        typeof payload.refresh_token === 'string' && payload.refresh_token.length > 0
-          ? payload.refresh_token
-          : refreshToken;
-      const accountId =
-        decoded.accountId.length > 0
-          ? decoded.accountId
-          : (this.refreshed?.accountId ?? this.fileAccountId() ?? '');
-      const stored: StoredCodexTokens = {
-        accessToken,
-        refreshToken: nextRefresh,
-        accountId,
-        planType: decoded.planType,
-        expiresAt: decoded.expiresAt,
-      };
-      this.refreshed = stored;
-      this.tokenStore.save(stored);
-      return toInfo(stored);
-    } catch (err) {
-      // AbortError (timeout) + network failures land here.
-      console.warn(`[codex-auth] refresh error: ${err instanceof Error ? err.name : 'unknown'}`);
-      return null;
-    } finally {
-      clearTimeout(timer);
-    }
+    const refreshed = await refreshAccessToken({
+      refreshToken,
+      fetchImpl: this.fetchImpl,
+      timeoutMs: this.refreshTimeoutMs,
+    });
+    if (refreshed === null) return null;
+    const accountId =
+      refreshed.accountId.length > 0
+        ? refreshed.accountId
+        : (this.refreshed?.accountId ?? readCodexAuthFile(this.authFilePath)?.accountId ?? '');
+    const stored: StoredCodexTokens = {
+      accessToken: refreshed.accessToken,
+      refreshToken: refreshed.refreshToken,
+      accountId,
+      planType: refreshed.planType,
+      expiresAt: refreshed.expiresAt,
+    };
+    this.refreshed = stored;
+    this.tokenStore.save(stored);
+    return toInfo(stored);
   }
 
   /**
@@ -283,44 +245,116 @@ export class CodexAuth {
 
   /** Decode the CLI file's access token into usable info, or null. */
   private fileInfo(): CodexAuthInfo | null {
-    const tokens = this.readFile();
-    const accessToken = typeof tokens?.access_token === 'string' ? tokens.access_token : '';
-    if (accessToken.length === 0) return null;
-    const decoded = decodeAccessToken(accessToken);
+    const tokens = readCodexAuthFile(this.authFilePath);
+    if (tokens === null || tokens.accessToken === null) return null;
+    const decoded = decodeAccessToken(tokens.accessToken);
     if (decoded === null) return null;
-    const accountIdFromField =
-      typeof tokens?.account_id === 'string' && tokens.account_id.length > 0
-        ? tokens.account_id
-        : '';
     return {
-      accessToken,
+      accessToken: tokens.accessToken,
       // Prefer the tokens.account_id field; fall back to the JWT claim.
-      accountId: accountIdFromField.length > 0 ? accountIdFromField : decoded.accountId,
+      accountId: tokens.accountId ?? decoded.accountId,
       planType: decoded.planType,
       expiresAt: decoded.expiresAt,
     };
   }
+}
 
-  private fileAccountId(): string | null {
-    const tokens = this.readFile();
-    return typeof tokens?.account_id === 'string' && tokens.account_id.length > 0
-      ? tokens.account_id
-      : null;
+/**
+ * Fresh read + parse + narrow of the CLI's `~/.codex/auth.json` in one pass.
+ * Missing file / malformed JSON / missing `tokens` object => null ("not
+ * signed in"); each field is a non-empty string or null. Exported for tests.
+ */
+export function readCodexAuthFile(path: string): CodexAuthFileTokens | null {
+  try {
+    if (!existsSync(path)) return null;
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
+    const tokens = asRecord(asRecord(parsed)?.['tokens']);
+    if (tokens === null) return null;
+    return {
+      accessToken: nonEmpty(tokens['access_token']),
+      refreshToken: nonEmpty(tokens['refresh_token']),
+      accountId: nonEmpty(tokens['account_id']),
+    };
+  } catch {
+    // Malformed / mid-write: treat as not signed in.
+    return null;
   }
+}
 
-  /** Fresh read + parse of the CLI auth.json `tokens` object, or null. */
-  private readFile(): CodexAuthFile['tokens'] | null {
-    try {
-      if (!existsSync(this.authFilePath)) return null;
-      const parsed = JSON.parse(readFileSync(this.authFilePath, 'utf8')) as CodexAuthFile;
-      if (parsed === null || typeof parsed !== 'object' || typeof parsed.tokens !== 'object') {
-        return null;
-      }
-      return parsed.tokens ?? null;
-    } catch {
-      // Missing / malformed / mid-write: treat as not signed in.
+/** Narrow to a non-empty string, else null. */
+function nonEmpty(value: unknown): string | null {
+  const str = asString(value);
+  return str.length > 0 ? str : null;
+}
+
+export interface RefreshAccessTokenInputs {
+  refreshToken: string;
+  fetchImpl: typeof fetch;
+  /** Network budget for the token endpoint call, ms. */
+  timeoutMs: number;
+}
+
+/** One successful OAuth refresh grant, JWT claims already decoded. */
+export interface RefreshedAccessToken {
+  accessToken: string;
+  /** Rotated refresh token when the server sent one; else the input token. */
+  refreshToken: string;
+  /** From the JWT auth claim; may be empty. */
+  accountId: string;
+  planType: string;
+  /** Unix milliseconds. */
+  expiresAt: number;
+}
+
+/**
+ * Rotate an access token via the OAuth refresh grant. Pure of CodexAuth state:
+ * no file reads, no caching — callers persist the result. Returns null on any
+ * failure (HTTP rejection, timeout, malformed payload); never throws. Only the
+ * error NAME is ever logged (tokens must not reach logs).
+ */
+export async function refreshAccessToken(
+  inputs: RefreshAccessTokenInputs,
+): Promise<RefreshedAccessToken | null> {
+  const { refreshToken, fetchImpl, timeoutMs } = inputs;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: CODEX_CLIENT_ID,
+      scope: OAUTH_SCOPE,
+    });
+    const res = await fetchImpl(OAUTH_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      console.warn(`[codex-auth] refresh failed: http ${res.status}`);
       return null;
     }
+    const payload = asRecord(await res.json());
+    const accessToken = asString(payload?.['access_token']);
+    if (accessToken.length === 0) return null;
+    const decoded = decodeAccessToken(accessToken);
+    if (decoded === null) return null;
+    // Rotated refresh token when the server sends one; else keep the current.
+    const rotated = asString(payload?.['refresh_token']);
+    return {
+      accessToken,
+      refreshToken: rotated.length > 0 ? rotated : refreshToken,
+      accountId: decoded.accountId,
+      planType: decoded.planType,
+      expiresAt: decoded.expiresAt,
+    };
+  } catch (err) {
+    // AbortError (timeout) + network failures land here.
+    console.warn(`[codex-auth] refresh error: ${err instanceof Error ? err.name : 'unknown'}`);
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -350,19 +384,16 @@ export function decodeAccessToken(token: string): DecodedToken | null {
   } catch {
     return null;
   }
-  if (payload === null || typeof payload !== 'object') return null;
-  const rec = payload as Record<string, unknown>;
+  const rec = asRecord(payload);
+  if (rec === null) return null;
   const exp = rec['exp'];
   if (typeof exp !== 'number' || !Number.isFinite(exp)) return null;
-  let accountId = '';
-  let planType = '';
-  const claim = rec[AUTH_CLAIM];
-  if (claim !== null && typeof claim === 'object') {
-    const c = claim as Record<string, unknown>;
-    if (typeof c['chatgpt_account_id'] === 'string') accountId = c['chatgpt_account_id'];
-    if (typeof c['chatgpt_plan_type'] === 'string') planType = c['chatgpt_plan_type'];
-  }
-  return { expiresAt: exp * 1000, accountId, planType };
+  const claim = asRecord(rec[AUTH_CLAIM]);
+  return {
+    expiresAt: exp * 1000,
+    accountId: asString(claim?.['chatgpt_account_id']),
+    planType: asString(claim?.['chatgpt_plan_type']),
+  };
 }
 
 /** base64url -> base64 (padding restored) for Buffer decoding. */

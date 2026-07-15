@@ -85,6 +85,8 @@ interface CatalogEntry {
   copy: string;
   surfaces: readonly ErrorSurface[];
   autoShowPanel: boolean;
+  /** Per-kind copy interpolation / variant selection (describeKind hook). */
+  presentCopy?(copy: string, params: ErrorParams | undefined): string;
 }
 
 const MIC_BLOCKED_COPY =
@@ -128,6 +130,7 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
       'or check your account tier.',
     surfaces: ['transcript', 'pill'],
     autoShowPanel: true,
+    presentCopy: (copy, params) => copy.replace('<model>', params?.model ?? 'this model'),
   },
   network_unreachable: {
     copy:
@@ -158,6 +161,9 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
       'desktop apps use the microphone (settings > privacy > microphone). typing works meanwhile.',
     surfaces: ['transcript', 'pill'],
     autoShowPanel: true,
+    // Permission denial: lead with the windows privacy toggle.
+    presentCopy: (copy, params) =>
+      params?.micErrorName === 'NotAllowedError' ? MIC_BLOCKED_COPY : copy,
   },
   audio_output_failed: {
     copy:
@@ -243,24 +249,84 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
   },
 };
 
+/** Every catalog kind (exported so tests derive their kind list from the catalog). */
+export const ERROR_KINDS: readonly ErrorKind[] = Object.keys(CATALOG) as ErrorKind[];
+
 /** Kinds that auto-show the panel (exported for the policy unit test). */
-export const AUTO_SHOW_KINDS: readonly ErrorKind[] = (Object.keys(CATALOG) as ErrorKind[]).filter(
+export const AUTO_SHOW_KINDS: readonly ErrorKind[] = ERROR_KINDS.filter(
   (k) => CATALOG[k].autoShowPanel,
 );
 
 /** Catalog lookup with copy interpolation / variant selection. */
 export function describeKind(kind: ErrorKind, params?: ErrorParams): ErrorPresentation {
   const entry = CATALOG[kind];
-  let message = entry.copy;
-  if (kind === 'model_unavailable') {
-    message = message.replace('<model>', params?.model ?? 'this model');
-  }
-  if (kind === 'mic_unavailable' && params?.micErrorName === 'NotAllowedError') {
-    // Permission denial: lead with the windows privacy toggle.
-    message = MIC_BLOCKED_COPY;
-  }
+  const message = entry.presentCopy ? entry.presentCopy(entry.copy, params) : entry.copy;
   return { kind, message, surfaces: entry.surfaces, autoShowPanel: entry.autoShowPanel };
 }
+
+/** What the classifier matchers see: derived once per classifyError call. */
+interface ClassifierInput {
+  /** Lowercased error message. */
+  msg: string;
+  /** Server error code attached via withErrorCode, or ''. */
+  code: string;
+  /** HTTP status from a ws rejected-upgrade message, or 0. */
+  httpStatus: number;
+}
+
+/**
+ * Ordered classifier table, FIRST MATCH WINS — 1:1 with the mapping table in
+ * tests/errors.test.ts. Order is load-bearing: e.g. insufficient_quota must
+ * win before the 401/handshake matchers see the message.
+ */
+const CLASSIFIERS: ReadonlyArray<{ kind: ErrorKind; matches(input: ClassifierInput): boolean }> = [
+  {
+    kind: 'insufficient_quota',
+    matches: ({ msg, code }) => code === 'insufficient_quota' || msg.includes('insufficient_quota'),
+  },
+  {
+    kind: 'no_api_key',
+    matches: ({ msg }) => msg.includes('no api key configured'),
+  },
+  {
+    kind: 'api_key_rejected',
+    matches: ({ msg, code, httpStatus }) =>
+      code === 'invalid_api_key' ||
+      msg.includes('invalid_api_key') ||
+      msg.includes('incorrect api key') ||
+      httpStatus === 401,
+  },
+  {
+    kind: 'model_unavailable',
+    matches: ({ msg, code, httpStatus }) =>
+      code === 'model_not_found' ||
+      msg.includes('model_not_found') ||
+      msg.includes('does not have access to model') ||
+      httpStatus === 403 ||
+      httpStatus === 404,
+  },
+  {
+    kind: 'rate_limited',
+    matches: ({ msg, code, httpStatus }) =>
+      code === 'rate_limit_exceeded' || /rate.?limit/.test(msg) || httpStatus === 429,
+  },
+  {
+    kind: 'network_unreachable',
+    matches: ({ msg }) =>
+      /\b(enotfound|eai_again|econnrefused|etimedout|econnreset|ehostunreach|enetunreach)\b/.test(
+        msg,
+      ) || msg.includes('handshake timed out'),
+  },
+  {
+    kind: 'response_interrupted',
+    matches: ({ msg }) => msg.includes('the response was interrupted'),
+  },
+  {
+    kind: 'server_error',
+    matches: ({ msg, code, httpStatus }) =>
+      code === 'server_error' || msg.includes('server_error') || httpStatus >= 500,
+  },
+];
 
 /**
  * Classify an arbitrary error (turn failure / mid-session server event) into
@@ -281,42 +347,9 @@ export function classifyError(err: unknown, params?: ErrorParams): ErrorPresenta
   const statusMatch = /unexpected server response: (\d{3})/.exec(msg);
   const httpStatus = statusMatch !== null ? Number(statusMatch[1]) : 0;
 
-  let kind: ErrorKind | null = null;
-  if (code === 'insufficient_quota' || msg.includes('insufficient_quota')) {
-    kind = 'insufficient_quota';
-  } else if (msg.includes('no api key configured')) {
-    kind = 'no_api_key';
-  } else if (
-    code === 'invalid_api_key' ||
-    msg.includes('invalid_api_key') ||
-    msg.includes('incorrect api key') ||
-    httpStatus === 401
-  ) {
-    kind = 'api_key_rejected';
-  } else if (
-    code === 'model_not_found' ||
-    msg.includes('model_not_found') ||
-    msg.includes('does not have access to model') ||
-    httpStatus === 403 ||
-    httpStatus === 404
-  ) {
-    kind = 'model_unavailable';
-  } else if (code === 'rate_limit_exceeded' || /rate.?limit/.test(msg) || httpStatus === 429) {
-    kind = 'rate_limited';
-  } else if (
-    /\b(enotfound|eai_again|econnrefused|etimedout|econnreset|ehostunreach|enetunreach)\b/.test(
-      msg,
-    ) ||
-    msg.includes('handshake timed out')
-  ) {
-    kind = 'network_unreachable';
-  } else if (msg.includes('the response was interrupted')) {
-    kind = 'response_interrupted';
-  } else if (code === 'server_error' || msg.includes('server_error') || httpStatus >= 500) {
-    kind = 'server_error';
-  }
-
-  if (kind !== null) return describeKind(kind, params);
+  const input: ClassifierInput = { msg, code, httpStatus };
+  const match = CLASSIFIERS.find((classifier) => classifier.matches(input));
+  if (match !== undefined) return describeKind(match.kind, params);
   return {
     kind: 'unknown',
     message: `something went wrong: ${singleLine(message)}`,

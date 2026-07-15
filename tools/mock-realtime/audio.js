@@ -3,6 +3,7 @@
  * (three rising sine notes, ~1.5s) so end-to-end playback is audible and
  * testable. 24kHz mono, 16-bit little-endian — exactly the session format.
  */
+// @ts-check
 'use strict';
 
 const SAMPLE_RATE = 24000;

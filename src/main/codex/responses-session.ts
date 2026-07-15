@@ -35,14 +35,28 @@
 
 import type { ChatGptCodexAuthSource } from '../auth/auth-source';
 import type { CodexUsedPercent } from '../../shared/types';
+import {
+  CODEX_RESPONSES_URL,
+  buildCodexHeaders,
+  isQuotaErrorEvent,
+  isQuotaStatus,
+  parseSseEventLine,
+  parseUsedPercent,
+  readSseLines,
+} from './transport';
+import type {
+  AssistantMessageItem,
+  CodexToolChoice,
+  FunctionCallItem,
+  FunctionCallOutputItem,
+  ResponseInputItem,
+  UserContentPart,
+  UserMessageItem,
+} from './wire-types';
 
 // --- proven request shape (COORD-STUDY §11) --------------------------------
-const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses';
 /** COORD-STUDY §11 winner: pixel-exact, cheapest, free under the ChatGPT plan. */
 export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
-/** The exact originator/UA the Codex CLI uses — the backend gates on these. */
-const CODEX_ORIGINATOR = 'codex_cli_rs';
-const CODEX_USER_AGENT = 'codex_cli_rs/0.48.0 (Windows 11; x86_64) unknown';
 /** Generous per-request budget for a streamed text answer (not a one-shot). */
 const DEFAULT_TIMEOUT_MS = 60_000;
 
@@ -128,7 +142,7 @@ export interface CodexResponsesSessionOptions {
   /** Tool/function definitions. Default: none. */
   tools?: CodexToolDef[];
   /** 'auto' | 'none' | 'required' | a named-tool choice. Default 'auto'. */
-  toolChoice?: unknown;
+  toolChoice?: CodexToolChoice;
   /** Model id. Default gpt-5.6-sol. */
   model?: string;
   /** Reasoning effort. Default 'low'. */
@@ -151,7 +165,7 @@ export class CodexResponsesSession {
   private readonly auth: ChatGptCodexAuthSource;
   private readonly instructions: string;
   private readonly tools: CodexToolDef[];
-  private readonly toolChoice: unknown;
+  private readonly toolChoice: CodexToolChoice;
   private readonly model: string;
   private readonly effort: 'low' | 'medium' | 'high';
   private readonly serviceTier: 'default' | 'priority';
@@ -163,9 +177,9 @@ export class CodexResponsesSession {
   /** Most recent response id (diagnostics only; the backend cannot continue it). */
   private previousResponseId: string | null = null;
   /** Full stateless Responses input history, excluding the next request input. */
-  private history: unknown[] = [];
+  private history: ResponseInputItem[] = [];
   /** Buffered function_call_output items awaiting continue(). */
-  private pendingOutputs: { type: 'function_call_output'; call_id: string; output: string }[] = [];
+  private pendingOutputs: FunctionCallOutputItem[] = [];
   /** In-flight request controller (for cancel()/supersede). */
   private controller: AbortController | null = null;
   /** Bumped by cancel(); stream handlers past a bump stop emitting. */
@@ -238,22 +252,13 @@ export class CodexResponsesSession {
 
   /** Send a new user turn with the complete client-side history for memory. */
   async submit(turn: CodexUserTurn, cb: CodexResponsesCallbacks = {}): Promise<CodexTurnResult> {
-    const userItem = this.buildUserItem(turn);
-    const result = await this.runRequest([...this.history, userItem], cb);
-    if (shouldCommit(result)) this.history.push(userItem, ...result.outputItems);
-    return result;
+    return this.runAndCommit([buildUserItem(turn)], cb);
   }
 
   /** Continue after tool outputs were buffered (function_call_output items). */
   async continue(cb: CodexResponsesCallbacks = {}): Promise<CodexTurnResult> {
-    if (this.pendingOutputs.length === 0) {
-      return emptyResult();
-    }
-    const outputs = this.pendingOutputs;
-    this.pendingOutputs = [];
-    const result = await this.runRequest([...this.history, ...outputs], cb);
-    if (shouldCommit(result)) this.history.push(...outputs, ...result.outputItems);
-    return result;
+    if (this.pendingOutputs.length === 0) return emptyResult();
+    return this.runAndCommit(this.takePendingOutputs(), cb);
   }
 
   /** Continue a tool round-trip and attach a fresh user/screenshot observation. */
@@ -262,32 +267,33 @@ export class CodexResponsesSession {
     cb: CodexResponsesCallbacks = {},
   ): Promise<CodexTurnResult> {
     if (this.pendingOutputs.length === 0) return emptyResult();
-    const outputs = this.pendingOutputs;
-    this.pendingOutputs = [];
-    const userItem = this.buildUserItem(turn);
-    const result = await this.runRequest([...this.history, ...outputs, userItem], cb);
-    if (shouldCommit(result)) this.history.push(...outputs, userItem, ...result.outputItems);
-    return result;
+    return this.runAndCommit([...this.takePendingOutputs(), buildUserItem(turn)], cb);
   }
 
   // -------------------------------------------------------------------------
 
-  private buildUserItem(turn: CodexUserTurn): unknown {
-    const content: unknown[] = [];
-    if (turn.context !== undefined && turn.context.length > 0) {
-      content.push({ type: 'input_text', text: turn.context });
-    }
-    for (const img of turn.images ?? []) {
-      content.push({
-        type: 'input_image',
-        image_url: `data:image/jpeg;base64,${img.jpegBase64}`,
-      });
-    }
-    content.push({ type: 'input_text', text: turn.text });
-    return { type: 'message', role: 'user', content };
+  /** Drain the buffered tool outputs (cleared BEFORE the request goes out). */
+  private takePendingOutputs(): FunctionCallOutputItem[] {
+    const outputs = this.pendingOutputs;
+    this.pendingOutputs = [];
+    return outputs;
   }
 
-  private buildBody(input: unknown[]): Record<string, unknown> {
+  /**
+   * Run one request with `history + newItems` as the input, and — only on a
+   * clean completion (not aborted, not quota, no error) — commit the new
+   * items plus the response's output items to the client-side history.
+   */
+  private async runAndCommit(
+    newItems: ResponseInputItem[],
+    cb: CodexResponsesCallbacks,
+  ): Promise<CodexTurnResult> {
+    const result = await this.runRequest([...this.history, ...newItems], cb);
+    if (shouldCommit(result)) this.history.push(...newItems, ...result.outputItems);
+    return result;
+  }
+
+  private buildBody(input: ResponseInputItem[]): Record<string, unknown> {
     const body: Record<string, unknown> = {
       model: this.model,
       instructions: this.instructions,
@@ -307,25 +313,21 @@ export class CodexResponsesSession {
   }
 
   /**
-   * POST + stream one request. Never throws; returns a CodexTurnResult and
-   * fires callbacks along the way.
+   * Resolve the bearer for one request, or a failure result when the request
+   * must not go out: mock mode (the app talks to the in-process mock realtime
+   * server; there is no Codex REST endpoint and unit tests must never hit the
+   * network), a cancel() landing during the async token refresh, a rejected
+   * refresh, or an empty token (not signed in). Failure callbacks fire here.
    */
-  private async runRequest(
-    input: unknown[],
+  private async resolveBearer(
+    alivePre: () => boolean,
     cb: CodexResponsesCallbacks,
-  ): Promise<InternalTurnResult> {
-    // Snapshot the cancel epoch up front so a cancel() that lands during the
-    // pre-fetch async gap (token refresh) still short-circuits the request.
-    const epoch = this.cancelEpoch;
-    const alivePre = (): boolean => epoch === this.cancelEpoch;
-
-    // Mock mode: the app talks to the in-process mock realtime server; there
-    // is no Codex REST endpoint and unit tests must never hit the network.
+  ): Promise<{ bearer: string } | { failure: InternalTurnResult }> {
     const mock = this.env['CLICKY_MOCK_URL'];
     if (mock !== undefined && mock !== '') {
       const err = new Error('codex responses unavailable in mock mode');
       cb.onError?.(err);
-      return { ...emptyInternalResult(), error: err };
+      return { failure: makeErrorResult({ error: err }) };
     }
 
     let bearer: string;
@@ -334,15 +336,33 @@ export class CodexResponsesSession {
     } catch (err) {
       const e = asError(err);
       if (alivePre()) cb.onError?.(e);
-      return { ...emptyInternalResult(), aborted: !alivePre(), error: alivePre() ? e : null };
+      return { failure: makeErrorResult({ aborted: !alivePre(), error: alivePre() ? e : null }) };
     }
     // Superseded (cancel()/reset()) while resolving the bearer — don't fetch.
-    if (!alivePre()) return { ...emptyInternalResult(), aborted: true };
+    if (!alivePre()) return { failure: makeErrorResult({ aborted: true }) };
     if (bearer.length === 0) {
       const e = new Error('codex sub not signed in');
       cb.onError?.(e);
-      return { ...emptyInternalResult(), error: e };
+      return { failure: makeErrorResult({ error: e }) };
     }
+    return { bearer };
+  }
+
+  /**
+   * POST + stream one request. Never throws; returns a CodexTurnResult and
+   * fires callbacks along the way.
+   */
+  private async runRequest(
+    input: ResponseInputItem[],
+    cb: CodexResponsesCallbacks,
+  ): Promise<InternalTurnResult> {
+    // Snapshot the cancel epoch up front so a cancel() that lands during the
+    // pre-fetch async gap (token refresh) still short-circuits the request.
+    const epoch = this.cancelEpoch;
+    const alivePre = (): boolean => epoch === this.cancelEpoch;
+
+    const resolved = await this.resolveBearer(alivePre, cb);
+    if ('failure' in resolved) return resolved.failure;
 
     const controller = new AbortController();
     this.controller = controller;
@@ -352,15 +372,7 @@ export class CodexResponsesSession {
     try {
       const res = await this.fetchImpl(CODEX_RESPONSES_URL, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${bearer}`,
-          'ChatGPT-Account-Id': this.auth.accountId,
-          Accept: 'text/event-stream',
-          'OpenAI-Beta': 'responses=experimental',
-          originator: CODEX_ORIGINATOR,
-          'User-Agent': CODEX_USER_AGENT,
-          'Content-Type': 'application/json',
-        },
+        headers: buildCodexHeaders(resolved.bearer, this.auth.accountId),
         signal: controller.signal,
         body: JSON.stringify(this.buildBody(input)),
       });
@@ -370,19 +382,10 @@ export class CodexResponsesSession {
 
       if (!res.ok) {
         // 429 / 402 / 403 usage rejections = plan quota — FAIL CLOSED.
-        const quota = res.status === 429 || res.status === 402 || res.status === 403;
+        const quota = isQuotaStatus(res.status);
         const e = new Error(`codex responses http ${res.status}`);
         if (alive()) cb.onError?.(e);
-        return {
-          responseId: null,
-          usage: null,
-          usedPercent,
-          quotaExhausted: quota,
-          aborted: false,
-          functionCalls: 0,
-          error: e,
-          outputItems: [],
-        };
+        return makeErrorResult({ usedPercent, quotaExhausted: quota, error: e });
       }
 
       const result = await this.consumeStream(res, epoch, cb);
@@ -393,16 +396,11 @@ export class CodexResponsesSession {
       // An abort from cancel() is expected supersede/barge-in, not an error to
       // surface; a timeout abort is also delivered as aborted (caller decides).
       if (!aborted && alive()) cb.onError?.(e);
-      return {
-        responseId: null,
-        usage: null,
+      return makeErrorResult({
         usedPercent: this.lastUsedPercentValue,
-        quotaExhausted: false,
         aborted,
-        functionCalls: 0,
         error: aborted ? null : e,
-        outputItems: [],
-      };
+      });
     } finally {
       clearTimeout(timer);
       if (this.controller === controller) this.controller = null;
@@ -421,52 +419,14 @@ export class CodexResponsesSession {
     const state = new StreamState();
     const alive = (): boolean => epoch === this.cancelEpoch;
 
-    const handleLine = (line: string): void => {
-      const trimmed = line.replace(/^﻿/, '').trimStart();
-      if (!trimmed.startsWith('data:')) return;
-      const data = trimmed.slice('data:'.length).trim();
-      if (data.length === 0 || data === '[DONE]') return;
-      let evt: Record<string, unknown>;
-      try {
-        const parsed: unknown = JSON.parse(data);
-        if (parsed === null || typeof parsed !== 'object') return;
-        evt = parsed as Record<string, unknown>;
-      } catch {
-        return;
-      }
-      if (alive()) this.dispatchEvent(evt, state, cb);
-    };
-
-    const body = res.body as ReadableStream<Uint8Array> | null | undefined;
-    if (body !== null && body !== undefined && typeof body.getReader === 'function') {
-      const reader = body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let nl: number;
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl);
-          buf = buf.slice(nl + 1);
-          handleLine(line);
-        }
-        if (!alive()) {
-          try {
-            await reader.cancel();
-          } catch {
-            /* ignore */
-          }
-          break;
-        }
-      }
-      buf += decoder.decode();
-      if (buf.length > 0) handleLine(buf);
-    } else {
-      const text = await res.text();
-      for (const line of text.split(/\r?\n/)) handleLine(line);
-    }
+    await readSseLines(
+      res,
+      (line) => {
+        const evt = parseSseEventLine(line);
+        if (evt !== null && alive()) this.dispatchEvent(evt, state, cb);
+      },
+      () => !alive(),
+    );
 
     // Flush any text item that streamed deltas but never got an explicit done.
     if (alive()) {
@@ -576,7 +536,7 @@ export class CodexResponsesSession {
       case 'response.failed':
       case 'response.incomplete':
       case 'error': {
-        if (isQuotaError(evt)) state.quotaExhausted = true;
+        if (isQuotaErrorEvent(evt)) state.quotaExhausted = true;
         cb.onError?.(new Error(errorMessageOf(evt)));
         break;
       }
@@ -607,8 +567,8 @@ class StreamState {
     this.outputOrder.push({ itemId, type });
   }
 
-  outputItems(): unknown[] {
-    const items: unknown[] = [];
+  outputItems(): (AssistantMessageItem | FunctionCallItem)[] {
+    const items: (AssistantMessageItem | FunctionCallItem)[] = [];
     for (const item of this.outputOrder) {
       if (item.type === 'message') {
         const text = this.textAccum.get(item.itemId) ?? '';
@@ -640,6 +600,21 @@ class StreamState {
 // Pure helpers (exported for tests)
 // ---------------------------------------------------------------------------
 
+function buildUserItem(turn: CodexUserTurn): UserMessageItem {
+  const content: UserContentPart[] = [];
+  if (turn.context !== undefined && turn.context.length > 0) {
+    content.push({ type: 'input_text', text: turn.context });
+  }
+  for (const img of turn.images ?? []) {
+    content.push({
+      type: 'input_image',
+      image_url: `data:image/jpeg;base64,${img.jpegBase64}`,
+    });
+  }
+  content.push({ type: 'input_text', text: turn.text });
+  return { type: 'message', role: 'user', content };
+}
+
 function emptyResult(): CodexTurnResult {
   return {
     responseId: null,
@@ -653,11 +628,12 @@ function emptyResult(): CodexTurnResult {
 }
 
 interface InternalTurnResult extends CodexTurnResult {
-  outputItems: unknown[];
+  outputItems: ResponseInputItem[];
 }
 
-function emptyInternalResult(): InternalTurnResult {
-  return { ...emptyResult(), outputItems: [] };
+/** An error-shaped result: everything empty except the given overrides. */
+function makeErrorResult(overrides: Partial<InternalTurnResult>): InternalTurnResult {
+  return { ...emptyResult(), outputItems: [], ...overrides };
 }
 
 function shouldCommit(result: InternalTurnResult): boolean {
@@ -700,23 +676,6 @@ export function parseUsage(usage: unknown): CodexUsage | null {
   };
 }
 
-/**
- * Parse the ChatGPT-plan rate-limit headers into used-% telemetry. A missing
- * or unparsable value yields null for that field. Exported for tests.
- */
-export function parseUsedPercent(headers: Headers): CodexUsedPercent {
-  const num = (name: string): number | null => {
-    const raw = headers.get(name);
-    if (raw === null) return null;
-    const n = Number.parseFloat(raw);
-    return Number.isFinite(n) ? n : null;
-  };
-  return {
-    primary: num('x-codex-primary-used-percent'),
-    secondary: num('x-codex-secondary-used-percent'),
-  };
-}
-
 function errorMessageOf(evt: Record<string, unknown>): string {
   const err = evt['error'];
   if (err !== null && typeof err === 'object') {
@@ -727,18 +686,4 @@ function errorMessageOf(evt: Record<string, unknown>): string {
   if (typeof top === 'string' && top.length > 0) return top;
   const type = evt['type'];
   return typeof type === 'string' ? `codex ${type}` : 'codex responses error';
-}
-
-/** True when a streamed error event is a plan usage / rate-limit rejection. */
-function isQuotaError(evt: Record<string, unknown>): boolean {
-  const err = evt['error'];
-  const rec = err !== null && typeof err === 'object' ? (err as Record<string, unknown>) : evt;
-  const hay = [
-    typeof rec['code'] === 'string' ? rec['code'] : '',
-    typeof rec['type'] === 'string' ? rec['type'] : '',
-    typeof rec['message'] === 'string' ? rec['message'] : '',
-  ]
-    .join(' ')
-    .toLowerCase();
-  return /quota|rate.?limit|usage.?limit|too many requests|insufficient/.test(hay);
 }

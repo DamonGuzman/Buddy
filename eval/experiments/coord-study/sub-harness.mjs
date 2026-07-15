@@ -132,7 +132,7 @@ async function pointOnce({ auth, model, effort, imageB64, ask, W, H }) {
     });
   } catch (err) {
     clearTimeout(timer);
-    throw new Error(`fetch failed: ${err.message}`);
+    throw new Error(`fetch failed: ${err.message}`, { cause: err });
   }
   const quota = {};
   for (const h of QUOTA_HEADERS) {

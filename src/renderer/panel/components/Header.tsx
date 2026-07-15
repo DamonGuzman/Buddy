@@ -1,7 +1,6 @@
-import { ArrowLeft, Bot, Settings } from 'lucide-react';
 import { Triangle } from './Triangle';
+import { STATUS_TINT } from './status-tint';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { AssistantState, SessionStatus } from '../../../shared/types';
@@ -17,10 +16,10 @@ const STATE_LABEL: Record<AssistantState, string> = {
 /** Subtle per-state tint on the assistant-state badge (dark zinc base). */
 const STATE_BADGE: Record<AssistantState, string> = {
   idle: 'border-border text-muted-foreground',
-  listening: 'border-clicky/40 bg-clicky/10 text-clicky',
-  thinking: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
-  speaking: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
-  error: 'border-destructive/40 bg-destructive/10 text-destructive',
+  listening: STATUS_TINT.accent,
+  thinking: STATUS_TINT.warning,
+  speaking: STATUS_TINT.positive,
+  error: STATUS_TINT.danger,
 };
 
 const STATE_DOT: Record<AssistantState, string> = {
@@ -50,13 +49,12 @@ interface HeaderProps {
   session: SessionStatus | null;
   /** M11: CLICKY_* dev/QA flags set for this run (besides CLICKY_DEBUG). */
   devFlags?: string[];
-  view: 'chat' | 'agents' | 'settings';
-  agentCount: number;
-  onView: (view: 'chat' | 'agents' | 'settings') => void;
 }
 
+/** M21: settings-window header — title, live status, session dot. The old
+ *  panel's view switcher and agents button retired with the panel. */
 export function Header(props: HeaderProps): React.JSX.Element {
-  const { assistantState, session, devFlags = [], view, agentCount, onView } = props;
+  const { assistantState, session, devFlags = [] } = props;
   const sessionState = session?.state ?? 'disconnected';
   const sessionTitle =
     sessionState === 'error' && session?.error
@@ -67,7 +65,7 @@ export function Header(props: HeaderProps): React.JSX.Element {
     <header className="flex items-center gap-2 border-b px-4 pt-3.5 pb-3 [-webkit-app-region:drag]">
       <div className="flex items-center gap-2">
         <Triangle size={22} />
-        <h1 className="text-[17px] leading-none font-semibold tracking-tight">buddy</h1>
+        <h1 className="text-[17px] leading-none font-semibold tracking-tight">buddy settings</h1>
       </div>
 
       <Badge
@@ -82,7 +80,7 @@ export function Header(props: HeaderProps): React.JSX.Element {
         {session?.usingMockServer ? (
           <Badge
             variant="outline"
-            className="rounded-full border-amber-400/40 bg-amber-400/10 px-2 text-[10px] tracking-wide text-amber-300"
+            className={cn('rounded-full px-2 text-[10px] tracking-wide', STATUS_TINT.warning)}
           >
             mock
           </Badge>
@@ -94,7 +92,7 @@ export function Header(props: HeaderProps): React.JSX.Element {
             <TooltipTrigger asChild>
               <Badge
                 variant="outline"
-                className="rounded-full border-violet-400/40 bg-violet-400/10 px-2 text-[10px] tracking-wide text-violet-300"
+                className={cn('rounded-full px-2 text-[10px] tracking-wide', STATUS_TINT.dev)}
               >
                 dev:{devFlags.length}
               </Badge>
@@ -112,48 +110,6 @@ export function Header(props: HeaderProps): React.JSX.Element {
             />
           </TooltipTrigger>
           <TooltipContent side="bottom">{sessionTitle}</TooltipContent>
-        </Tooltip>
-        {view === 'chat' ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label="agents"
-                className="relative size-7 text-muted-foreground"
-                onClick={() => onView('agents')}
-              >
-                <Bot className="size-4" />
-                {agentCount > 0 ? (
-                  <span className="absolute -top-1 -right-1 grid min-w-4 place-items-center rounded-full bg-clicky px-1 text-[9px] leading-4 text-primary-foreground">
-                    {agentCount}
-                  </span>
-                ) : null}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">agents</TooltipContent>
-          </Tooltip>
-        ) : null}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={view !== 'chat' ? 'back to chat' : 'settings'}
-              className={cn(
-                'size-7 text-muted-foreground',
-                view !== 'chat' && 'bg-accent text-accent-foreground',
-              )}
-              onClick={() => onView(view === 'chat' ? 'settings' : 'chat')}
-            >
-              {view !== 'chat' ? <ArrowLeft className="size-4" /> : <Settings className="size-4" />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {view !== 'chat' ? 'back to chat' : 'settings'}
-          </TooltipContent>
         </Tooltip>
       </div>
     </header>

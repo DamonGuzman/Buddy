@@ -3,8 +3,11 @@
  * - scoring.ts (pure): label/name normalization, similarity, selection
  *   (threshold + proximity tie-breaks),
  * - convert.ts (pure): DIP <-> physical px at 100%/150%/200% and roundtrip,
+ *   plus the prefer-screen seam (injected Electron screen API + fallback),
  * - snapper.ts service: timebox fallback, crash respawn, dispose — against a
- *   fake JSON-lines daemon (a Node child process, no PowerShell/UIA needed).
+ *   fake JSON-lines daemon (a Node child process, no PowerShell/UIA needed),
+ * - snapper.ts retry/budget policy — against a stubbed daemon client
+ *   (transport-level behavior lives in tests/daemon-client.test.ts).
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -16,8 +19,19 @@ import {
   SNAP_TEXT_THRESHOLD,
 } from '../src/main/grounding/scoring';
 import type { SnapCandidate } from '../src/main/grounding/scoring';
-import { dipToPhysicalViaMeta, physicalToDipViaMeta } from '../src/main/grounding/convert';
+import {
+  dipToPhysicalPreferScreen,
+  dipToPhysicalViaMeta,
+  physicalToDipPreferScreen,
+  physicalToDipViaMeta,
+} from '../src/main/grounding/convert';
+import type { Pt, ScreenPointApi } from '../src/main/grounding/convert';
 import { GroundingService } from '../src/main/grounding/snapper';
+import type {
+  DaemonQuery,
+  DaemonRequester,
+  DaemonResponse,
+} from '../src/main/grounding/daemon-client';
 import type { CaptureMeta } from '../src/shared/types';
 
 // ---------------------------------------------------------------------------
@@ -220,6 +234,72 @@ describe('grounding convert: DIP <-> physical', () => {
     const m = meta(1.5);
     expect(dipToPhysicalViaMeta({ x: 2560, y: 1440 }, m)).toEqual({ x: 3840, y: 2160 });
   });
+
+  it('two-step rounding is preserved (not collapsible to round(p*sf))', () => {
+    // Documented in convert.ts: the direct product rounds the other way here.
+    const m = meta(1.25, 2560);
+    const p = { x: -1023.6000000000001, y: 0 };
+    expect(dipToPhysicalViaMeta(p, m).x).toBe(-1279);
+    expect(Math.round(p.x * m.scaleFactor)).toBe(-1280);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// convert: prefer-screen seam (injectable Electron screen API)
+// ---------------------------------------------------------------------------
+
+/** A ScreenPointApi stub that records calls and returns canned points. */
+function apiStub(result: Pt | (() => Pt)): ScreenPointApi & { calls: Pt[] } {
+  const calls: Pt[] = [];
+  const produce = (point: Pt): Pt => {
+    calls.push(point);
+    return typeof result === 'function' ? result() : result;
+  };
+  return { calls, dipToScreenPoint: produce, screenToDipPoint: produce };
+}
+
+describe('grounding convert: prefer-screen seam', () => {
+  const m = meta(1.5);
+
+  it('uses the screen API result when finite, rounding the input first', () => {
+    const api = apiStub({ x: 111, y: 222 });
+    expect(dipToPhysicalPreferScreen({ x: 10.4, y: 20.6 }, m, api)).toEqual({ x: 111, y: 222 });
+    expect(api.calls).toEqual([{ x: 10, y: 21 }]);
+    expect(physicalToDipPreferScreen({ x: 1919.5, y: 1080.4 }, m, api)).toEqual({ x: 111, y: 222 });
+    expect(api.calls[1]).toEqual({ x: 1920, y: 1080 });
+  });
+
+  it('falls back to viaMeta (with the UNROUNDED point) when the API throws', () => {
+    const throwing = apiStub(() => {
+      throw new Error('screen API unavailable');
+    });
+    const p = { x: 10.4, y: 20.6 };
+    expect(dipToPhysicalPreferScreen(p, m, throwing)).toEqual(dipToPhysicalViaMeta(p, m));
+    expect(dipToPhysicalPreferScreen(p, m, throwing)).toEqual({ x: 16, y: 31 });
+    const q = { x: 1920, y: 1080 };
+    expect(physicalToDipPreferScreen(q, m, throwing)).toEqual(physicalToDipViaMeta(q, m));
+  });
+
+  it('falls back when the API returns non-finite coordinates', () => {
+    const p = { x: 100, y: 50 };
+    expect(dipToPhysicalPreferScreen(p, m, apiStub({ x: NaN, y: 5 }))).toEqual(
+      dipToPhysicalViaMeta(p, m),
+    );
+    expect(dipToPhysicalPreferScreen(p, m, apiStub({ x: 5, y: Infinity }))).toEqual(
+      dipToPhysicalViaMeta(p, m),
+    );
+    expect(physicalToDipPreferScreen(p, m, apiStub({ x: NaN, y: NaN }))).toEqual(
+      physicalToDipViaMeta(p, m),
+    );
+  });
+
+  it('falls back when the API returns null/undefined at runtime', () => {
+    const p = { x: 100, y: 50 };
+    const nullApi = apiStub(() => null as unknown as Pt);
+    const undefApi = apiStub(() => undefined as unknown as Pt);
+    expect(dipToPhysicalPreferScreen(p, m, nullApi)).toEqual(dipToPhysicalViaMeta(p, m));
+    expect(physicalToDipPreferScreen(p, m, undefApi)).toEqual(physicalToDipViaMeta(p, m));
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -323,5 +403,169 @@ describe('GroundingService (fake daemon)', () => {
     service.dispose();
     const after = await service.snap({ x: 150, y: 120, label: 'the save button' });
     expect(after.matched).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// snapper retry/budget policy against a stubbed daemon client
+// ---------------------------------------------------------------------------
+
+interface StubClient extends DaemonRequester {
+  /** Every daemon query, in order, with its transport timeout. */
+  calls: { query: DaemonQuery; timeoutMs: number }[];
+}
+
+/** A DaemonRequester stub answering from a scripted per-call sequence. */
+function stubClient(
+  respond: (query: DaemonQuery, call: number) => Promise<DaemonResponse | null>,
+): StubClient {
+  const calls: StubClient['calls'] = [];
+  return {
+    calls,
+    ensureSpawned: () => {},
+    dispose: () => {},
+    request: (query, timeoutMs) => {
+      calls.push({ query, timeoutMs });
+      return respond(query, calls.length);
+    },
+  };
+}
+
+/** One daemon answer carrying the given candidates. */
+function answer(candidates: unknown, elapsedMs = 5): DaemonResponse {
+  return { id: 1, elapsedMs, candidates };
+}
+
+const SAVE = { name: 'Save', x: 100, y: 100, w: 80, h: 40 };
+const EXPORT = { name: 'Export', x: 100, y: 100, w: 80, h: 40 };
+
+function stubService(client: DaemonRequester, options: Partial<{ excludePid: number }> = {}) {
+  return new GroundingService({ scriptDir: 'unused-for-stub-client', ...options }, client);
+}
+
+describe('GroundingService (stubbed client): retry + budget policy', () => {
+  it('retries once at the wider radius when nothing near the point matches', async () => {
+    const client = stubClient((_query, call) =>
+      Promise.resolve(call === 1 ? answer([EXPORT]) : answer([SAVE])),
+    );
+    const outcome = await stubService(client).snap({ x: 150, y: 120, label: 'the save button' });
+    expect(client.calls.map((c) => c.query.radiusPx)).toEqual([350, 700]);
+    expect(outcome.matched).toBe(true);
+    expect(outcome.point).toEqual({ x: 140, y: 120 });
+    expect(outcome.daemonMs).toBe(5);
+  });
+
+  it('a first-round match never triggers the retry', async () => {
+    const client = stubClient(() => Promise.resolve(answer([SAVE])));
+    const outcome = await stubService(client).snap({ x: 150, y: 120, label: 'the save button' });
+    expect(client.calls).toHaveLength(1);
+    expect(outcome.matched).toBe(true);
+  });
+
+  it('gives up after the widest radius (no third attempt)', async () => {
+    const client = stubClient(() => Promise.resolve(answer([EXPORT])));
+    const outcome = await stubService(client).snap({ x: 150, y: 120, label: 'the save button' });
+    expect(client.calls.map((c) => c.query.radiusPx)).toEqual([350, 700]);
+    expect(outcome.matched).toBe(false);
+    expect(outcome.timedOut).toBe(false);
+    expect(outcome.candidates).toBe(1);
+  });
+
+  it('a caller radius >= the retry radius is tried only once', async () => {
+    const client = stubClient(() => Promise.resolve(answer([EXPORT])));
+    const outcome = await stubService(client).snap({
+      x: 150,
+      y: 120,
+      label: 'the save button',
+      radiusPx: 700,
+    });
+    expect(client.calls.map((c) => c.query.radiusPx)).toEqual([700]);
+    expect(outcome.matched).toBe(false);
+  });
+
+  it('a null transport answer reports timedOut (raw-point fallback)', async () => {
+    const client = stubClient(() => Promise.resolve(null));
+    const outcome = await stubService(client).snap({ x: 150, y: 120, label: 'the save button' });
+    expect(client.calls).toHaveLength(1);
+    expect(outcome.matched).toBe(false);
+    expect(outcome.timedOut).toBe(true);
+  });
+
+  it('skips the retry when the remaining budget is under the attempt floor', async () => {
+    // First round burns most of the 200ms timebox; the 700px retry would
+    // start with < 120ms left and must be skipped as a timeout.
+    const client = stubClient(() => new Promise((r) => setTimeout(() => r(answer([EXPORT])), 120)));
+    const outcome = await stubService(client).snap(
+      { x: 150, y: 120, label: 'the save button' },
+      { timeboxMs: 200 },
+    );
+    expect(client.calls).toHaveLength(1);
+    expect(outcome.matched).toBe(false);
+    expect(outcome.timedOut).toBe(true);
+  });
+
+  it('clamps the daemon budget to 450ms under a roomy timebox', async () => {
+    const client = stubClient(() => Promise.resolve(answer([SAVE])));
+    await stubService(client).snap({ x: 150, y: 120, label: 'the save button' });
+    const { query, timeoutMs } = client.calls[0]!;
+    expect(query.budgetMs).toBe(450); // min(450, 600 - 60)
+    expect(query.maxNodes).toBe(3000);
+    expect(timeoutMs).toBeLessThanOrEqual(600);
+  });
+
+  it('floors the daemon budget at 100ms under a tight timebox', async () => {
+    const client = stubClient(() => Promise.resolve(answer([SAVE])));
+    await stubService(client).snap(
+      { x: 150, y: 120, label: 'the save button' },
+      { timeboxMs: 130 },
+    );
+    expect(client.calls[0]!.query.budgetMs).toBe(100); // max(100, 130 - 60)
+  });
+
+  it('rounds the query point and carries excludePid on every attempt', async () => {
+    const client = stubClient(() => Promise.resolve(answer([EXPORT])));
+    await stubService(client, { excludePid: 4242 }).snap({
+      x: 150.6,
+      y: 119.4,
+      label: 'the save button',
+    });
+    for (const { query } of client.calls) {
+      expect(query.x).toBe(151);
+      expect(query.y).toBe(119);
+      expect(query.excludePid).toBe(4242);
+    }
+  });
+
+  it('debug mode surfaces every scored candidate from the answering query', async () => {
+    const client = stubClient(() => Promise.resolve(answer([EXPORT, { ...SAVE, ct: 'Button' }])));
+    const outcome = await stubService(client).snap(
+      { x: 150, y: 120, label: 'the save button' },
+      { debug: true },
+    );
+    expect(outcome.matched).toBe(true);
+    expect(outcome.debug).toHaveLength(2);
+    const save = outcome.debug!.find((c) => c.name === 'Save')!;
+    expect(save.ct).toBe('Button');
+    expect(save.rect).toEqual({ x: 100, y: 100, w: 80, h: 40 });
+    expect(save.textScore).toBeGreaterThanOrEqual(0.85);
+    const exp = outcome.debug!.find((c) => c.name === 'Export')!;
+    expect(exp.textScore).toBeLessThan(SNAP_TEXT_THRESHOLD);
+  });
+
+  it('normalizes a scalar-ized single candidate (PS 5.1 ConvertTo-Json)', async () => {
+    const client = stubClient(() => Promise.resolve(answer(SAVE)));
+    const outcome = await stubService(client).snap({ x: 150, y: 120, label: 'the save button' });
+    expect(outcome.matched).toBe(true);
+    expect(outcome.candidates).toBe(1);
+  });
+
+  it('a disposed service answers immediately without touching the client', async () => {
+    const client = stubClient(() => Promise.resolve(answer([SAVE])));
+    const service = stubService(client);
+    service.dispose();
+    const outcome = await service.snap({ x: 150, y: 120, label: 'the save button' });
+    expect(outcome.matched).toBe(false);
+    expect(outcome.timedOut).toBe(false);
+    expect(client.calls).toHaveLength(0);
   });
 });

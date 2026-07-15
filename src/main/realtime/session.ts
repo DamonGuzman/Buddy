@@ -6,6 +6,12 @@
  * also what tools/mock-realtime implements (point it there with
  * CLICKY_MOCK_URL or `urlOverride`).
  *
+ * The session is the I/O adapter over three extracted, unit-tested units:
+ * - ./connect.ts        — socket open + handshake settlement/rejection,
+ * - ./response-tracker.ts — response-lifecycle accounting (M3/M4/M5 ordering,
+ *                           cancelled-response isolation),
+ * - ./send-queue.ts     — capped offline queue with audio-first shedding (M7).
+ *
  * F1 fixes (review findings):
  * - M3: every response.create this session sends — external turn or internal
  *   tool-rejection continue — emits 'response-requested', the single source
@@ -38,8 +44,12 @@ import type {
   ServerEvent,
   UserContentPart,
 } from './protocol';
-import { parseServerEvent, validatePointAtArgs } from './protocol';
+import { isKnownServerEvent, validatePointAtArgs } from './protocol';
 import { resolveEndpoint } from './mockable';
+import { connectRealtimeSocket } from './connect';
+import { buildScreenshotFraming } from './framing';
+import { ResponseTracker } from './response-tracker';
+import { SendQueue } from './send-queue';
 import { withErrorCode } from '../errors';
 
 // ---------------------------------------------------------------------------
@@ -137,6 +147,14 @@ const DEFAULT_RESPONSE_WATCHDOG_MS = 30_000;
 const RESPONSE_PING_INTERVAL_MS = 15_000;
 
 const PCM_FORMAT = { type: 'audio/pcm', rate: 24000 } as const;
+/** Async input-transcription model (captions for the user's committed audio). */
+const TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
+/** Server-VAD tuning for full realtime mode (speech threshold + windows). */
+const SERVER_VAD_TUNING = {
+  threshold: 0.5,
+  prefix_padding_ms: 300,
+  silence_duration_ms: 500,
+} as const;
 
 /** Prefix for the factual context part of an image turn (the mock keys on it). */
 export const CONTEXT_PREFIX = 'context:';
@@ -157,8 +175,10 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
   /** Next socket close is deliberate (watchdog/resume): skip auto-reconnect. */
   private suppressReconnectOnce = false;
 
-  /** Outbound events queued while (re)connecting; flushed on ready. */
-  private sendQueue: ClientEvent[] = [];
+  /** Outbound events queued while (re)connecting; flushed on ready (M7 cap). */
+  private readonly sendQueue = new SendQueue(MAX_SEND_QUEUE);
+  /** Response-lifecycle accounting; timers react via onResponseActiveChange. */
+  private readonly tracker = new ResponseTracker((active) => this.onResponseActiveChange(active));
 
   private idleTimer: NodeJS.Timeout | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
@@ -166,16 +186,6 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
   /** F1 (churn): last failed connect attempt (cooldown for appendAudio). */
   private lastConnectFailAt = 0;
 
-  /** True between response.create and response.done/error. */
-  private responseActive = false;
-  /** Server id learned from response.created for the active request. */
-  private activeResponseId: string | null = null;
-  /** Cancelled/superseded response ids whose late stream events are ignored. */
-  private staleResponseIds = new Set<string>();
-  /** Cancels issued before response.created; WebSocket event order identifies them later. */
-  private unidentifiedCancelledResponses = 0;
-  /** F1 (M4): a continue was requested mid-response; fire it after done. */
-  private continuePending = false;
   private responseWatchdog: NodeJS.Timeout | null = null;
   private pingTimer: NodeJS.Timeout | null = null;
 
@@ -258,7 +268,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
    * the disconnected case once the queued appends are gone.
    */
   clearAudio(): void {
-    this.dropQueuedAppends();
+    this.sendQueue.dropAudioAppends();
     if (!this.isSocketOpen()) return;
     this.send({ type: 'input_audio_buffer.clear' });
   }
@@ -271,16 +281,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     await this.connect();
     this.assertResponseIdle();
     this.send({ type: 'input_audio_buffer.commit' });
-    if (images.length > 0 || contextText.length > 0) {
-      this.send({
-        type: 'conversation.item.create',
-        item: {
-          type: 'message',
-          role: 'user',
-          content: this.buildImageContent(images, contextText),
-        },
-      });
-    }
+    this.sendUserContext(images, contextText);
     this.createResponse();
   }
 
@@ -288,12 +289,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
   async askText(text: string, images: TurnImage[] = [], contextText = ''): Promise<void> {
     await this.connect();
     this.assertResponseIdle();
-    const content: UserContentPart[] = this.buildImageContent(images, contextText);
-    content.push({ type: 'input_text', text });
-    this.send({
-      type: 'conversation.item.create',
-      item: { type: 'message', role: 'user', content },
-    });
+    this.sendUserContext(images, contextText, text);
     this.createResponse();
   }
 
@@ -302,15 +298,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
    */
   async addContext(images: TurnImage[], contextText = ''): Promise<void> {
     await this.connect();
-    if (images.length === 0 && contextText.length === 0) return;
-    this.send({
-      type: 'conversation.item.create',
-      item: {
-        type: 'message',
-        role: 'user',
-        content: this.buildImageContent(images, contextText),
-      },
-    });
+    this.sendUserContext(images, contextText);
   }
 
   /**
@@ -321,16 +309,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
   async respondToVadTurn(images: TurnImage[], contextText = ''): Promise<void> {
     await this.connect();
     this.assertResponseIdle();
-    if (images.length > 0 || contextText.length > 0) {
-      this.send({
-        type: 'conversation.item.create',
-        item: {
-          type: 'message',
-          role: 'user',
-          content: this.buildImageContent(images, contextText),
-        },
-      });
-    }
+    this.sendUserContext(images, contextText);
     this.createResponse();
   }
 
@@ -372,32 +351,20 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
    * into a single deferred response.create.
    */
   continueResponse(): void {
-    if (this.responseActive) {
-      this.continuePending = true;
-      return;
-    }
+    if (this.tracker.deferContinueIfActive()) return;
     this.createResponse();
   }
 
   /** Cancel the in-progress response (no-op when disconnected). */
   cancelResponse(): void {
-    this.continuePending = false; // a cancelled turn must not auto-continue
-    if (!this.responseActive) return;
-    if (this.activeResponseId !== null) {
-      this.staleResponseIds.add(this.activeResponseId);
-    } else {
-      // response.created is ordered after the response.create we already sent,
-      // so the next unidentified created id belongs to this cancelled request.
-      this.unidentifiedCancelledResponses += 1;
-    }
+    const { cancelled, responseId } = this.tracker.cancel();
+    if (!cancelled) return;
     if (this.isSocketOpen()) {
       this.send({
         type: 'response.cancel',
-        ...(this.activeResponseId !== null ? { response_id: this.activeResponseId } : {}),
+        ...(responseId !== null ? { response_id: responseId } : {}),
       });
     }
-    this.setResponseActive(false);
-    this.activeResponseId = null;
   }
 
   /** Remove model audio the user never heard after a WebSocket VAD interruption. */
@@ -419,33 +386,25 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
    */
   notifySystemResume(): void {
     if (this.closedByUser) return;
-    this.dropQueuedAppends();
+    this.sendQueue.dropAudioAppends();
     this.failActiveResponse('system resumed from sleep');
     this.backoffAttempt = 0;
     const ws = this.ws;
     if (ws !== null) {
       this.suppressReconnectOnce = true;
-      try {
-        ws.terminate();
-      } catch {
-        /* already dead */
-      }
+      this.terminateSilently(ws);
     }
   }
 
   /** Clean shutdown (app quit). No reconnect after this. */
   close(): void {
     this.closedByUser = true;
-    this.clearTimers();
-    this.setResponseActive(false);
-    this.activeResponseId = null;
-    this.continuePending = false;
-    this.sendQueue = [];
+    this.clearAllTimers();
+    this.tracker.reset();
+    this.sendQueue.clear();
     // F1 (retention): release per-turn accumulation.
     this.transcripts.clear();
     this.toolArgs.clear();
-    this.staleResponseIds.clear();
-    this.unidentifiedCancelledResponses = 0;
     this.lastTurnCapture = null;
     const ws = this.ws;
     this.ws = null;
@@ -478,11 +437,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
   private doConnect(): Promise<void> {
     if (this.ws !== null) {
       // Defensive: never leak a half-dead socket.
-      try {
-        this.ws.terminate();
-      } catch {
-        /* ignore */
-      }
+      this.terminateSilently(this.ws);
       this.ws = null;
     }
     const endpoint = this.resolve();
@@ -497,12 +452,13 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       // it CANNOT open a realtime WebSocket, so there is no `chatgptCodex` arm
       // here by design. The sub/key split lives entirely in the grounding path
       // (auth/auth-source.ts + grounding/rest-grounder.ts). Do NOT wire the
-      // Codex AuthSource into this session.
+      // Codex AuthSource into this session (connect.ts must never grow an
+      // AuthSource parameter).
       const key = this.options.getApiKey ? this.options.getApiKey() : (this.options.apiKey ?? null);
       if (key === null || key.length === 0) {
         const err = new Error('no API key configured');
         this.lastConnectFailAt = Date.now();
-        this.dropQueuedAppends(); // F1 (M7): stale mic audio must not linger
+        this.sendQueue.dropAudioAppends(); // F1 (M7): stale mic audio must not linger
         this.setStatus({ state: 'error', error: err.message });
         return Promise.reject(err);
       }
@@ -510,127 +466,71 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     }
 
     return new Promise<void>((resolvePromise, rejectPromise) => {
-      const ws = new WebSocket(endpoint.url, { headers });
-      this.ws = ws;
-      let settled = false;
-      // Server `error` event received before session.created (e.g. the
-      // account is out of credit: the server accepts the handshake, sends
-      // {type:'error',code:'insufficient_quota'}, then closes 1013). Captured
-      // so the connect rejection carries the REAL reason instead of a generic
-      // "connection closed during handshake".
-      let preSettleError: { message: string; code: string } | null = null;
-
-      const timeout = setTimeout(() => {
-        fail(
-          preSettleError !== null
-            ? // M11: the server's error code rides on the Error so the
-              // catalog classifier (src/main/errors.ts) can map it.
-              withErrorCode(
-                new Error(describeHandshakeRejection(preSettleError, null)),
-                preSettleError.code,
-              )
-            : new Error(`realtime handshake timed out after ${this.connectTimeoutMs}ms`),
-        );
-        ws.terminate();
-      }, this.connectTimeoutMs);
-
-      const fail = (err: Error): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        // F1 (M7): a failed connect drops queued mic audio — it belongs to a
-        // turn that can no longer succeed and must not leak into the next.
-        this.lastConnectFailAt = Date.now();
-        this.dropQueuedAppends();
-        if (this.ws === ws) {
-          this.ws = null;
-          this.setStatus({ state: 'error', error: err.message });
-        }
-        rejectPromise(err);
-      };
-
-      ws.on('message', (data: WebSocket.RawData) => {
-        this.guard(() => {
-          const evt = parseServerEvent(rawDataToString(data));
-          if (evt === null) return;
-          if (!settled && evt.type === 'session.created') {
-            settled = true;
-            clearTimeout(timeout);
+      this.ws = connectRealtimeSocket(
+        { url: endpoint.url, headers, timeoutMs: this.connectTimeoutMs },
+        {
+          guard: (fn) => this.guard(fn),
+          onSettled: (ws) => {
             this.sendNow(ws, this.buildSessionUpdate());
             this.backoffAttempt = 0;
             this.setStatus({ state: 'ready' });
             this.flushQueue();
             this.resetIdleTimer();
             resolvePromise();
-            return;
-          }
-          if (!settled && evt.type === 'error') {
-            // Pre-session rejection (quota, auth, ...): hold the reason for
-            // the close/timeout that follows — do NOT route it through
-            // handleServerEvent, whose status churn the connect failure
-            // would immediately overwrite anyway.
-            preSettleError = { message: evt.error.message, code: evt.error.code ?? '' };
-            return;
-          }
-          this.resetIdleTimer();
-          // F1 (sleep/resume): any server activity feeds the response watchdog.
-          if (this.responseActive) this.armResponseWatchdog();
-          this.handleServerEvent(evt);
-        });
-      });
-
-      ws.on('error', (err: Error) => {
-        this.guard(() => {
-          if (!settled) {
-            fail(err);
-          } else if (this.ws === ws) {
-            this.emitError(err);
-          }
-        });
-      });
-
-      ws.on('close', (code: number, reason: Buffer) => {
-        this.guard(() => {
-          if (!settled) {
-            const closeInfo = { code, reason: reason.toString('utf8') };
-            // M11: keep the classification data (server error code) flowing.
-            const rejectionCode =
-              preSettleError?.code ??
-              (closeInfo.reason.includes('insufficient_quota') ? 'insufficient_quota' : undefined);
-            fail(
-              withErrorCode(
-                new Error(describeHandshakeRejection(preSettleError, closeInfo)),
-                rejectionCode,
-              ),
-            );
-            return;
-          }
-          if (this.ws !== ws) return; // superseded socket
-          this.ws = null;
-          const wasIdleClose = this.idleClosing;
-          this.idleClosing = false;
-          const suppress = this.suppressReconnectOnce;
-          this.suppressReconnectOnce = false;
-          const hadActiveResponse = this.responseActive;
-          this.setStatus({ state: 'disconnected' });
-          // F1 fix (M6): a response died with the socket. Clear the active
-          // flag (it gated keep-warm + reconnect forever) and synthesize a
-          // failed response-done so the app-level turn recovers.
-          if (hadActiveResponse) this.failActiveResponse('connection dropped mid-response');
-          // F1 (retention): per-item accumulation dies with the connection.
-          this.transcripts.clear();
-          this.toolArgs.clear();
-          // Reconnect with backoff ONLY when the session was mid-use.
-          if (
-            !this.closedByUser &&
-            !wasIdleClose &&
-            !suppress &&
-            (hadActiveResponse || this.sendQueue.length > 0)
-          ) {
-            this.scheduleReconnect();
-          }
-        });
-      });
+          },
+          onFailed: (ws, err) => {
+            // F1 (M7): a failed connect drops queued mic audio — it belongs
+            // to a turn that can no longer succeed and must not leak into
+            // the next.
+            this.lastConnectFailAt = Date.now();
+            this.sendQueue.dropAudioAppends();
+            if (this.ws === ws) {
+              this.ws = null;
+              this.setStatus({ state: 'error', error: err.message });
+            }
+            rejectPromise(err);
+          },
+          onServerEvent: (_ws, evt) => {
+            this.resetIdleTimer();
+            // F1 (sleep/resume): any server activity feeds the response watchdog.
+            if (this.tracker.active) this.armResponseWatchdog();
+            if (!isKnownServerEvent(evt)) {
+              this.logUnknown(evt.type);
+              return;
+            }
+            this.handleServerEvent(evt);
+          },
+          onSocketError: (ws, err) => {
+            if (this.ws === ws) this.emitError(err);
+          },
+          onSocketClose: (ws) => {
+            if (this.ws !== ws) return; // superseded socket
+            this.ws = null;
+            const wasIdleClose = this.idleClosing;
+            this.idleClosing = false;
+            const suppress = this.suppressReconnectOnce;
+            this.suppressReconnectOnce = false;
+            const hadActiveResponse = this.tracker.active;
+            this.setStatus({ state: 'disconnected' });
+            // F1 fix (M6): a response died with the socket. Clear the active
+            // flag (it gated keep-warm + reconnect forever) and synthesize a
+            // failed response-done so the app-level turn recovers.
+            if (hadActiveResponse) this.failActiveResponse('connection dropped mid-response');
+            // F1 (retention): per-item accumulation dies with the connection.
+            this.transcripts.clear();
+            this.toolArgs.clear();
+            // Reconnect with backoff ONLY when the session was mid-use.
+            if (
+              !this.closedByUser &&
+              !wasIdleClose &&
+              !suppress &&
+              (hadActiveResponse || this.sendQueue.length > 0)
+            ) {
+              this.scheduleReconnect();
+            }
+          },
+        },
+      );
     });
   }
 
@@ -642,7 +542,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       this.reconnectTimer = null;
       void this.connect().catch(() => {
         // Handshake failed again — back off further while still mid-use.
-        if (this.responseActive || this.sendQueue.length > 0) this.scheduleReconnect();
+        if (this.tracker.active || this.sendQueue.length > 0) this.scheduleReconnect();
       });
     }, delay);
   }
@@ -651,25 +551,36 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     if (this.idleTimer !== null) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
-      if (this.responseActive || !this.isSocketOpen()) return;
+      if (this.tracker.active || !this.isSocketOpen()) return;
       this.idleClosing = true;
       this.ws?.close(1000, 'idle');
     }, this.idleTimeoutMs);
   }
 
-  private clearTimers(): void {
+  /** Every session timer: idle, reconnect, response watchdog, ping. */
+  private clearAllTimers(): void {
     if (this.idleTimer !== null) clearTimeout(this.idleTimer);
     if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
     this.idleTimer = null;
     this.reconnectTimer = null;
+    this.disarmResponseTimers();
+  }
+
+  /** Terminate a socket that may already be dead (never throws). */
+  private terminateSilently(ws: WebSocket): void {
+    try {
+      ws.terminate();
+    } catch {
+      /* already dead */
+    }
   }
 
   // -------------------------------------------------------------------------
   // Response lifecycle (watchdog + ping while active)
   // -------------------------------------------------------------------------
 
-  private setResponseActive(active: boolean): void {
-    this.responseActive = active;
+  /** ResponseTracker active-flag transitions drive the response timers. */
+  private onResponseActiveChange(active: boolean): void {
     if (active) {
       this.armResponseWatchdog();
       if (this.pingTimer === null) {
@@ -684,18 +595,22 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
         }, RESPONSE_PING_INTERVAL_MS);
       }
     } else {
-      if (this.responseWatchdog !== null) clearTimeout(this.responseWatchdog);
-      this.responseWatchdog = null;
-      if (this.pingTimer !== null) clearInterval(this.pingTimer);
-      this.pingTimer = null;
+      this.disarmResponseTimers();
     }
+  }
+
+  private disarmResponseTimers(): void {
+    if (this.responseWatchdog !== null) clearTimeout(this.responseWatchdog);
+    this.responseWatchdog = null;
+    if (this.pingTimer !== null) clearInterval(this.pingTimer);
+    this.pingTimer = null;
   }
 
   private armResponseWatchdog(): void {
     if (this.responseWatchdog !== null) clearTimeout(this.responseWatchdog);
     this.responseWatchdog = setTimeout(() => {
       this.responseWatchdog = null;
-      if (!this.responseActive) return;
+      if (!this.tracker.active) return;
       // F1 fix (sleep/resume): zero server activity for the whole window —
       // classic half-open pipe (commit written into a dead socket). Fail the
       // response so the app recovers, and terminate so the next turn starts
@@ -705,22 +620,16 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       );
       if (this.ws !== null) {
         this.suppressReconnectOnce = true;
-        try {
-          this.ws.terminate();
-        } catch {
-          /* already dead */
-        }
+        this.terminateSilently(this.ws);
       }
     }, this.responseWatchdogMs);
   }
 
   /** Synthesize a failed response-done so app-level turn recovery runs. */
   private failActiveResponse(reason: string): void {
-    if (!this.responseActive) return;
+    if (!this.tracker.active) return;
     console.warn(`[realtime] failing active response: ${reason}`);
-    this.setResponseActive(false);
-    this.activeResponseId = null;
-    this.continuePending = false;
+    this.tracker.fail();
     this.transcripts.clear();
     this.toolArgs.clear();
     this.emit('response-done', { responseId: '', status: 'failed' });
@@ -740,14 +649,12 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
         audio: {
           input: {
             format: PCM_FORMAT,
-            transcription: { model: 'gpt-4o-mini-transcribe' },
+            transcription: { model: TRANSCRIPTION_MODEL },
             turn_detection:
               this.options.turnDetection === 'server_vad'
                 ? {
                     type: 'server_vad',
-                    threshold: 0.5,
-                    prefix_padding_ms: 300,
-                    silence_duration_ms: 500,
+                    ...SERVER_VAD_TUNING,
                     // Let VAD commit the audio, then attach that turn's fresh
                     // screenshots before the client requests the response.
                     create_response: false,
@@ -763,78 +670,30 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
   }
 
   /**
-   * One user message item: a short factual input_text part (which screen is
-   * active, each screenshot's index + pixel dims, coordinate rules) followed
-   * by one input_image data-URL part per screen. Persona lives in the
-   * session instructions, not here.
+   * Send the turn's user message item (screenshots + factual context, plus
+   * the typed question for the text path). Records the capture metadata
+   * FIRST — the explicit turn-start baseline that point_at validation clamps
+   * against — then sends. No-op when there is nothing to send.
    */
-  private buildImageContent(images: TurnImage[], contextText: string): UserContentPart[] {
-    const content: UserContentPart[] = [];
-    if (images.length > 0) {
-      this.lastTurnCapture = images.map((img) => img.meta);
-      const screens = images
-        .map(
-          (img) =>
-            `screen${img.meta.screenIndex} is ${img.meta.imageW}x${img.meta.imageH} pixels` +
-            (img.meta.isActive ? ' (active screen, the cursor is here)' : ''),
-        )
-        .join('; ');
-      // M8.6 (pointing accuracy): explicit coordinate anchors + a worked
-      // fraction→pixel example. Live evals showed the model reads the scene
-      // correctly but localizes in a mis-scaled coordinate frame; anchoring
-      // the convention with landmarks tightens point_at coordinates.
-      const anchors = images
-        .map(
-          (img) =>
-            `screen${img.meta.screenIndex}: top-left corner (0,0), ` +
-            `bottom-right corner (${img.meta.imageW},${img.meta.imageH})`,
-        )
-        .join('; ');
-      const first = images[0]!.meta;
-      const framing =
-        `${CONTEXT_PREFIX} ${images.length} screenshot(s) attached. ${screens}. ` +
-        `point_at coordinates must be pixel coordinates within the named screenshot. ` +
-        `coordinate anchors — ${anchors}. ` +
-        `to point accurately: judge how far across and down the target sits as a fraction ` +
-        `of the full screenshot, then multiply by that screenshot's pixel size ` +
-        `(e.g. a target 1/3 across and 1/4 down screen${first.screenIndex} is at ` +
-        `(${Math.round(first.imageW / 3)},${Math.round(first.imageH / 4)})); ` +
-        `commit to the target's actual offset — never default to the middle of the screen.` +
-        (contextText.length > 0 ? ` ${contextText}` : '');
-      content.push({ type: 'input_text', text: framing });
-      for (const img of images) {
-        content.push({
-          type: 'input_image',
-          image_url: `data:image/jpeg;base64,${img.jpegBase64}`,
-        });
-      }
-    } else if (contextText.length > 0) {
-      content.push({ type: 'input_text', text: `${CONTEXT_PREFIX} ${contextText}` });
-    }
-    return content;
+  private sendUserContext(images: TurnImage[], contextText: string, userText?: string): void {
+    if (userText === undefined && images.length === 0 && contextText.length === 0) return;
+    if (images.length > 0) this.lastTurnCapture = images.map((img) => img.meta);
+    const content = buildImageContent(images, contextText);
+    if (userText !== undefined) content.push({ type: 'input_text', text: userText });
+    this.send({
+      type: 'conversation.item.create',
+      item: { type: 'message', role: 'user', content },
+    });
   }
 
   private assertResponseIdle(): void {
-    if (this.responseActive) {
-      throw new Error('a realtime response is already active');
-    }
+    this.tracker.assertIdle();
   }
 
   private createResponse(): void {
-    this.assertResponseIdle();
-    this.activeResponseId = null;
-    this.setResponseActive(true);
+    this.tracker.begin();
     this.send({ type: 'response.create' });
     this.emit('response-requested'); // F1 (M3): single source of truth
-  }
-
-  /** True only for the current response; cancelled/parallel stream debris is dropped. */
-  private acceptsResponseEvent(responseId: string | undefined): boolean {
-    if (!responseId) return this.responseActive;
-    if (this.staleResponseIds.has(responseId)) return false;
-    if (!this.responseActive) return false;
-    if (this.activeResponseId === null) this.activeResponseId = responseId;
-    return this.activeResponseId === responseId;
   }
 
   /** Serialize + send, queueing while not ready (flushed on session.created). */
@@ -843,29 +702,12 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       this.sendNow(this.ws, evt);
       return;
     }
-    // F1 (M7): cap the queue. Shed audio first — 60ms mic chunks dominate
-    // any backlog and are worthless once this stale — then the oldest frame.
-    if (this.sendQueue.length >= MAX_SEND_QUEUE) {
-      const appendIdx = this.sendQueue.findIndex((e) => e.type === 'input_audio_buffer.append');
-      if (appendIdx === -1 && evt.type === 'input_audio_buffer.append') return; // drop the newcomer
-      this.sendQueue.splice(appendIdx !== -1 ? appendIdx : 0, 1);
-    }
     this.sendQueue.push(evt);
   }
 
-  /** F1 (M7): drop queued mic-audio frames (stale-turn hygiene). */
-  private dropQueuedAppends(): void {
-    if (this.sendQueue.length === 0) return;
-    this.sendQueue = this.sendQueue.filter((evt) => evt.type !== 'input_audio_buffer.append');
-  }
-
   private sendNow(ws: WebSocket, evt: ClientEvent): void {
-    this.sendNowRaw(ws, JSON.stringify(evt));
-  }
-
-  private sendNowRaw(ws: WebSocket, frame: string): void {
     try {
-      ws.send(frame);
+      ws.send(JSON.stringify(evt));
       this.resetIdleTimer();
     } catch (err) {
       this.emitError(err);
@@ -874,9 +716,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
 
   private flushQueue(): void {
     if (this.ws === null) return;
-    const queue = this.sendQueue;
-    this.sendQueue = [];
-    for (const evt of queue) this.sendNow(this.ws, evt);
+    for (const evt of this.sendQueue.drain()) this.sendNow(this.ws, evt);
   }
 
   // -------------------------------------------------------------------------
@@ -899,15 +739,8 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
         // With interrupt_response=true the server cancels the active model
         // response. Mark it stale immediately so late WebSocket audio cannot
         // leak while the app stops local playback.
-        if (this.options.turnDetection === 'server_vad' && this.responseActive) {
-          if (this.activeResponseId !== null) {
-            this.staleResponseIds.add(this.activeResponseId);
-          } else {
-            this.unidentifiedCancelledResponses += 1;
-          }
-          this.continuePending = false;
-          this.setResponseActive(false);
-          this.activeResponseId = null;
+        if (this.options.turnDetection === 'server_vad') {
+          this.tracker.markActiveResponseStale();
         }
         this.emit('speech-started', { itemId: evt.item_id });
         break;
@@ -920,23 +753,13 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       case 'response.created': {
         const responseId = evt.response?.id;
         if (!responseId) break;
-        if (this.unidentifiedCancelledResponses > 0) {
-          this.unidentifiedCancelledResponses -= 1;
-          this.staleResponseIds.add(responseId);
-          break;
-        }
-        if (!this.responseActive) {
-          this.staleResponseIds.add(responseId);
+        const decision = this.tracker.onResponseCreated(responseId);
+        if (decision === 'cancel-unexpected') {
           console.warn(`[realtime] ignoring unexpected response ${responseId}`);
           this.send({ type: 'response.cancel', response_id: responseId });
-          break;
-        }
-        if (this.activeResponseId === null) {
-          this.activeResponseId = responseId;
-        } else if (this.activeResponseId !== responseId) {
-          this.staleResponseIds.add(responseId);
+        } else if (decision === 'cancel-parallel') {
           console.warn(
-            `[realtime] cancelling parallel response ${responseId}; active is ${this.activeResponseId}`,
+            `[realtime] cancelling parallel response ${responseId}; active is ${this.tracker.activeResponseId}`,
           );
           this.send({ type: 'response.cancel', response_id: responseId });
         }
@@ -949,7 +772,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
 
       case 'response.output_audio_transcript.delta':
       case 'response.output_text.delta': {
-        if (!this.acceptsResponseEvent(evt.response_id)) break;
+        if (!this.tracker.acceptsEvent(evt.response_id)) break;
         const text = (this.transcripts.get(evt.item_id) ?? '') + evt.delta;
         this.transcripts.set(evt.item_id, text);
         this.emit('assistant-transcript', { itemId: evt.item_id, text, done: false });
@@ -957,7 +780,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       }
 
       case 'response.output_audio_transcript.done': {
-        if (!this.acceptsResponseEvent(evt.response_id)) break;
+        if (!this.tracker.acceptsEvent(evt.response_id)) break;
         const text = evt.transcript ?? this.transcripts.get(evt.item_id) ?? '';
         this.transcripts.set(evt.item_id, text);
         this.emit('assistant-transcript', { itemId: evt.item_id, text, done: true });
@@ -965,7 +788,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       }
 
       case 'response.output_audio.delta': {
-        if (!this.acceptsResponseEvent(evt.response_id)) break;
+        if (!this.tracker.acceptsEvent(evt.response_id)) break;
         const buf = Buffer.from(evt.delta, 'base64');
         const chunk = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
         this.emit('audio-delta', { itemId: evt.item_id, chunk });
@@ -973,56 +796,38 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
       }
 
       case 'response.output_audio.done':
-        if (!this.acceptsResponseEvent(evt.response_id)) break;
+        if (!this.tracker.acceptsEvent(evt.response_id)) break;
         this.emit('audio-done', { itemId: evt.item_id });
         break;
 
       case 'response.function_call_arguments.delta': {
-        if (!this.acceptsResponseEvent(evt.response_id)) break;
+        if (!this.tracker.acceptsEvent(evt.response_id)) break;
         this.toolArgs.set(evt.call_id, (this.toolArgs.get(evt.call_id) ?? '') + evt.delta);
         break;
       }
 
       case 'response.function_call_arguments.done':
-        if (!this.acceptsResponseEvent(evt.response_id)) break;
+        if (!this.tracker.acceptsEvent(evt.response_id)) break;
         this.handleToolCallDone(evt.call_id, evt.name, evt.arguments);
         break;
 
       case 'response.done': {
         const status = evt.response.status ?? 'completed';
         const responseId = evt.response.id ?? '';
-        if (responseId && this.staleResponseIds.delete(responseId)) {
-          // The app-level response ledger still needs the cancelled request's
-          // completion, but it must not mutate the newer active response.
-          this.emit('response-done', {
-            responseId,
-            status,
-            usage: evt.response.usage,
-          });
-          break;
-        }
-        if (responseId && this.activeResponseId !== null && responseId !== this.activeResponseId) {
+        const decision = this.tracker.onResponseDone(responseId, status);
+        if (decision.kind === 'non-active') {
           console.warn(
             `[realtime] ignoring completion for non-active response ${responseId}; ` +
-              `active is ${this.activeResponseId}`,
+              `active is ${this.tracker.activeResponseId}`,
           );
-          this.emit('response-done', {
-            responseId,
-            status,
-            usage: evt.response.usage,
-          });
-          break;
+        } else if (decision.kind === 'active') {
+          this.transcripts.clear();
+          this.toolArgs.clear();
+          // F1 fix (M4): the deferred tool-output continue fires HERE — and
+          // BEFORE emitting response-done, so app-level response accounting
+          // never dips to zero in the middle of a multi-response turn (M5).
+          if (decision.continueAfter) this.createResponse();
         }
-        this.setResponseActive(false);
-        this.activeResponseId = null;
-        this.transcripts.clear();
-        this.toolArgs.clear();
-        const wantContinue = this.continuePending && status === 'completed';
-        this.continuePending = false;
-        // F1 fix (M4): the deferred tool-output continue fires HERE — and
-        // BEFORE emitting response-done, so app-level response accounting
-        // never dips to zero in the middle of a multi-response turn (M5).
-        if (wantContinue) this.createResponse();
         this.emit('response-done', {
           responseId,
           status,
@@ -1054,9 +859,6 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
         );
         break;
       }
-
-      default:
-        this.logUnknown((evt as { type: string }).type);
     }
   }
 
@@ -1130,34 +932,23 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
 }
 
 /**
- * User-readable, single-line reason for a handshake the server rejected.
- * Prefers the server's pre-session `error` event; falls back to the WS close
- * code + reason. Shown verbatim in the panel (header "session: …" pill and
- * the "something went wrong: …" transcript entry) — keep the tone lowercase.
+ * Content parts of an image turn's user message: the shared framing prose
+ * (framing.ts — starts with CONTEXT_PREFIX, which the mock keys on) followed
+ * by one input_image data-URL part per screen. Persona lives in the session
+ * instructions, not here.
  */
-function describeHandshakeRejection(
-  err: { message: string; code: string } | null,
-  close: { code: number; reason: string } | null,
-): string {
-  if (err?.code === 'insufficient_quota' || close?.reason.includes('insufficient_quota') === true) {
-    return 'openai says your account is out of credit — add credits at platform.openai.com/billing';
+function buildImageContent(images: TurnImage[], contextText: string): UserContentPart[] {
+  const content: UserContentPart[] = [];
+  const framing = buildScreenshotFraming(
+    images.map((img) => img.meta),
+    contextText,
+  );
+  if (framing.length > 0) content.push({ type: 'input_text', text: framing });
+  for (const img of images) {
+    content.push({
+      type: 'input_image',
+      image_url: `data:image/jpeg;base64,${img.jpegBase64}`,
+    });
   }
-  if (err !== null) {
-    const msg = singleLine(err.message);
-    return err.code.length > 0 ? `openai error: ${msg} (${err.code})` : `openai error: ${msg}`;
-  }
-  const reason = close !== null ? singleLine(close.reason) : '';
-  const detail =
-    close !== null ? ` (code ${close.code}${reason.length > 0 ? `: ${reason}` : ''})` : '';
-  return `connection closed during handshake${detail}`;
-}
-
-function singleLine(text: string): string {
-  return text.replace(/\s+/g, ' ').trim();
-}
-
-function rawDataToString(data: WebSocket.RawData): string {
-  if (Array.isArray(data)) return Buffer.concat(data).toString('utf8');
-  if (data instanceof ArrayBuffer) return Buffer.from(data).toString('utf8');
-  return data.toString('utf8');
+  return content;
 }

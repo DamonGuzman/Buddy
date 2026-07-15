@@ -2,15 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CaptureResult } from '../src/main/capture';
 import type { ChatGptCodexAuthSource } from '../src/main/auth/auth-source';
 import type { WindowsInputController } from '../src/main/computer/windows-input';
+import {
+  ComputerUseOperator,
+  parseClickArgs,
+  parsePressKeysArgs,
+  parseTypeTextArgs,
+} from '../src/main/computer/operator';
+import { CodexResponsesSession } from '../src/main/codex/responses-session';
 
-vi.mock('electron', () => ({
-  screen: {
-    dipToScreenPoint: ({ x, y }: { x: number; y: number }) => ({ x: x * 2, y: y * 2 }),
-  },
-}));
-
-const { ComputerUseOperator } = await import('../src/main/computer/operator');
-const { CodexResponsesSession } = await import('../src/main/codex/responses-session');
+/** DIP -> physical injection (replaces the old vi.mock('electron') seam). */
+const dipToScreenPoint = ({ x, y }: { x: number; y: number }) => ({ x: x * 2, y: y * 2 });
 
 const AUTH: ChatGptCodexAuthSource = {
   kind: 'chatgptCodex',
@@ -77,6 +78,7 @@ describe('ComputerUseOperator', () => {
       input,
       initialCaptures: [CAPTURE],
       isAllowed: () => true,
+      dipToScreenPoint,
       capture: async () => {
         captures += 1;
         return [CAPTURE];
@@ -111,7 +113,85 @@ describe('ComputerUseOperator', () => {
       input,
       initialCaptures: [CAPTURE],
       isAllowed: () => false,
+      dipToScreenPoint,
     });
     await expect(operator.run('click')).resolves.toMatchObject({ ok: false, actions: 0 });
+  });
+});
+
+describe('parseClickArgs', () => {
+  it('accepts a full click and defaults button/count/label', () => {
+    expect(parseClickArgs({ screen: 0, x: 25, y: 50, label: 'save' })).toEqual({
+      ok: true,
+      value: { screen: 0, x: 25, y: 50, button: 'left', count: 1, label: 'save' },
+    });
+    expect(parseClickArgs({ screen: 1, x: 2, y: 3, button: 'right', count: 2 })).toEqual({
+      ok: true,
+      value: { screen: 1, x: 2, y: 3, button: 'right', count: 2, label: '' },
+    });
+  });
+
+  it('caps the echoed label at 200 chars and ignores bogus button/count', () => {
+    const parsed = parseClickArgs({
+      screen: 0,
+      x: 1,
+      y: 1,
+      label: 'x'.repeat(300),
+      button: 'nuke',
+      count: 7,
+    });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value.label).toHaveLength(200);
+      expect(parsed.value.button).toBe('left');
+      expect(parsed.value.count).toBe(1);
+    }
+  });
+
+  it('rejects missing/non-finite coordinates and non-record args', () => {
+    expect(parseClickArgs({ screen: 0, x: 1 })).toEqual({
+      ok: false,
+      error: 'screen, x, and y must be numbers',
+    });
+    expect(parseClickArgs({ screen: 0, x: Number.NaN, y: 1 })).toEqual({
+      ok: false,
+      error: 'screen, x, and y must be numbers',
+    });
+    expect(parseClickArgs([1, 2])).toEqual({ ok: false, error: 'arguments were not valid json' });
+  });
+});
+
+describe('parseTypeTextArgs', () => {
+  it('accepts literal text up to the cap', () => {
+    expect(parseTypeTextArgs({ text: 'hello' })).toEqual({ ok: true, value: { text: 'hello' } });
+    expect(parseTypeTextArgs({ text: 'x'.repeat(10_000) }).ok).toBe(true);
+  });
+
+  it('rejects non-strings and over-long text', () => {
+    const error = 'text must be at most 10000 characters';
+    expect(parseTypeTextArgs({ text: 42 })).toEqual({ ok: false, error });
+    expect(parseTypeTextArgs({})).toEqual({ ok: false, error });
+    expect(parseTypeTextArgs({ text: 'x'.repeat(10_001) })).toEqual({ ok: false, error });
+  });
+});
+
+describe('parsePressKeysArgs', () => {
+  it('accepts one to eight strings', () => {
+    expect(parsePressKeysArgs({ keys: ['ENTER'] })).toEqual({
+      ok: true,
+      value: { keys: ['ENTER'] },
+    });
+    expect(parsePressKeysArgs({ keys: ['CTRL', 'L'] }).ok).toBe(true);
+  });
+
+  it('rejects empty, oversized, and mixed-type arrays', () => {
+    const error = 'keys must be an array of one to eight strings';
+    expect(parsePressKeysArgs({ keys: [] })).toEqual({ ok: false, error });
+    expect(parsePressKeysArgs({ keys: Array.from({ length: 9 }, () => 'A') })).toEqual({
+      ok: false,
+      error,
+    });
+    expect(parsePressKeysArgs({ keys: ['CTRL', 4] })).toEqual({ ok: false, error });
+    expect(parsePressKeysArgs({ keys: 'ENTER' })).toEqual({ ok: false, error });
   });
 });

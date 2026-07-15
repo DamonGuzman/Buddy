@@ -18,19 +18,11 @@
  *   response.output_item.added/done events.
  */
 
-import type { AgentStatus, AgentStep, AgentSummary, CaptureMeta } from '../../shared/types';
+import type { AgentStep, AgentSummary, CaptureMeta } from '../../shared/types';
+import type { ResponseItem } from '../codex/wire-types';
 
-// --- constants ---
-export const AGENT_MAX_CONCURRENT = 3;
-export const AGENT_STEP_LOG_CAP = 30;
-export const AGENT_RUN_WALL_CLOCK_MS = 4 * 60_000;
-export const AGENT_BACKEND_TIMEOUT_MS = 90_000; // per backend request (search rounds can be slow)
-export const AGENT_TOOL_TIMEOUT_MS = 15_000;
-export const AGENT_FETCH_TIMEOUT_MS = 20_000;
-export const AGENT_FETCH_MAX_CHARS = 8_000;
-export const AGENT_FETCH_MAX_CALLS = 6; // per run
-export const AGENT_DEFAULT_MODEL = 'gpt-5.6-sol'; // CLICKY_AGENT_MODEL env overrides
-export const AGENT_REASONING_EFFORT = 'medium';
+// Tuning constants (AGENT_*) live in agents/config.ts — this file is the pure
+// type contract only.
 
 // --- brief (built by conversation.ts at spawn) ---
 export interface AgentBrief {
@@ -43,9 +35,9 @@ export interface AgentBrief {
 }
 
 // --- Responses-API wire shapes (client-side history; store:false) ---
-/** One item in the request `input` list / streamed output. Kept loose on purpose:
- *  items returned by the backend are appended to history VERBATIM. */
-export type ResponseItem = Record<string, unknown>;
+// Re-homed to codex/wire-types.ts so all Codex-backend consumers share one
+// definition (kept loose on purpose: backend items are appended VERBATIM).
+export type { ResponseItem };
 
 export interface AgentFunctionCall {
   callId: string;
@@ -82,6 +74,8 @@ export type AgentBackendResult =
 export interface AgentBackend {
   /** Never throws; classifies failures into AgentBackendResult. Aborting `signal` yields ok:false agent_backend_down retryable:false. */
   request(req: AgentBackendRequest): Promise<AgentBackendResult>;
+  /** Current readiness to accept a run (Codex: signed in; mock: always). */
+  isReady(): boolean;
 }
 
 // --- tools (implemented by agents/tools/*; registry in agents/tools/index.ts) ---
@@ -103,6 +97,19 @@ export interface AgentToolSpec {
 }
 
 // --- manager surfaces (implemented by agents/manager.ts; consumed by index.ts/conversation.ts) ---
+
+/**
+ * Where completed summaries are retained across restarts. The default
+ * file-backed implementation (agents/manager.ts createFilePersistence) writes
+ * tmp+rename with mode 0o600; tests inject in-memory ports.
+ */
+export interface AgentPersistencePort {
+  /** Raw parsed JSON (validated by the manager), or null when nothing is stored. May throw. */
+  load(): unknown;
+  /** Replace the stored list. May throw (the manager treats failures as non-fatal). */
+  save(records: AgentSummary[]): void;
+}
+
 export interface AgentManagerDeps {
   backend: AgentBackend;
   /** Current ChatGPT-subscription readiness; checked before accepting a run. */
@@ -115,6 +122,8 @@ export interface AgentManagerDeps {
   notify?(title: string, body: string): void;
   /** Optional JSON file used to retain completed summaries across restarts. */
   persistencePath?: string;
+  /** Overrides persistencePath with a custom store (tests / future backends). */
+  persistence?: AgentPersistencePort;
   now?(): number;
 }
 export type SpawnResult =

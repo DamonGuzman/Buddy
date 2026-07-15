@@ -2,8 +2,34 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import vm from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WebSocketServer } from 'ws';
-import { PhoneAudioBridgeClient } from '../src/main/phone-audio-bridge';
+import { WebSocketServer, type WebSocket as WsWebSocket } from 'ws';
+import { PhoneAudioBridgeClient, toArrayBuffer } from '../src/main/phone-audio-bridge';
+
+describe('toArrayBuffer', () => {
+  it('copies exactly a Buffer view (no pool neighbors leak in)', () => {
+    const pool = Buffer.alloc(16, 0x77);
+    const view = pool.subarray(4, 8); // nonzero byteOffset into the pool
+    view.set([1, 2, 3, 4]);
+    const chunk = toArrayBuffer(view);
+    expect(chunk.byteLength).toBe(4);
+    expect(new Uint8Array(chunk)).toEqual(new Uint8Array([1, 2, 3, 4]));
+  });
+
+  it('concatenates a Buffer[] fragment list in order', () => {
+    const chunk = toArrayBuffer([Buffer.from([1, 2]), Buffer.from([3]), Buffer.from([4, 5])]);
+    expect(new Uint8Array(chunk)).toEqual(new Uint8Array([1, 2, 3, 4, 5]));
+  });
+
+  it('copies an ArrayBuffer into a standalone buffer', () => {
+    const source = new Uint8Array([9, 8, 7]).buffer;
+    const chunk = toArrayBuffer(source);
+    expect(chunk).not.toBe(source);
+    expect(new Uint8Array(chunk)).toEqual(new Uint8Array([9, 8, 7]));
+    // Mutating the source must not reach the returned copy.
+    new Uint8Array(source)[0] = 0;
+    expect(new Uint8Array(chunk)[0]).toBe(9);
+  });
+});
 
 describe('PhoneAudioBridgeClient', () => {
   const cleanups: (() => Promise<void>)[] = [];
@@ -27,9 +53,7 @@ describe('PhoneAudioBridgeClient', () => {
 
     const client = new PhoneAudioBridgeClient(`ws://127.0.0.1:${address.port}`);
     cleanups.push(async () => client.close());
-    const socketPromise = new Promise<import('ws').WebSocket>((resolve) =>
-      server.once('connection', resolve),
-    );
+    const socketPromise = new Promise<WsWebSocket>((resolve) => server.once('connection', resolve));
     const connected = new Promise<void>((resolve) => client.once('connected', resolve));
     client.start();
     const [socket] = await Promise.all([socketPromise, connected]);

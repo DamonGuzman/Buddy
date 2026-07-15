@@ -1,5 +1,5 @@
 /**
- * Multi-display screenshot pipeline (M3).
+ * Multi-display screenshot pipeline (M3) — the Electron half.
  *
  * Contract (docs/ARCHITECTURE.md §2, §6): on hotkey press, capture every
  * display via desktopCapturer, resize to <= CAPTURE_MAX_EDGE on the longest
@@ -9,12 +9,19 @@
  * request — never continuous.
  *
  * Pure math (resize planning, source<->display matching, meta construction)
- * is exported separately so it can be unit-tested without Electron.
+ * lives in capture-math.ts so it can be unit-tested without Electron.
  */
 
 import { BrowserWindow, desktopCapturer, screen } from 'electron';
-import { CAPTURE_JPEG_QUALITY, CAPTURE_MAX_EDGE } from '../shared/constants';
-import type { CaptureMeta, Rect } from '../shared/types';
+import type { Display, DesktopCapturerSource } from 'electron';
+import { CAPTURE_JPEG_QUALITY } from '../shared/constants';
+import type { CaptureMeta } from '../shared/types';
+import {
+  buildCaptureMeta,
+  displayPhysicalSize,
+  matchSourcesToDisplays,
+  planResize,
+} from './capture-math';
 
 export interface CaptureResult {
   meta: CaptureMeta;
@@ -22,121 +29,17 @@ export interface CaptureResult {
   jpegBase64: string;
 }
 
-// ---------------------------------------------------------------------------
-// Pure helpers (unit-tested in tests/capture.test.ts)
-// ---------------------------------------------------------------------------
-
-export interface ResizePlan {
-  width: number;
-  height: number;
-  /** False when the source already fits within maxEdge (no resize needed). */
-  resized: boolean;
-}
-
 /**
- * Final image dimensions: longest edge <= maxEdge, aspect preserved.
- * The longest edge lands exactly on maxEdge; the other edge rounds.
+ * Warning sink for capture-time diagnostics. Injectable so tests assert on
+ * messages instead of console.warn call shapes.
  */
-export function planResize(srcW: number, srcH: number, maxEdge = CAPTURE_MAX_EDGE): ResizePlan {
-  if (!(srcW > 0) || !(srcH > 0)) {
-    throw new Error(`planResize: invalid source size ${srcW}x${srcH}`);
-  }
-  const longest = Math.max(srcW, srcH);
-  if (longest <= maxEdge) return { width: srcW, height: srcH, resized: false };
-  const ratio = maxEdge / longest;
-  return {
-    width: Math.round(srcW * ratio),
-    height: Math.round(srcH * ratio),
-    resized: true,
-  };
+export interface CaptureLogger {
+  warn(message: string): void;
 }
 
-/** Physical pixel size of a display (DIP bounds x scaleFactor). */
-export function displayPhysicalSize(
-  bounds: Rect,
-  scaleFactor: number,
-): { width: number; height: number } {
-  return {
-    width: Math.round(bounds.width * scaleFactor),
-    height: Math.round(bounds.height * scaleFactor),
-  };
-}
-
-/** Minimal display shape needed by the pure matching/meta helpers. */
-export interface DisplayLike {
-  id: number;
-  bounds: Rect;
-  scaleFactor: number;
-}
-
-/** Minimal desktopCapturer source shape needed for matching. */
-export interface SourceLike {
-  /** Electron display id as a string; '' or garbage on some Windows setups. */
-  display_id: string;
-  name: string;
-}
-
-export interface SourceMatch {
-  /** Per display (same order as input), the index into `sources` or null. */
-  sourceIndexByDisplay: (number | null)[];
-  /**
-   * True when every display was matched via display_id. False means the
-   * order-based fallback was used (Windows display_id matching is
-   * historically flaky — empty or mismatched ids).
-   */
-  matchedByDisplayId: boolean;
-}
-
-/**
- * Match desktopCapturer screen sources to displays.
- *
- * Preferred: source.display_id === String(display.id), each source used at
- * most once. If ANY display fails to match that way, fall back to order
- * matching (screen sources are enumerated in the same order as
- * screen.getAllDisplays() on Windows in practice).
- */
-export function matchSourcesToDisplays(
-  displays: readonly { id: number }[],
-  sources: readonly SourceLike[],
-): SourceMatch {
-  const used = new Set<number>();
-  const byId: (number | null)[] = displays.map((display) => {
-    const idx = sources.findIndex(
-      (s, i) => !used.has(i) && s.display_id !== '' && s.display_id === String(display.id),
-    );
-    if (idx === -1) return null;
-    used.add(idx);
-    return idx;
-  });
-
-  if (byId.every((idx) => idx !== null)) {
-    return { sourceIndexByDisplay: byId, matchedByDisplayId: true };
-  }
-
-  return {
-    sourceIndexByDisplay: displays.map((_, i) => (i < sources.length ? i : null)),
-    matchedByDisplayId: false,
-  };
-}
-
-/** Build the per-display CaptureMeta (imageW/imageH = FINAL sent-image size). */
-export function buildCaptureMeta(
-  display: DisplayLike,
-  screenIndex: number,
-  imageW: number,
-  imageH: number,
-  activeDisplayId: number,
-): CaptureMeta {
-  return {
-    screenIndex,
-    displayId: display.id,
-    imageW,
-    imageH,
-    displayBounds: { ...display.bounds },
-    scaleFactor: display.scaleFactor,
-    isActive: display.id === activeDisplayId,
-  };
-}
+const consoleCaptureLogger: CaptureLogger = {
+  warn: (message) => console.warn(message),
+};
 
 // ---------------------------------------------------------------------------
 // Self-exclusion (content protection)
@@ -158,13 +61,13 @@ export function exemptFromCaptureProtection(win: BrowserWindow): void {
  * sees the buddy/caption/panel in screenshots. Best-effort per window (a
  * window may be destroyed mid-iteration).
  */
-function setClickyWindowsContentProtection(enabled: boolean): void {
+function setClickyWindowsContentProtection(enabled: boolean, logger: CaptureLogger): void {
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.isDestroyed() || captureVisibleWindows.has(win)) continue;
     try {
       win.setContentProtection(enabled);
     } catch (err) {
-      console.warn('[capture] setContentProtection failed:', err);
+      logger.warn(`[capture] setContentProtection failed: ${String(err)}`);
     }
   }
 }
@@ -174,6 +77,48 @@ function setClickyWindowsContentProtection(enabled: boolean): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * Resize + encode one display's grab and build its CaptureMeta.
+ * Null when the display has no usable source (warned, display skipped —
+ * screenIndex stays aligned with display order for the surviving screens).
+ */
+function captureOneDisplay(
+  display: Display,
+  screenIndex: number,
+  source: DesktopCapturerSource | undefined,
+  activeDisplayId: number,
+  logger: CaptureLogger,
+): CaptureResult | null {
+  if (!source) {
+    logger.warn(`[capture] no source for display ${display.id} (screen${screenIndex}) — skipped`);
+    return null;
+  }
+
+  const thumb = source.thumbnail;
+  const size = thumb.getSize();
+  if (size.width <= 0 || size.height <= 0) {
+    logger.warn(`[capture] empty thumbnail for display ${display.id} — skipped`);
+    return null;
+  }
+
+  const plan = planResize(size.width, size.height);
+  const image = plan.resized
+    ? thumb.resize({ width: plan.width, height: plan.height, quality: 'good' })
+    : thumb;
+  const finalSize = image.getSize();
+
+  return {
+    meta: buildCaptureMeta(
+      display,
+      screenIndex,
+      finalSize.width,
+      finalSize.height,
+      activeDisplayId,
+    ),
+    jpegBase64: image.toJPEG(CAPTURE_JPEG_QUALITY).toString('base64'),
+  };
+}
+
+/**
  * Capture all displays: desktopCapturer at physical resolution, per-display
  * source matching, resize to <= CAPTURE_MAX_EDGE longest edge, JPEG encode.
  *
@@ -181,7 +126,9 @@ function setClickyWindowsContentProtection(enabled: boolean): void {
  * screen grab (try/finally restores them so normal QA screenshots still see
  * them afterwards).
  */
-export async function captureAllDisplays(): Promise<CaptureResult[]> {
+export async function captureAllDisplays(
+  logger: CaptureLogger = consoleCaptureLogger,
+): Promise<CaptureResult[]> {
   const displays = screen.getAllDisplays();
   if (displays.length === 0) return [];
 
@@ -200,7 +147,7 @@ export async function captureAllDisplays(): Promise<CaptureResult[]> {
   }
 
   // SELF-EXCLUSION: hide Clicky's windows from the grab, always restore.
-  setClickyWindowsContentProtection(true);
+  setClickyWindowsContentProtection(true, logger);
   let sources;
   try {
     sources = await desktopCapturer.getSources({
@@ -208,7 +155,7 @@ export async function captureAllDisplays(): Promise<CaptureResult[]> {
       thumbnailSize: { width: thumbW, height: thumbH },
     });
   } finally {
-    setClickyWindowsContentProtection(false);
+    setClickyWindowsContentProtection(false, logger);
   }
 
   const match = matchSourcesToDisplays(
@@ -216,12 +163,10 @@ export async function captureAllDisplays(): Promise<CaptureResult[]> {
     sources.map((s) => ({ display_id: s.display_id, name: s.name })),
   );
   if (!match.matchedByDisplayId) {
-    console.warn(
-      '[capture] display_id matching failed (ids:',
-      sources.map((s) => s.display_id),
-      'displays:',
-      displays.map((d) => d.id),
-      ') — using order-based fallback',
+    logger.warn(
+      `[capture] display_id matching failed (ids: ${JSON.stringify(
+        sources.map((s) => s.display_id),
+      )} displays: ${JSON.stringify(displays.map((d) => d.id))}) — using order-based fallback`,
     );
   }
 
@@ -229,36 +174,8 @@ export async function captureAllDisplays(): Promise<CaptureResult[]> {
   displays.forEach((display, screenIndex) => {
     const sourceIndex = match.sourceIndexByDisplay[screenIndex] ?? null;
     const source = sourceIndex === null ? undefined : sources[sourceIndex];
-    if (!source) {
-      console.warn(
-        `[capture] no source for display ${display.id} (screen${screenIndex}) — skipped`,
-      );
-      return;
-    }
-
-    const thumb = source.thumbnail;
-    const size = thumb.getSize();
-    if (size.width <= 0 || size.height <= 0) {
-      console.warn(`[capture] empty thumbnail for display ${display.id} — skipped`);
-      return;
-    }
-
-    const plan = planResize(size.width, size.height);
-    const image = plan.resized
-      ? thumb.resize({ width: plan.width, height: plan.height, quality: 'good' })
-      : thumb;
-    const finalSize = image.getSize();
-
-    results.push({
-      meta: buildCaptureMeta(
-        display,
-        screenIndex,
-        finalSize.width,
-        finalSize.height,
-        activeDisplayId,
-      ),
-      jpegBase64: image.toJPEG(CAPTURE_JPEG_QUALITY).toString('base64'),
-    });
+    const result = captureOneDisplay(display, screenIndex, source, activeDisplayId, logger);
+    if (result !== null) results.push(result);
   });
 
   return results;

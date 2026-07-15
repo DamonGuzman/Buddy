@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { shouldRetry } from '../src/main/agents/agent';
 import { AgentManager } from '../src/main/agents/manager';
 import { MockAgentBackend } from '../src/main/agents/mock-backend';
 import { CodexAgentBackend } from '../src/main/agents/backend';
@@ -8,8 +9,10 @@ import type {
   AgentBackendRequest,
   AgentBackendResult,
   AgentBrief,
+  AgentPersistencePort,
   AgentToolContext,
 } from '../src/main/agents/types';
+import type { AgentSummary } from '../src/shared/types';
 
 function brief(id: string): AgentBrief {
   return { id, task: `research ${id}`, recentTranscript: '', createdAt: Date.now() };
@@ -42,6 +45,7 @@ describe('Agent Mode runtime', () => {
     let requests = 0;
     let finished = false;
     const backend: AgentBackend = {
+      isReady: () => true,
       async request(): Promise<AgentBackendResult> {
         requests += 1;
         if (requests <= 15) {
@@ -110,6 +114,7 @@ describe('Agent Mode runtime', () => {
     expect(signedOut.spawn(brief('nope'))).toEqual({ ok: false, reason: 'not_signed_in' });
 
     const blocking: AgentBackend = {
+      isReady: () => true,
       request: (req) =>
         new Promise<AgentBackendResult>((resolve) => {
           req.signal.addEventListener(
@@ -157,6 +162,115 @@ describe('Agent Mode runtime', () => {
     await expect(tool.execute({ url: 'http://localhost/secret' }, ctx)).rejects.toThrow(
       'local addresses are blocked',
     );
+  });
+
+  it('the mock backend reports itself ready (no sign-in required)', () => {
+    expect(new MockAgentBackend().isReady()).toBe(true);
+  });
+
+  it('persists terminal summaries through an injected persistence port', async () => {
+    let saved: AgentSummary[] = [];
+    const store: AgentPersistencePort = {
+      load: () => null,
+      save: (records) => {
+        saved = records;
+      },
+    };
+    let finished = false;
+    const manager = new AgentManager({
+      backend: new MockAgentBackend(),
+      isReady: () => true,
+      persistence: store,
+      onAgentsChanged: () => {},
+      onFinished: () => {
+        finished = true;
+      },
+    });
+    expect(manager.spawn(brief('persist_me')).ok).toBe(true);
+    await vi.waitFor(() => expect(finished).toBe(true));
+    expect(saved.map((item) => item.id)).toEqual(['persist_me']);
+    expect(saved[0]?.status).toBe('done');
+    expect(saved[0]?.finishedAt).toBeDefined();
+
+    // A fresh manager reloads from the same port; malformed rows are dropped.
+    const reloaded = new AgentManager({
+      backend: new MockAgentBackend(),
+      isReady: () => true,
+      persistence: {
+        load: () => [
+          ...saved,
+          { id: 'bogus', task: 42 },
+          {
+            id: 'bad_status',
+            task: 'x',
+            status: 'exploded',
+            createdAt: 1,
+            spoken: false,
+            unseen: false,
+            steps: [],
+          },
+        ],
+        save: () => {},
+      },
+      onAgentsChanged: () => {},
+      onFinished: () => {},
+    });
+    expect(reloaded.list().map((item) => item.id)).toEqual(['persist_me']);
+  });
+
+  it('a throwing persistence port never takes down spawn/persist', async () => {
+    let finished = false;
+    const manager = new AgentManager({
+      backend: new MockAgentBackend(),
+      isReady: () => true,
+      persistence: {
+        load: () => {
+          throw new Error('corrupt');
+        },
+        save: () => {
+          throw new Error('disk full');
+        },
+      },
+      onAgentsChanged: () => {},
+      onFinished: () => {
+        finished = true;
+      },
+    });
+    expect(manager.spawn(brief('fragile')).ok).toBe(true);
+    await vi.waitFor(() => expect(finished).toBe(true));
+    expect(manager.list()[0]?.status).toBe('done');
+  });
+});
+
+describe('shouldRetry policy', () => {
+  const ok: AgentBackendResult = {
+    ok: true,
+    outputItems: [],
+    text: 'fine',
+    functionCalls: [],
+    searchQueries: [],
+    citations: [],
+    usedPercent: null,
+  };
+  const failure = (
+    errorKind: 'agent_not_signed_in' | 'agent_quota' | 'agent_backend_down',
+    retryable: boolean,
+  ): AgentBackendResult => ({ ok: false, errorKind, detail: 'x', retryable });
+
+  it('never retries successes or exhausted attempts', () => {
+    expect(shouldRetry(ok, 0)).toBe(false);
+    expect(shouldRetry(failure('agent_backend_down', true), 1)).toBe(false);
+  });
+
+  it('retries retryable failures and backend-down blips once', () => {
+    expect(shouldRetry(failure('agent_backend_down', true), 0)).toBe(true);
+    expect(shouldRetry(failure('agent_backend_down', false), 0)).toBe(true);
+    expect(shouldRetry(failure('agent_quota', true), 0)).toBe(true);
+  });
+
+  it('stops immediately on non-retryable quota / sign-in failures', () => {
+    expect(shouldRetry(failure('agent_quota', false), 0)).toBe(false);
+    expect(shouldRetry(failure('agent_not_signed_in', false), 0)).toBe(false);
   });
 });
 

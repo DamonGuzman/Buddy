@@ -38,9 +38,6 @@ export interface ServerVadTurnDetection {
   interrupt_response: true;
 }
 
-/** Back-compat alias used by persona.ts. */
-export type ToolDefinition = RealtimeFunctionTool;
-
 /** GA `session` object for `session.update` (type: 'realtime' sessions). */
 export interface RealtimeSessionConfig {
   type: 'realtime';
@@ -362,15 +359,58 @@ export type ServerEvent =
   | RateLimitsUpdatedEvent;
 
 /**
- * Parse a server frame. Returns null for malformed JSON / missing type.
- * Unknown event types are returned as-is (cast) — the session's switch
- * ignores anything it doesn't know, logging once per type.
+ * A well-formed server frame whose `type` is outside the subset above. The
+ * payload passes through untouched — the session ignores it, logging once
+ * per type.
  */
-export function parseServerEvent(raw: string): ServerEvent | null {
+export interface UnknownServerEvent {
+  type: string;
+  [k: string]: unknown;
+}
+
+/**
+ * Exhaustiveness guard: `Record<ServerEvent['type'], true>` forces this map
+ * to list EXACTLY the union's discriminants — adding a ServerEvent member
+ * without registering its type here is a compile error, and vice versa.
+ */
+const SERVER_EVENT_TYPES: Record<ServerEvent['type'], true> = {
+  'session.created': true,
+  'session.updated': true,
+  'input_audio_buffer.speech_started': true,
+  'input_audio_buffer.speech_stopped': true,
+  'input_audio_buffer.committed': true,
+  'conversation.item.input_audio_transcription.completed': true,
+  'response.created': true,
+  'response.output_item.added': true,
+  'response.output_audio.delta': true,
+  'response.output_audio.done': true,
+  'response.output_audio_transcript.delta': true,
+  'response.output_audio_transcript.done': true,
+  'response.output_text.delta': true,
+  'response.function_call_arguments.delta': true,
+  'response.function_call_arguments.done': true,
+  'response.done': true,
+  error: true,
+  'rate_limits.updated': true,
+};
+
+const KNOWN_SERVER_EVENT_TYPES: ReadonlySet<string> = new Set(Object.keys(SERVER_EVENT_TYPES));
+
+/** Narrow a parsed frame to the typed subset the session's switch handles. */
+export function isKnownServerEvent(evt: ServerEvent | UnknownServerEvent): evt is ServerEvent {
+  return KNOWN_SERVER_EVENT_TYPES.has(evt.type);
+}
+
+/**
+ * Parse a server frame. Returns null for malformed JSON / missing type.
+ * Unknown event types are returned as-is (see UnknownServerEvent) — use
+ * isKnownServerEvent() to narrow to the typed subset.
+ */
+export function parseServerEvent(raw: string): ServerEvent | UnknownServerEvent | null {
   try {
     const evt = JSON.parse(raw) as { type?: unknown };
     if (evt === null || typeof evt !== 'object' || typeof evt.type !== 'string') return null;
-    return evt as ServerEvent;
+    return evt as ServerEvent | UnknownServerEvent;
   } catch {
     return null;
   }
@@ -392,15 +432,27 @@ export interface PointAtArgs {
 }
 
 /**
+ * Look up the capture for a model-named screen index. F1 fix (m2): captures
+ * are KEYED by meta.screenIndex — a display can be skipped, so array position
+ * is NOT the screen index. An unknown index falls back to the ACTIVE screen's
+ * capture, then the first. Returns undefined only for an empty batch.
+ */
+export function findCaptureForScreen(
+  metas: CaptureMeta[],
+  screen: number,
+): CaptureMeta | undefined {
+  return metas.find((m) => m.screenIndex === screen) ?? metas.find((m) => m.isActive) ?? metas[0];
+}
+
+/**
  * Validate + clamp raw point_at arguments from the model.
  *
  * - x/y must be finite numbers; rounded to integers, clamped to >= 0 and,
  *   when `capture` metadata for that screen is known, to the image bounds.
- * - screen must be a finite number; rounded, clamped to >= 0. F1 fix (m2):
- *   captures are KEYED by meta.screenIndex — a display can be skipped, so
- *   array position is NOT the screen index. The screen is validated against
- *   the actual screenIndex values present; an unknown index falls back to
- *   the ACTIVE screen's capture (matching the conversation's lookup).
+ * - screen must be a finite number; rounded, clamped to >= 0, then validated
+ *   against the actual screenIndex values present (findCaptureForScreen);
+ *   an unknown index falls back to the ACTIVE screen's capture (matching the
+ *   conversation's lookup).
  * - label is kept only if it's a non-empty string (trimmed, capped at 120).
  *
  * Returns null for fundamentally malformed input (missing/non-numeric x, y
@@ -415,12 +467,9 @@ export function validatePointAtArgs(raw: unknown, capture?: CaptureMeta[]): Poin
   if (xNum === null || yNum === null || screenNum === null) return null;
 
   let screen = Math.max(0, Math.round(screenNum));
-  let meta = capture?.find((m) => m.screenIndex === screen);
-  if (meta === undefined && capture !== undefined && capture.length > 0) {
-    // Unknown screen index: explicit fallback to the active screen (m2).
-    meta = capture.find((m) => m.isActive) ?? capture[0];
-    if (meta !== undefined) screen = meta.screenIndex;
-  }
+  const meta = capture !== undefined ? findCaptureForScreen(capture, screen) : undefined;
+  // Unknown screen index: explicit fallback to the active screen (m2).
+  if (meta !== undefined && meta.screenIndex !== screen) screen = meta.screenIndex;
   const maxX = meta ? Math.max(0, meta.imageW - 1) : Number.MAX_SAFE_INTEGER;
   const maxY = meta ? Math.max(0, meta.imageH - 1) : Number.MAX_SAFE_INTEGER;
   const x = Math.min(Math.max(0, Math.round(xNum)), maxX);

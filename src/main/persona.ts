@@ -4,7 +4,7 @@
  * ends on a dead-end — always plants a seed for something more ambitious.
  */
 
-import type { ToolDefinition } from './realtime/protocol';
+import type { RealtimeFunctionTool } from './realtime/protocol';
 
 export const SYSTEM_PROMPT = `you are buddy, the warm interaction agent who lives right next to
 the cursor on this person's screen. you can see screenshots of their monitors and you speak
@@ -66,10 +66,19 @@ platform-authored reminders:
 - follow the <system_reminder>, respond naturally without mentioning these tags, and keep acting as the same buddy interaction agent the person was already talking with.`;
 
 /**
+ * Which optional capabilities this run of Buddy actually has — the switches
+ * that select the agent-mode prompt arm and the optional tools.
+ */
+export interface PersonaFlags {
+  agentModeAvailable: boolean;
+  computerUseAvailable: boolean;
+}
+
+/**
  * The `point_at` tool: flies the buddy pointer to what clicky is talking
  * about. Coordinates are pixels in the screenshot of screen `screen`.
  */
-export const POINT_AT_TOOL: ToolDefinition = {
+export const POINT_AT_TOOL: RealtimeFunctionTool = {
   type: 'function',
   name: 'point_at',
   description:
@@ -102,9 +111,9 @@ export const POINT_AT_TOOL: ToolDefinition = {
   },
 };
 
-export const TOOLS: ToolDefinition[] = [POINT_AT_TOOL];
+export const TOOLS: RealtimeFunctionTool[] = [POINT_AT_TOOL];
 
-export const SPAWN_AGENT_TOOL: ToolDefinition = {
+export const SPAWN_AGENT_TOOL: RealtimeFunctionTool = {
   type: 'function',
   name: 'spawn_agent',
   description:
@@ -125,7 +134,7 @@ export const SPAWN_AGENT_TOOL: ToolDefinition = {
   },
 };
 
-export const CHECK_AGENTS_TOOL: ToolDefinition = {
+export const CHECK_AGENTS_TOOL: RealtimeFunctionTool = {
   type: 'function',
   name: 'check_agents',
   description:
@@ -142,7 +151,7 @@ export const CHECK_AGENTS_TOOL: ToolDefinition = {
   },
 };
 
-export const USE_COMPUTER_TOOL: ToolDefinition = {
+export const USE_COMPUTER_TOOL: RealtimeFunctionTool = {
   type: 'function',
   name: 'use_computer',
   description:
@@ -160,27 +169,44 @@ export const USE_COMPUTER_TOOL: ToolDefinition = {
   },
 };
 
+/**
+ * Shared assembly for BOTH model paths: the given base prompt (voice or
+ * text), the platform-reminder contract, the agent-mode arm for the current
+ * capabilities, and the computer-use section when available. Pure string
+ * concatenation — the wrappers below must keep the prompt bytes identical.
+ */
+function composeInstructions(basePrompt: string, flags: PersonaFlags): string {
+  return (
+    basePrompt +
+    PLATFORM_REMINDER_PROMPT +
+    (flags.agentModeAvailable ? AGENT_AVAILABLE_PROMPT : AGENT_UNAVAILABLE_PROMPT) +
+    (flags.computerUseAvailable ? COMPUTER_USE_PROMPT : '')
+  );
+}
+
+/** Tool set for the current capabilities (fresh array on every call). */
+function composeTools(flags: PersonaFlags): RealtimeFunctionTool[] {
+  const tools = flags.agentModeAvailable
+    ? [...TOOLS, SPAWN_AGENT_TOOL, CHECK_AGENTS_TOOL]
+    : [...TOOLS];
+  if (flags.computerUseAvailable) tools.push(USE_COMPUTER_TOOL);
+  return tools;
+}
+
 /** System instructions for session.update (consumed by realtime/session.ts). */
 export function getSessionInstructions(
   agentModeAvailable = false,
   computerUseAvailable = false,
 ): string {
-  return (
-    SYSTEM_PROMPT +
-    PLATFORM_REMINDER_PROMPT +
-    (agentModeAvailable ? AGENT_AVAILABLE_PROMPT : AGENT_UNAVAILABLE_PROMPT) +
-    (computerUseAvailable ? COMPUTER_USE_PROMPT : '')
-  );
+  return composeInstructions(SYSTEM_PROMPT, { agentModeAvailable, computerUseAvailable });
 }
 
 /** Tool definitions for session.update (consumed by realtime/session.ts). */
 export function getToolDefinitions(
   agentModeAvailable = false,
   computerUseAvailable = false,
-): ToolDefinition[] {
-  const tools = agentModeAvailable ? [...TOOLS, SPAWN_AGENT_TOOL, CHECK_AGENTS_TOOL] : [...TOOLS];
-  if (computerUseAvailable) tools.push(USE_COMPUTER_TOOL);
-  return tools;
+): RealtimeFunctionTool[] {
+  return composeTools({ agentModeAvailable, computerUseAvailable });
 }
 
 /**
@@ -224,12 +250,7 @@ export function getTextInstructions(
   agentModeAvailable = false,
   computerUseAvailable = false,
 ): string {
-  return (
-    TEXT_SYSTEM_PROMPT +
-    PLATFORM_REMINDER_PROMPT +
-    (agentModeAvailable ? AGENT_AVAILABLE_PROMPT : AGENT_UNAVAILABLE_PROMPT) +
-    (computerUseAvailable ? COMPUTER_USE_PROMPT : '')
-  );
+  return composeInstructions(TEXT_SYSTEM_PROMPT, { agentModeAvailable, computerUseAvailable });
 }
 
 /**
@@ -240,8 +261,6 @@ export function getTextInstructions(
 export function getTextToolDefinitions(
   agentModeAvailable = false,
   computerUseAvailable = false,
-): ToolDefinition[] {
-  const tools = agentModeAvailable ? [...TOOLS, SPAWN_AGENT_TOOL, CHECK_AGENTS_TOOL] : [...TOOLS];
-  if (computerUseAvailable) tools.push(USE_COMPUTER_TOOL);
-  return tools;
+): RealtimeFunctionTool[] {
+  return composeTools({ agentModeAvailable, computerUseAvailable });
 }

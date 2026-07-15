@@ -69,9 +69,31 @@ typed action** and is always signposted by a visible indicator.
 - **Main process** owns: tray, window lifecycle, hotkey hook, screenshot capture, settings store,
   the **RealtimeSession** (WS client), tool-call dispatch, debug server.
 - **Overlay renderer** (one `BrowserWindow` per display): `transparent: true`, `frame: false`,
-  `alwaysOnTop: 'screen-saver'`, `setIgnoreMouseEvents(true)`, `skipTaskbar`, full display bounds,
-  visible on all workspaces. Draws buddy + caption + indicator. Never focusable.
-- **Panel renderer**: ~380×520 frameless window toggled from tray click, hides on blur.
+  always on top at Electron's taskbar-safe `floating` level, `setIgnoreMouseEvents(true)`,
+  `skipTaskbar`, full display bounds, visible on all workspaces. Never use the `screen-saver` level
+  on Windows: it sits above the taskbar and a full-display overlay can trigger fullscreen shell
+  behavior. Before first show, the Windows seam marks each HWND `NonRudeHWND` so Explorer does not
+  classify the full-display transparent overlay as a fullscreen app and demote the taskbar; if that
+  marker fails, the overlay drops always-on-top rather than breaking the taskbar. Draws buddy +
+  caption + indicator. Never focusable.
+- **Settings/audio-host renderer** (M21 — the chat panel is GONE): the former panel window
+  survives as a hidden audio host (mic capture + voice playback AudioWorklets live in its
+  renderer, pre-created at app-ready, unthrottled) whose only visible face is a settings-only
+  view opened from the tray's Settings item (plus first-run / actionable-error showOnce).
+  Transcript, composer, and agents view are deleted — the whisper composer, caption bubbles,
+  and overlay helper sprites carry those jobs. Tray click now toggles the whisper; a second
+  app launch and overlay agent-clicks summon the whisper too. Internal `panel:*` channel and
+  file names remain for wire/history stability and now denote this window.
+- **Whisper renderer** (M20): ~340×244 transparent frameless composer anchored beside the buddy's
+  rest spot — the text channel for can't-talk environments. Summoned by a hotkey TAP (release
+  within `TAP_MAX_MS` = the conversation's `MIN_HOLD_MS`, so a tap never commits a voice turn) or
+  by clicking the buddy (which no longer opens the panel). Full realtime mode ignores taps — the
+  press toggles the open-mic session there, and the buddy click remains the whisper's summon.
+  It is the ONE window allowed to steal focus (`app.focus({steal: true})`, explicitly summoned),
+  hides on blur (with a short post-show grace for the Windows foreground fight) / esc / re-tap.
+  Main mirrors `panel:transcript` + `panel:assistant-state` to it at the conversation's panel
+  port (index.ts), so the conversation package stays whisper-unaware. Typed turns pair with the
+  `voiceMuted` setting (quiet mode): model audio deltas are not played and captions are forced.
 - IPC is **typed**: all channels + payload types live in `src/shared/ipc.ts`. Renderers get a
   narrow `window.clicky` API from `preload`. No `remote`, contextIsolation on everywhere.
 
@@ -83,8 +105,10 @@ src/
   main/
     index.ts         app bootstrap, wiring only
     tray.ts          tray icon + menu
-    windows/         overlay + panel window management (per-display lifecycle, display hotplug)
-    hotkey.ts        uiohook hold-to-talk state machine (down→capture+listen, up→commit)
+    windows/         overlay + panel + whisper window management (per-display lifecycle,
+                     display hotplug; whisper.ts = M20 floating composer)
+    hotkey.ts        uiohook hold-to-talk state machine (down→capture+listen, up→commit;
+                     M20: release within TAP_MAX_MS additionally emits 'tap' → whisper)
     capture.ts       multi-display screenshot pipeline (capture, resize, label, filter own windows)
     coords.ts        screenshot px → display DIP coord mapping (pure functions, unit-tested)
     grounding/       M9 element-snap grounding: snapper.ps1 (UIA daemon, embedded at build),
@@ -101,7 +125,9 @@ src/
   renderer/
     overlay/         buddy canvas/DOM, bezier animation, caption bubble, indicators,
                      agent helper sprites + hover card (M19, docs/AGENT-MODE.md §5.5)
-    panel/           React panel UI (status, transcript, text input, settings)
+    panel/           M21: settings-only React app + the hidden audio engines
+                     (the chat panel UI — transcript/composer/agents — is deleted)
+    whisper/         M20 floating composer (reply stack + input + quiet-mode toggle)
   preload/           contextBridge APIs for each renderer
 tools/
   mock-realtime/     standalone Node WS server speaking the Realtime protocol subset; scripted

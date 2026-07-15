@@ -8,9 +8,9 @@
  * the buddy footprint, the hosting overlay flips interactive
  * (setIgnoreMouseEvents(false)) so the buddy can be clicked/dragged, and
  * flips back to click-through the INSTANT the cursor leaves the small padded
- * buddy region (renderer 'exit' events + a belt-and-braces 150ms cursor poll
- * here in main — the user's clicks elsewhere must never be eaten). Overlays
- * still NEVER take focus.
+ * buddy region (renderer 'exit' events + a belt-and-braces cursor poll in
+ * hover-controller.ts — the user's clicks elsewhere must never be eaten).
+ * Overlays still NEVER take focus.
  *
  * Buddy residency rule (M2, amended M15): at rest the buddy lives on the REST
  * display's overlay only — the primary display unless the user drag-
@@ -18,7 +18,8 @@
  * shows/moves it on the addressed display and hides it everywhere else;
  * 'idle' returns it to the rest corner; 'hide' fades it out everywhere.
  * `routePointer` is the single entry point that enforces this — production
- * dispatch and the debug server both go through it.
+ * dispatch and the debug server both go through it. The routing itself is
+ * pure (pointer-routing.ts).
  *
  * M15 mouse observation: the window currently showing the buddy gets
  * setIgnoreMouseEvents(true, { forward: true }) so its renderer receives
@@ -26,22 +27,37 @@
  * plain setIgnoreMouseEvents(true) (no forwarding = zero mousemove cost).
  */
 
-import { BrowserWindow, ipcMain, screen } from 'electron';
-import type { Display, WebContents } from 'electron';
-import { join } from 'node:path';
+import { ipcMain, screen } from 'electron';
+import type { BrowserWindow, Display, Rectangle, WebContents } from 'electron';
 import type { MainToOverlayChannel, MainToOverlayEvents } from '../../shared/ipc';
 import type {
   AssistantState,
+  BuddyRest,
   OverlayHoverConfig,
   OverlayHoverEvent,
   OverlayHoverStatus,
   PointerCommand,
   Rect,
 } from '../../shared/types';
-import { getSettingsStore } from '../settings';
-import { togglePanel } from './panel';
-import { CrashLoopGuard, lockdownNavigation, recoverOnRenderProcessGone } from './harden';
+import { bobIdleMsOverride } from '../env';
+import type { SettingsStore } from '../settings';
+import { toggleWhisper } from './whisper';
+import {
+  createHardenedWindow,
+  hardenedWebPreferences,
+  loadRendererPage,
+  TASKBAR_SAFE_TOPMOST_LEVEL,
+} from './common';
+import {
+  CRASH_LOOP_MAX_RECREATES,
+  CRASH_LOOP_WINDOW_MS,
+  CrashLoopGuard,
+  recoverOnRenderProcessGone,
+} from './harden';
+import { HoverController } from './hover-controller';
 import { listeningBlocksHover } from './hover-policy';
+import { markNativeWindowNonRude } from './non-rude';
+import { computePointerRouting, forwardingModeFor } from './pointer-routing';
 
 /**
  * Module-level handle to the started manager so sibling main modules (e.g.
@@ -53,42 +69,109 @@ export function getOverlayManager(): OverlayManager | null {
   return activeManager;
 }
 
-/** M15: belt-and-braces cursor poll cadence while an overlay is interactive. */
-const INTERACTIVE_POLL_MS = 150;
+/** M15: reject hover regions larger than any plausible buddy footprint. */
+const MAX_HOVER_REGION_DIP = 400;
+
+/** One overlay window + the screenIndex used in capture labeling. */
+interface OverlayEntry {
+  win: BrowserWindow;
+  screenIndex: number;
+}
+
+/** Per-window slice of `OverlayManager.hoverDebugInfo()` (debug-server JSON). */
+export interface OverlayWindowHoverDebug {
+  displayId: number;
+  screenIndex: number;
+  bounds: Rectangle | null;
+  scaleFactor: number | null;
+  forwarding: boolean;
+  interactive: boolean;
+  rendererPid: number | null;
+  hover: OverlayHoverStatus | null;
+}
+
+/** M15 debug/QA snapshot shape (GET /hover/state on the debug server). */
+export interface OverlayHoverDebugInfo {
+  assistantState: AssistantState;
+  buddyHostIndex: number | null;
+  interactiveDisplayId: number | null;
+  interactiveRegion: Rect | null;
+  buddyRest: BuddyRest | null;
+  restScreenIndex: number;
+  windows: OverlayWindowHoverDebug[];
+}
 
 export class OverlayManager {
-  /** displayId -> window */
-  private windows = new Map<number, BrowserWindow>();
-  /** displayId -> screenIndex used in capture labeling. */
-  private indexByDisplayId = new Map<number, number>();
+  /** displayId -> { window, screenIndex } (screenIndex = capture labeling). */
+  private overlays = new Map<number, OverlayEntry>();
   private started = false;
   /** Crash recovery budget shared across ALL overlay windows. */
-  private crashGuard = new CrashLoopGuard(3, 5 * 60_000, 'overlay');
+  private crashGuard = new CrashLoopGuard(
+    CRASH_LOOP_MAX_RECREATES,
+    CRASH_LOOP_WINDOW_MS,
+    'overlay',
+  );
 
   // --- M15 buddy-hover state ------------------------------------------------
-  /** Mirror of the last broadcast assistant state (snooped in broadcast()). */
+  /** Last assistant state (every change flows through setAssistantState). */
   private lastAssistantState: AssistantState = 'idle';
   /** screenIndex of the window currently showing the buddy; null = hidden. */
   private buddyHostIndex: number | null = null;
-  /** displayId of the overlay currently interactive (dwell), or null. */
-  private interactiveDisplayId: number | null = null;
-  /** Latest padded buddy region for the interactive overlay, window-local DIP. */
-  private interactiveRegion: Rect | null = null;
-  private interactivePoll: ReturnType<typeof setInterval> | null = null;
+  /** The dwell-to-interact state machine (owns the interactive flip + poll). */
+  private readonly hover = new HoverController({
+    isWindowLive: (displayId) => {
+      const entry = this.overlays.get(displayId);
+      return entry !== undefined && !entry.win.isDestroyed();
+    },
+    makeWindowInteractive: (displayId) => {
+      const entry = this.overlays.get(displayId);
+      if (!entry || entry.win.isDestroyed()) return;
+      entry.win.setIgnoreMouseEvents(false);
+      entry.win.webContents.send('overlay:interactive', { interactive: true });
+    },
+    restoreWindowClickThrough: (displayId) => {
+      const entry = this.overlays.get(displayId);
+      if (!entry || entry.win.isDestroyed()) return;
+      // The buddy-hosting window keeps mousemove forwarding on restore.
+      this.applyMouseMode(entry, displayId, null);
+      entry.win.webContents.send('overlay:interactive', { interactive: false });
+    },
+    windowBounds: (displayId) => {
+      const entry = this.overlays.get(displayId);
+      return entry && !entry.win.isDestroyed() ? entry.win.getBounds() : null;
+    },
+    cursorPoint: () => screen.getCursorScreenPoint(), // global DIP
+  });
   /** Latest renderer hover status per display (debug/QA). */
   private hoverStatusByDisplay = new Map<number, OverlayHoverStatus>();
   private unsubscribeSettings: (() => void) | null = null;
+  /**
+   * M20: cursor feed for the buddy-hosting overlay. Windows' mousemove
+   * forwarding (setIgnoreMouseEvents forward:true) proved unreliable — zero
+   * delivery on some machines — which silently killed buddy hover/click.
+   * Main polls the cursor instead and streams window-local positions; the
+   * renderer's HoverMachine consumes them exactly like DOM mousemoves. The
+   * poll pauses while a window is interactive (real events flow there).
+   */
+  private cursorFeed: NodeJS.Timeout | null = null;
+  private lastCursorSent = '';
+
+  /**
+   * The store is injected by the composition root (index.ts constructs it
+   * before overlays.start() runs — boot-order invariant).
+   */
+  constructor(private readonly settings: SettingsStore) {}
 
   /** Create overlays for all current displays and start watching hotplug. */
   start(): void {
     if (this.started) return;
     this.started = true;
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- module-level singleton handle (see getOverlayManager)
     activeManager = this;
     this.registerHoverIpc();
     // Push a fresh hover config whenever settings change (hotkey label /
-    // buddyRest). getSettingsStore() is the M15 module-level handle —
-    // index.ts constructs the store before overlays.start() runs.
-    this.unsubscribeSettings = getSettingsStore()?.onChange(() => this.pushHoverConfig()) ?? null;
+    // buddyRest).
+    this.unsubscribeSettings = this.settings.onChange(() => this.pushHoverConfig());
     this.syncDisplays();
     // At boot the buddy rests on the rest display (did-finish-load sends it
     // 'idle'), so that window hosts the buddy for mouse forwarding.
@@ -97,25 +180,79 @@ export class OverlayManager {
     screen.on('display-added', () => this.syncDisplays());
     screen.on('display-removed', () => this.syncDisplays());
     screen.on('display-metrics-changed', () => this.syncDisplays());
+    // M20: see cursorFeed. 90ms comfortably resolves the 500ms dwell while
+    // costing one getCursorScreenPoint per tick; positions dedupe below.
+    this.cursorFeed = setInterval(() => this.pollCursorFeed(), 90);
+    this.cursorFeed.unref?.();
+  }
+
+  /** M20: stream the cursor to the buddy-hosting overlay (see cursorFeed). */
+  private pollCursorFeed(): void {
+    if (this.buddyHostIndex === null) return;
+    // While a window is interactive it receives REAL mouse events — the
+    // synthetic feed pauses so the two streams never interleave.
+    if (this.hover.displayId !== null) return;
+    const entry = [...this.overlays.values()].find(
+      (e) => e.screenIndex === this.buddyHostIndex && !e.win.isDestroyed(),
+    );
+    if (!entry) return;
+    const pt = screen.getCursorScreenPoint(); // global DIP
+    const b = entry.win.getBounds(); // DIP
+    const inside = pt.x >= b.x && pt.x < b.x + b.width && pt.y >= b.y && pt.y < b.y + b.height;
+    const payload = inside ? { x: pt.x - b.x, y: pt.y - b.y } : null;
+    const key = payload === null ? 'out' : `${payload.x},${payload.y}`;
+    if (key === this.lastCursorSent) return; // idle cursor costs nothing
+    this.lastCursorSent = key;
+    entry.win.webContents.send('overlay:cursor', payload);
   }
 
   /** Number of live overlay windows (debug /state). */
   count(): number {
-    return [...this.windows.values()].filter((w) => !w.isDestroyed()).length;
+    return [...this.overlays.values()].filter((e) => !e.win.isDestroyed()).length;
+  }
+
+  /**
+   * M20: the buddy's rest spot in GLOBAL DIP plus its display's work area —
+   * the whisper composer window anchors next to it. Mirrors the renderer's
+   * rest math (hover.ts defaultRest / fraction rest) closely enough for
+   * window placement; the caller clamps to the work area anyway. null before
+   * start() or when no overlay window is live.
+   */
+  restAnchor(): { x: number; y: number; workArea: Rectangle } | null {
+    const restIndex = this.restScreenIndex();
+    const entry = [...this.overlays.entries()].find(
+      ([, e]) => e.screenIndex === restIndex && !e.win.isDestroyed(),
+    );
+    if (!entry) return null;
+    const display = screen.getAllDisplays().find((d) => d.id === entry[0]);
+    if (!display) return null;
+    const { bounds, workArea } = display;
+    const rest = this.settings.get().buddyRest;
+    const frac = rest && rest.screenIndex === restIndex ? rest : null;
+    // Renderer default rest: bottom-right corner minus the hover margins.
+    const x = frac ? bounds.x + frac.xFrac * bounds.width : bounds.x + bounds.width - 76;
+    const y = frac ? bounds.y + frac.yFrac * bounds.height : bounds.y + bounds.height - 120;
+    return { x: Math.round(x), y: Math.round(y), workArea };
+  }
+
+  /**
+   * M15: the one entry point for assistant-state changes (production and
+   * debug both route through broadcast) — the dwell flip must be suppressed
+   * while the user is physically holding push-to-talk.
+   */
+  setAssistantState(state: AssistantState): void {
+    this.lastAssistantState = state;
+    if (this.pushToTalkHoldActive()) this.hover.restoreClickThrough();
+    this.sendToAll('overlay:assistant-state', state);
   }
 
   /** Send a typed event to every overlay window. */
   broadcast<C extends MainToOverlayChannel>(channel: C, payload: MainToOverlayEvents[C]): void {
-    // M15: every assistant-state change flows through here (production and
-    // debug), so snoop it — the dwell flip must be suppressed while the user
-    // is physically holding push-to-talk.
     if (channel === 'overlay:assistant-state') {
-      this.lastAssistantState = payload as unknown as AssistantState;
-      if (this.pushToTalkHoldActive()) this.restoreClickThrough();
+      this.setAssistantState(payload as unknown as AssistantState);
+      return;
     }
-    for (const win of this.windows.values()) {
-      if (!win.isDestroyed()) win.webContents.send(channel, payload);
-    }
+    this.sendToAll(channel, payload);
   }
 
   /** Send a typed event to the overlay covering one screenIndex. */
@@ -124,71 +261,76 @@ export class OverlayManager {
     channel: C,
     payload: MainToOverlayEvents[C],
   ): void {
-    for (const [displayId, index] of this.indexByDisplayId) {
-      if (index !== screenIndex) continue;
-      const win = this.windows.get(displayId);
-      if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+    for (const entry of this.overlays.values()) {
+      if (entry.screenIndex !== screenIndex) continue;
+      if (!entry.win.isDestroyed()) entry.win.webContents.send(channel, payload);
     }
   }
 
   /**
-   * Route a pointer command per the buddy residency rule:
-   * - 'animate' → addressed screenIndex gets the command, all others 'hide'
-   * - 'idle'    → rest display gets 'idle' (rest corner), others 'hide'
-   *               (M15: rest display = Settings.buddyRest, default primary)
-   * - 'hide'    → everyone hides
+   * Route a pointer command per the buddy residency rule (see the module
+   * header + pointer-routing.ts).
    */
   routePointer(cmd: PointerCommand): void {
-    if (cmd.type === 'animate') {
-      for (const [displayId, index] of this.indexByDisplayId) {
-        const win = this.windows.get(displayId);
-        if (!win || win.isDestroyed()) continue;
-        win.webContents.send(
-          'overlay:pointer',
-          index === cmd.screenIndex ? cmd : ({ type: 'hide' } satisfies PointerCommand),
-        );
-      }
-      this.buddyHostIndex = cmd.screenIndex;
-    } else if (cmd.type === 'idle') {
-      const restIndex = this.restScreenIndex();
-      for (const [displayId, index] of this.indexByDisplayId) {
-        const win = this.windows.get(displayId);
-        if (!win || win.isDestroyed()) continue;
-        win.webContents.send(
-          'overlay:pointer',
-          index === restIndex ? cmd : ({ type: 'hide' } satisfies PointerCommand),
-        );
-      }
-      this.buddyHostIndex = restIndex;
-    } else {
+    const routing = computePointerRouting(cmd, this.restScreenIndex());
+    if (routing.targetIndex === null) {
       this.broadcast('overlay:pointer', cmd);
-      this.buddyHostIndex = null;
+    } else {
+      for (const [, entry] of this.entriesByScreenIndex()) {
+        if (entry.win.isDestroyed()) continue;
+        entry.win.webContents.send(
+          'overlay:pointer',
+          entry.screenIndex === routing.targetIndex
+            ? cmd
+            : ({ type: 'hide' } satisfies PointerCommand),
+        );
+      }
     }
+    this.buddyHostIndex = routing.buddyHostIndex;
     // M15: a pointer command can move the buddy off the interactive window
     // (or into a flight) — hover must never fight the flight engine.
-    this.restoreClickThrough();
+    this.hover.restoreClickThrough();
     this.updateMouseForwarding();
   }
 
   destroy(): void {
     if (activeManager === this) activeManager = null;
     // M15: hover teardown.
-    this.stopInteractivePoll();
+    if (this.cursorFeed !== null) clearInterval(this.cursorFeed); // M20
+    this.cursorFeed = null;
+    this.hover.dispose();
     this.unsubscribeSettings?.();
     this.unsubscribeSettings = null;
     ipcMain.removeAllListeners('overlay:hover');
     ipcMain.removeAllListeners('overlay:buddy-click');
     ipcMain.removeAllListeners('overlay:buddy-move');
     ipcMain.removeHandler('overlay:get-hover-config');
-    for (const win of this.windows.values()) {
-      if (!win.isDestroyed()) win.destroy();
+    for (const entry of this.overlays.values()) {
+      if (!entry.win.isDestroyed()) entry.win.destroy();
     }
-    this.windows.clear();
-    this.indexByDisplayId.clear();
+    this.overlays.clear();
     this.hoverStatusByDisplay.clear();
   }
 
   // -------------------------------------------------------------------------
+
+  private sendToAll<C extends MainToOverlayChannel>(
+    channel: C,
+    payload: MainToOverlayEvents[C],
+  ): void {
+    for (const entry of this.overlays.values()) {
+      if (!entry.win.isDestroyed()) entry.win.webContents.send(channel, payload);
+    }
+  }
+
+  /**
+   * Entries in ascending screenIndex order — i.e. screen.getAllDisplays()
+   * order, matching the historical per-display iteration (the map itself
+   * keeps window CREATION order, which broadcast/debug output preserve).
+   */
+  private entriesByScreenIndex(): [number, OverlayEntry][] {
+    return [...this.overlays.entries()].sort((a, b) => a[1].screenIndex - b[1].screenIndex);
+  }
 
   /** Reconcile windows with the current display set. */
   private syncDisplays(): void {
@@ -196,24 +338,26 @@ export class OverlayManager {
     const liveIds = new Set(displays.map((d) => d.id));
 
     // Remove overlays for departed displays.
-    for (const [displayId, win] of this.windows) {
+    for (const [displayId, entry] of this.overlays) {
       if (!liveIds.has(displayId)) {
-        if (this.interactiveDisplayId === displayId) this.restoreClickThrough();
-        if (!win.isDestroyed()) win.destroy();
-        this.windows.delete(displayId);
+        if (this.hover.isInteractive(displayId)) this.hover.restoreClickThrough();
+        if (!entry.win.isDestroyed()) entry.win.destroy();
+        this.overlays.delete(displayId);
         this.hoverStatusByDisplay.delete(displayId);
       }
     }
 
     // Stable screenIndex assignment: order of screen.getAllDisplays().
-    this.indexByDisplayId.clear();
     displays.forEach((display, index) => {
-      this.indexByDisplayId.set(display.id, index);
-      const existing = this.windows.get(display.id);
-      if (existing && !existing.isDestroyed()) {
-        existing.setBounds(display.bounds);
+      const existing = this.overlays.get(display.id);
+      if (existing && !existing.win.isDestroyed()) {
+        existing.screenIndex = index;
+        existing.win.setBounds(display.bounds);
       } else {
-        this.windows.set(display.id, this.createWindow(display, index));
+        this.overlays.set(display.id, {
+          win: this.createWindow(display, index),
+          screenIndex: index,
+        });
       }
     });
     // M15: re-assert forwarding after hotplug (indices may have shifted).
@@ -222,7 +366,7 @@ export class OverlayManager {
 
   private createWindow(display: Display, screenIndex: number): BrowserWindow {
     const isPrimary = screen.getPrimaryDisplay().id === display.id;
-    const win = new BrowserWindow({
+    const win = createHardenedWindow({
       x: display.bounds.x,
       y: display.bounds.y,
       width: display.bounds.width,
@@ -239,17 +383,10 @@ export class OverlayManager {
       fullscreenable: false,
       skipTaskbar: true,
       show: false,
-      webPreferences: {
-        preload: join(__dirname, '../preload/overlay.js'),
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        // Keep animations running while the (never-focused) overlay is "unfocused".
-        backgroundThrottling: false,
-      },
+      // Keep animations running while the (never-focused) overlay is "unfocused".
+      webPreferences: hardenedWebPreferences('overlay.js'),
     });
 
-    lockdownNavigation(win);
     // Crash recovery: a dead overlay renderer = invisible buddy. Drop the dead
     // window and let syncDisplays build a fresh one (bounded by crashGuard).
     recoverOnRenderProcessGone(
@@ -258,7 +395,7 @@ export class OverlayManager {
       `overlay(display ${display.id})`,
       () => {
         if (!win.isDestroyed()) win.destroy();
-        if (this.windows.get(display.id) === win) this.windows.delete(display.id);
+        if (this.overlays.get(display.id)?.win === win) this.overlays.delete(display.id);
         this.syncDisplays();
       },
       // Guard gave up: still destroy the zombie window (renderer is gone, the
@@ -266,11 +403,14 @@ export class OverlayManager {
       // stays accurate. No syncDisplays here — that would recreate it.
       () => {
         if (!win.isDestroyed()) win.destroy();
-        if (this.windows.get(display.id) === win) this.windows.delete(display.id);
+        if (this.overlays.get(display.id)?.win === win) this.overlays.delete(display.id);
       },
     );
 
-    win.setAlwaysOnTop(true, 'screen-saver');
+    // `screen-saver` is above the Windows taskbar. Because this window spans
+    // the full display, using that band can make the shell treat it like a
+    // fullscreen app and let ordinary windows cover the taskbar.
+    win.setAlwaysOnTop(true, TASKBAR_SAFE_TOPMOST_LEVEL);
     // Click-through at the OS level. M15: forwarding is enabled ONLY on the
     // window currently showing the buddy (updateMouseForwarding) so its
     // renderer sees mousemove for hover awareness; other overlays skip
@@ -279,6 +419,9 @@ export class OverlayManager {
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     // Belt-and-braces: bounds again after frameless quirks on scaled displays.
     win.setBounds(display.bounds);
+    // Must settle before the first show: otherwise Explorer can classify this
+    // full-monitor transparent window as fullscreen and demote the taskbar.
+    const nonRudeReady = markNativeWindowNonRude(win.getNativeWindowHandle());
 
     // Known limitation: ?screenIndex/?primary are creation-time snapshots and
     // go stale if displays are re-ordered while the window lives. Harmless
@@ -288,24 +431,18 @@ export class OverlayManager {
     // channel (src/shared/ipc.ts is frozen), so it is documented instead.
     // CLICKY_BOB_IDLE_MS: test hook to shrink the renderer's idle bob-pause
     // timeout (default 5min) without a rebuild.
-    const bobIdleMs = Number(process.env['CLICKY_BOB_IDLE_MS']);
+    const bobIdleMs = bobIdleMsOverride();
     const query =
       `?screenIndex=${screenIndex}&primary=${isPrimary ? '1' : '0'}` +
-      (Number.isFinite(bobIdleMs) && bobIdleMs > 0 ? `&bobIdleMs=${bobIdleMs}` : '');
-    if (process.env['ELECTRON_RENDERER_URL']) {
-      void win.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/overlay/index.html${query}`);
-    } else {
-      void win.loadFile(join(__dirname, '../renderer/overlay/index.html'), {
-        search: query,
-      });
-    }
+      (bobIdleMs !== null ? `&bobIdleMs=${bobIdleMs}` : '');
+    loadRendererPage(win, 'overlay', query);
 
     // Authoritative initial residency (the ?primary flag is the renderer's
     // pre-subscription default; this message settles any race).
     // M15: rest display = Settings.buddyRest (default primary), and the
     // hover config (hotkey label + rest fraction) rides along.
     win.webContents.on('did-finish-load', () => {
-      const index = this.indexByDisplayId.get(display.id);
+      const index = this.overlays.get(display.id)?.screenIndex;
       const hostsRest = index !== undefined && index === this.restScreenIndex();
       win.webContents.send('overlay:pointer', {
         type: hostsRest ? 'idle' : 'hide',
@@ -316,7 +453,15 @@ export class OverlayManager {
       this.updateMouseForwarding();
     });
 
-    win.once('ready-to-show', () => win.showInactive());
+    win.once('ready-to-show', () => {
+      void nonRudeReady.then((marked) => {
+        if (win.isDestroyed()) return;
+        // If the native marker fails, protecting the user's taskbar wins over
+        // keeping the buddy above every application window.
+        if (!marked && process.platform === 'win32') win.setAlwaysOnTop(false);
+        win.showInactive();
+      });
+    });
     return win;
   }
 
@@ -326,20 +471,20 @@ export class OverlayManager {
 
   /** screenIndex hosting the buddy at rest: Settings.buddyRest or primary. */
   private restScreenIndex(): number {
-    const rest = getSettingsStore()?.get().buddyRest ?? null;
-    if (rest && [...this.indexByDisplayId.values()].includes(rest.screenIndex)) {
+    const rest = this.settings.get().buddyRest;
+    if (rest && [...this.overlays.values()].some((e) => e.screenIndex === rest.screenIndex)) {
       return rest.screenIndex;
     }
-    return this.indexByDisplayId.get(screen.getPrimaryDisplay().id) ?? 0;
+    return this.overlays.get(screen.getPrimaryDisplay().id)?.screenIndex ?? 0;
   }
 
   /** Hover config for one overlay (rest fraction only on the rest host). */
   private hoverConfigFor(screenIndex: number): OverlayHoverConfig {
-    const settings = getSettingsStore()?.get() ?? null;
-    const rest = settings?.buddyRest ?? null;
+    const settings = this.settings.get();
+    const rest = settings.buddyRest;
     return {
-      hotkeyLabel: settings?.hotkeyLabel ?? 'Ctrl+Alt (left alt)',
-      fullRealtimeMode: settings?.fullRealtimeMode ?? false,
+      hotkeyLabel: settings.hotkeyLabel,
+      fullRealtimeMode: settings.fullRealtimeMode,
       rest:
         rest && rest.screenIndex === screenIndex && screenIndex === this.restScreenIndex()
           ? { xFrac: rest.xFrac, yFrac: rest.yFrac }
@@ -349,10 +494,9 @@ export class OverlayManager {
 
   /** Push the hover config to every overlay (settings changed / drag moved). */
   private pushHoverConfig(): void {
-    for (const [displayId, index] of this.indexByDisplayId) {
-      const win = this.windows.get(displayId);
-      if (!win || win.isDestroyed()) continue;
-      win.webContents.send('overlay:hover-config', this.hoverConfigFor(index));
+    for (const [, entry] of this.entriesByScreenIndex()) {
+      if (entry.win.isDestroyed()) continue;
+      entry.win.webContents.send('overlay:hover-config', this.hoverConfigFor(entry.screenIndex));
     }
   }
 
@@ -363,15 +507,29 @@ export class OverlayManager {
    * events at all right now).
    */
   private updateMouseForwarding(): void {
-    for (const [displayId, index] of this.indexByDisplayId) {
-      const win = this.windows.get(displayId);
-      if (!win || win.isDestroyed()) continue;
-      if (displayId === this.interactiveDisplayId) continue;
-      if (index === this.buddyHostIndex) {
-        win.setIgnoreMouseEvents(true, { forward: true });
-      } else {
-        win.setIgnoreMouseEvents(true);
-      }
+    for (const [displayId, entry] of this.entriesByScreenIndex()) {
+      if (entry.win.isDestroyed()) continue;
+      this.applyMouseMode(entry, displayId, this.hover.displayId);
+    }
+  }
+
+  /** Apply the pure forwardingModeFor decision to one window. */
+  private applyMouseMode(
+    entry: OverlayEntry,
+    displayId: number,
+    interactiveDisplayId: number | null,
+  ): void {
+    const mode = forwardingModeFor({
+      displayId,
+      screenIndex: entry.screenIndex,
+      buddyHostIndex: this.buddyHostIndex,
+      interactiveDisplayId,
+    });
+    if (mode === 'interactive') return; // the HoverController owns this window
+    if (mode === 'forward') {
+      entry.win.setIgnoreMouseEvents(true, { forward: true });
+    } else {
+      entry.win.setIgnoreMouseEvents(true);
     }
   }
 
@@ -379,20 +537,22 @@ export class OverlayManager {
     ipcMain.on('overlay:hover', (event, evt: OverlayHoverEvent) => {
       this.onHoverEvent(event.sender, evt);
     });
-    ipcMain.on('overlay:buddy-click', () => togglePanel());
+    // M20: clicking the buddy summons the whisper composer (was: the panel —
+    // the panel is retiring to a settings surface; the tray still opens it).
+    ipcMain.on('overlay:buddy-click', () => toggleWhisper());
     ipcMain.on('overlay:buddy-move', (event, rest: { xFrac: number; yFrac: number }) => {
       this.onBuddyMove(event.sender, rest);
     });
     ipcMain.handle('overlay:get-hover-config', (event) => {
       const displayId = this.displayIdFor(event.sender);
-      const index = displayId === null ? undefined : this.indexByDisplayId.get(displayId);
+      const index = displayId === null ? undefined : this.overlays.get(displayId)?.screenIndex;
       return this.hoverConfigFor(index ?? 0);
     });
   }
 
   private displayIdFor(sender: WebContents): number | null {
-    for (const [displayId, win] of this.windows) {
-      if (!win.isDestroyed() && win.webContents.id === sender.id) return displayId;
+    for (const [displayId, entry] of this.overlays) {
+      if (!entry.win.isDestroyed() && entry.win.webContents.id === sender.id) return displayId;
     }
     return null;
   }
@@ -407,7 +567,7 @@ export class OverlayManager {
     if (evt.kind === 'exit') {
       // SAFETY-CRITICAL: restore click-through the instant the renderer
       // reports the cursor left the padded buddy region.
-      if (this.interactiveDisplayId === displayId) this.restoreClickThrough();
+      if (this.hover.isInteractive(displayId)) this.hover.restoreClickThrough();
       return;
     }
     if (evt.kind === 'dwell' && evt.region && isFiniteRect(evt.region)) {
@@ -415,8 +575,8 @@ export class OverlayManager {
       // push-to-talk, and never flip a
       // window that isn't hosting the buddy.
       if (this.pushToTalkHoldActive()) return;
-      if (this.indexByDisplayId.get(displayId) !== this.buddyHostIndex) return;
-      this.makeInteractive(displayId, evt.region);
+      if (this.overlays.get(displayId)?.screenIndex !== this.buddyHostIndex) return;
+      this.hover.makeInteractive(displayId, evt.region);
     }
   }
 
@@ -426,79 +586,18 @@ export class OverlayManager {
    * a hold proxy strands a resting Buddy with hover disabled indefinitely.
    */
   private pushToTalkHoldActive(): boolean {
-    return listeningBlocksHover(
-      this.lastAssistantState,
-      getSettingsStore()?.get().fullRealtimeMode ?? false,
-    );
-  }
-
-  /** Flip one overlay interactive; poll the cursor as a fallback exit path. */
-  private makeInteractive(displayId: number, region: Rect): void {
-    const win = this.windows.get(displayId);
-    if (!win || win.isDestroyed()) return;
-    this.interactiveRegion = region;
-    if (this.interactiveDisplayId === displayId) return; // region refresh only
-    if (this.interactiveDisplayId !== null) this.restoreClickThrough();
-    this.stopInteractivePoll(); // defensive: never two polls
-    this.interactiveDisplayId = displayId;
-    win.setIgnoreMouseEvents(false);
-    win.webContents.send('overlay:interactive', { interactive: true });
-    // Belt-and-braces: the renderer's mousemove/mouseleave exit events are
-    // the primary path; this poll force-restores click-through if they ever
-    // go missing (renderer hang, missed events at display edges).
-    this.interactivePoll = setInterval(() => {
-      const w = this.windows.get(displayId);
-      if (!w || w.isDestroyed() || this.interactiveRegion === null) {
-        this.restoreClickThrough();
-        return;
-      }
-      const cursor = screen.getCursorScreenPoint(); // global DIP
-      const bounds = w.getBounds(); // global DIP
-      const r = this.interactiveRegion; // window-local DIP
-      const inside =
-        cursor.x >= bounds.x + r.x &&
-        cursor.x <= bounds.x + r.x + r.width &&
-        cursor.y >= bounds.y + r.y &&
-        cursor.y <= bounds.y + r.y + r.height;
-      if (!inside) this.restoreClickThrough();
-    }, INTERACTIVE_POLL_MS);
-  }
-
-  /** Restore click-through on whatever window is interactive (idempotent). */
-  private restoreClickThrough(): void {
-    this.stopInteractivePoll();
-    if (this.interactiveDisplayId === null) return;
-    const displayId = this.interactiveDisplayId;
-    this.interactiveDisplayId = null;
-    this.interactiveRegion = null;
-    const win = this.windows.get(displayId);
-    if (win && !win.isDestroyed()) {
-      const hostsBuddy = this.indexByDisplayId.get(displayId) === this.buddyHostIndex;
-      if (hostsBuddy) {
-        win.setIgnoreMouseEvents(true, { forward: true });
-      } else {
-        win.setIgnoreMouseEvents(true);
-      }
-      win.webContents.send('overlay:interactive', { interactive: false });
-    }
-  }
-
-  private stopInteractivePoll(): void {
-    if (this.interactivePoll !== null) {
-      clearInterval(this.interactivePoll);
-      this.interactivePoll = null;
-    }
+    return listeningBlocksHover(this.lastAssistantState, this.settings.get().fullRealtimeMode);
   }
 
   /** Drag-reposition finished: persist the rest spot and re-push configs. */
   private onBuddyMove(sender: WebContents, rest: { xFrac: number; yFrac: number }): void {
     const displayId = this.displayIdFor(sender);
     if (displayId === null) return;
-    const screenIndex = this.indexByDisplayId.get(displayId);
+    const screenIndex = this.overlays.get(displayId)?.screenIndex;
     if (screenIndex === undefined) return;
     const clamp01 = (v: number): number =>
       typeof v === 'number' && Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 0;
-    getSettingsStore()?.set({
+    this.settings.set({
       buddyRest: { screenIndex, xFrac: clamp01(rest.xFrac), yFrac: clamp01(rest.yFrac) },
     });
     // settings.onChange -> pushHoverConfig handles the config broadcast; the
@@ -508,26 +607,31 @@ export class OverlayManager {
   }
 
   /** M15 debug/QA snapshot (GET /hover/state on the debug server). */
-  hoverDebugInfo(): unknown {
+  hoverDebugInfo(): OverlayHoverDebugInfo {
     const displays = screen.getAllDisplays();
     return {
       assistantState: this.lastAssistantState,
       buddyHostIndex: this.buddyHostIndex,
-      interactiveDisplayId: this.interactiveDisplayId,
-      interactiveRegion: this.interactiveRegion,
-      buddyRest: getSettingsStore()?.get().buddyRest ?? null,
+      interactiveDisplayId: this.hover.displayId,
+      interactiveRegion: this.hover.region,
+      buddyRest: this.settings.get().buddyRest,
       restScreenIndex: this.restScreenIndex(),
-      windows: [...this.windows.entries()].map(([displayId, win]) => {
+      windows: [...this.overlays.entries()].map(([displayId, entry]) => {
         const display = displays.find((d) => d.id === displayId);
-        const index = this.indexByDisplayId.get(displayId);
+        const mode = forwardingModeFor({
+          displayId,
+          screenIndex: entry.screenIndex,
+          buddyHostIndex: this.buddyHostIndex,
+          interactiveDisplayId: this.hover.displayId,
+        });
         return {
           displayId,
-          screenIndex: index,
-          bounds: win.isDestroyed() ? null : win.getBounds(),
+          screenIndex: entry.screenIndex,
+          bounds: entry.win.isDestroyed() ? null : entry.win.getBounds(),
           scaleFactor: display?.scaleFactor ?? null,
-          forwarding: index === this.buddyHostIndex && displayId !== this.interactiveDisplayId,
-          interactive: displayId === this.interactiveDisplayId,
-          rendererPid: win.isDestroyed() ? null : win.webContents.getOSProcessId(),
+          forwarding: mode === 'forward',
+          interactive: mode === 'interactive',
+          rendererPid: entry.win.isDestroyed() ? null : entry.win.webContents.getOSProcessId(),
           hover: this.hoverStatusByDisplay.get(displayId) ?? null,
         };
       }),
@@ -544,7 +648,7 @@ function isFiniteRect(r: Rect): boolean {
     Number.isFinite(r.height) &&
     r.width > 0 &&
     r.height > 0 &&
-    r.width <= 400 &&
-    r.height <= 400
+    r.width <= MAX_HOVER_REGION_DIP &&
+    r.height <= MAX_HOVER_REGION_DIP
   );
 }

@@ -14,7 +14,12 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CodexAuth, decodeAccessToken } from '../src/main/auth/codex-auth';
+import {
+  CodexAuth,
+  decodeAccessToken,
+  readCodexAuthFile,
+  refreshAccessToken,
+} from '../src/main/auth/codex-auth';
 import type { StoredCodexTokens } from '../src/main/auth/token-store';
 
 // ---------------------------------------------------------------------------
@@ -287,3 +292,103 @@ import { readFileSync } from 'node:fs';
 function readRaw(p: string): string {
   return readFileSync(p, 'utf8');
 }
+
+describe('readCodexAuthFile', () => {
+  let dir: string;
+  let path: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'codex-auth-file-'));
+    path = join(dir, 'auth.json');
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('narrows all three token fields in one pass', () => {
+    writeFileSync(
+      path,
+      JSON.stringify({
+        tokens: { access_token: 'a.b.c', refresh_token: 'r-1', account_id: 'acct' },
+      }),
+      'utf8',
+    );
+    expect(readCodexAuthFile(path)).toEqual({
+      accessToken: 'a.b.c',
+      refreshToken: 'r-1',
+      accountId: 'acct',
+    });
+  });
+
+  it('maps absent / empty / non-string fields to null', () => {
+    writeFileSync(
+      path,
+      JSON.stringify({ tokens: { access_token: '', refresh_token: 42 } }),
+      'utf8',
+    );
+    expect(readCodexAuthFile(path)).toEqual({
+      accessToken: null,
+      refreshToken: null,
+      accountId: null,
+    });
+  });
+
+  it('returns null for a missing file, malformed JSON, or no tokens object', () => {
+    expect(readCodexAuthFile(join(dir, 'nope.json'))).toBeNull();
+    writeFileSync(path, '{ not json', 'utf8');
+    expect(readCodexAuthFile(path)).toBeNull();
+    writeFileSync(path, JSON.stringify({ tokens: 'nope' }), 'utf8');
+    expect(readCodexAuthFile(path)).toBeNull();
+  });
+});
+
+describe('refreshAccessToken', () => {
+  const NEW_EXP_SEC = Math.floor(Date.now() / 1000) + 3600;
+
+  it('returns the decoded rotated tokens on success', async () => {
+    const access = jwt({ expSec: NEW_EXP_SEC, accountId: 'acct-r', planType: 'plus' });
+    const fetchImpl = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ access_token: access, refresh_token: 'refresh-rotated' }),
+    })) as unknown as typeof fetch;
+    await expect(
+      refreshAccessToken({ refreshToken: 'refresh-old', fetchImpl, timeoutMs: 1_000 }),
+    ).resolves.toEqual({
+      accessToken: access,
+      refreshToken: 'refresh-rotated',
+      accountId: 'acct-r',
+      planType: 'plus',
+      expiresAt: NEW_EXP_SEC * 1000,
+    });
+  });
+
+  it('keeps the input refresh token when the server does not rotate it', async () => {
+    const access = jwt({ expSec: NEW_EXP_SEC });
+    const fetchImpl = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ access_token: access }),
+    })) as unknown as typeof fetch;
+    const refreshed = await refreshAccessToken({
+      refreshToken: 'refresh-old',
+      fetchImpl,
+      timeoutMs: 1_000,
+    });
+    expect(refreshed?.refreshToken).toBe('refresh-old');
+  });
+
+  it('returns null on an HTTP rejection or an undecodable payload', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const reject = (async () => ({ ok: false, status: 401 })) as unknown as typeof fetch;
+    await expect(
+      refreshAccessToken({ refreshToken: 'r', fetchImpl: reject, timeoutMs: 1_000 }),
+    ).resolves.toBeNull();
+    const garbage = (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ access_token: 'not-a-jwt' }),
+    })) as unknown as typeof fetch;
+    await expect(
+      refreshAccessToken({ refreshToken: 'r', fetchImpl: garbage, timeoutMs: 1_000 }),
+    ).resolves.toBeNull();
+    warnSpy.mockRestore();
+  });
+});

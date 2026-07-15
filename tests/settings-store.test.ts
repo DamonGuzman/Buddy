@@ -253,6 +253,37 @@ describe('SettingsStore: corrupt settings.json (M11 settings_reset)', () => {
     expect(second.get().computerUseEnabled).toBe(true);
   });
 
+  it('heals invalid persisted preference values field-by-field (no reset)', () => {
+    const path = freshPath();
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: 3,
+        apiKeyEncrypted: null,
+        model: 'not-a-model',
+        voice: 42,
+        captionsEnabled: 'yes',
+        micDeviceId: 'mic-kept',
+        fullRealtimeMode: 1,
+        buddyRest: { screenIndex: -1, xFrac: 0.5, yFrac: 0.5 },
+        preferApiKeyGrounding: 'nope',
+        computerUseEnabled: [],
+      }),
+      'utf8',
+    );
+    const store = new SettingsStore(path);
+    expect(store.settingsWereReset()).toBe(false);
+    const s = store.get();
+    expect(s.model).toBe('gpt-realtime-2.1');
+    expect(s.voice).toBe('marin');
+    expect(s.captionsEnabled).toBe(true);
+    expect(s.micDeviceId).toBe('mic-kept'); // valid values survive healing
+    expect(s.fullRealtimeMode).toBe(false);
+    expect(s.buddyRest).toBeNull();
+    expect(s.preferApiKeyGrounding).toBe(false);
+    expect(s.computerUseEnabled).toBe(false);
+  });
+
   it('resets to defaults and reports settingsWereReset', () => {
     const path = freshPath();
     writeFileSync(path, '{"version":1, THIS IS NOT JSON', 'utf8');

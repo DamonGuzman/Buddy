@@ -13,15 +13,16 @@
  * 0-1000 output actively HURTS new-gen models), strict-JSON output.
  *
  * Contract with the conversation layer:
- * - `groundWithModel()` NEVER throws and never hangs past the timeout.
- * - It returns null on: no API key, mock mode (CLICKY_MOCK_URL — the mock
- *   server has no REST endpoint and unit tests must stay offline), timeout,
- *   HTTP error, unparsable output, coordinates outside the image bounds, or
- *   a second call while one is already in flight (one in-flight max; the
- *   conversation's pointerChain serializes callers anyway — this is a guard).
+ * - `ground()` NEVER throws and never hangs past the timeout.
+ * - Its `point` is null on: no usable auth, mock mode (CLICKY_MOCK_URL — the
+ *   mock server has no REST endpoint and unit tests must stay offline),
+ *   timeout, HTTP error, unparsable output, coordinates outside the image
+ *   bounds, or a second call while one is already in flight (one in-flight
+ *   max; the conversation's pointerChain serializes callers anyway — this is
+ *   a guard).
  * - The API key comes from the same source as the realtime session
- *   (settings, decrypted in main) via the `getApiKey` callback and is used
- *   ONLY in the Authorization header — never logged, never in errors.
+ *   (settings, decrypted in main) via the resolved `apiKey` AuthSource and is
+ *   used ONLY in the Authorization header — never logged, never in errors.
  *
  * M13-core addition: a SECOND transport for the ChatGPT-subscription path.
  * When the resolved AuthSource is `chatgptCodex`, `ground()` hits
@@ -29,10 +30,25 @@
  * pixel-exact, ~1.4s, cheapest — and free under the user's plan) using the
  * proven Codex request shape (message-list input, streamed SSE, prompt-enforced
  * JSON, NO request-level text.format). Same never-throw/return-null contract.
- * Selection is by AuthSource kind; the api-key transport is unchanged.
+ * Selection is by AuthSource kind; the api-key transport is unchanged. The
+ * shared Codex wire mechanics (URL, impersonation headers, quota-status
+ * classification, used-percent telemetry, SSE parsing) live in
+ * `../codex/transport`.
  */
 
 import type { AuthSource } from '../auth/auth-source';
+import type { CodexUsedPercent } from '../../shared/types';
+import type { UserContentPart } from '../codex/wire-types';
+import {
+  CODEX_RESPONSES_URL,
+  buildCodexHeaders,
+  forEachSseEvent,
+  isQuotaErrorEvent,
+  isQuotaStatus,
+  parseUsedPercent,
+} from '../codex/transport';
+
+export type { CodexUsedPercent };
 
 export interface RestGroundQuery {
   /** JPEG bytes, base64 (NOT a data URL) — the same capture the model saw. */
@@ -54,7 +70,11 @@ export interface RestGroundResult {
 }
 
 export interface RestGrounderOptions {
-  /** Same key source as the realtime session (settings, decrypted in main). */
+  /**
+   * Same key source as the realtime session (settings, decrypted in main).
+   * The key used per call comes from the resolved `apiKey` AuthSource handed
+   * to `ground()`; this option is retained at the construction seam.
+   */
   getApiKey: () => string | null;
   /** Injection point for tests. Default: global fetch. */
   fetchImpl?: typeof fetch;
@@ -78,33 +98,21 @@ const MAX_OUTPUT_TOKENS = 1_500;
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 
 // --- Codex-subscription transport (COORD-STUDY §11) ------------------------
-const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses';
 /** COORD-STUDY §11 winner: pixel-exact, cheapest, free under the ChatGPT plan. */
 const CODEX_MODEL = 'gpt-5.6-sol';
 /**
- * The exact originator/UA the Codex CLI uses — the backend gates on these.
- * Version-pinned to the shape proven live; NOT a secret.
+ * Codex grounding always runs at effort 'low' — the §11 protocol proven live.
+ * KNOWN DISCREPANCY, kept deliberately: `options.reasoningEffort`
+ * (`this.effort`) tunes only the api-key transport and does NOT reach the
+ * Codex arm; changing that would change the proven wire shape.
  */
-const CODEX_ORIGINATOR = 'codex_cli_rs';
-const CODEX_USER_AGENT = 'codex_cli_rs/0.48.0 (Windows 11; x86_64) unknown';
+const CODEX_GROUNDING_EFFORT = 'low';
 
 /** Token usage from a grounding response (subset we surface). */
 export interface GroundUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
-}
-
-/**
- * ChatGPT-plan rate-limit telemetry, parsed from the `x-codex-*-used-percent`
- * response headers. Fed to the (deferred) fail-closed "plan limit reached" UX.
- * A field is null when its header was absent/unparsable.
- */
-export interface CodexUsedPercent {
-  /** Primary (short) window used %, 0..100. */
-  primary: number | null;
-  /** Secondary (long / weekly) window used %, 0..100. */
-  secondary: number | null;
 }
 
 export type GroundSource = 'apiKey' | 'codex' | 'none';
@@ -151,40 +159,6 @@ export class RestGrounder {
   }
 
   /**
-   * Ground `label` in the provided screenshot. Resolves to pixel coordinates
-   * in the image's own space, or null on any failure (see class contract).
-   */
-  async groundWithModel(query: RestGroundQuery): Promise<RestGroundResult | null> {
-    const env = this.options.env ?? process.env;
-    // Mock mode: the realtime session talks to the in-process mock server;
-    // there is no REST endpoint to call and tests must never hit the network.
-    if (env['CLICKY_MOCK_URL'] !== undefined && env['CLICKY_MOCK_URL'] !== '') return null;
-    const key = this.options.getApiKey();
-    if (key === null || key.length === 0) return null;
-    if (this.inFlight) {
-      console.debug('[rest-ground] call skipped: one already in flight');
-      return null;
-    }
-    this.inFlight = true;
-    const t0 = Date.now();
-    try {
-      const result = await this.request(query, key);
-      console.debug(
-        `[rest-ground] ${this.model} ${Date.now() - t0}ms -> ` +
-          (result === null ? 'null' : `(${result.x},${result.y})`),
-      );
-      return result;
-    } catch (err) {
-      // Timeouts land here (AbortError), as do network failures.
-      const reason = err instanceof Error ? err.message : String(err);
-      console.debug(`[rest-ground] failed after ${Date.now() - t0}ms: ${reason}`);
-      return null;
-    } finally {
-      this.inFlight = false;
-    }
-  }
-
-  /**
    * Transport-selecting entry point (M13-core). Grounds `query` via whichever
    * backend the resolved AuthSource names:
    *   - `chatgptCodex` -> gpt-5.6-sol over chatgpt.com/backend-api/codex (SSE),
@@ -197,33 +171,22 @@ export class RestGrounder {
     const env = this.options.env ?? process.env;
     // Mock mode: no REST endpoint; tests + `npm run dev` mock never hit the net.
     if (env['CLICKY_MOCK_URL'] !== undefined && env['CLICKY_MOCK_URL'] !== '') {
-      return { point: null, source: 'none', quotaExhausted: false, usedPercent: null };
+      return nullOutcome('none');
     }
     if (this.inFlight) {
       console.debug('[rest-ground] call skipped: one already in flight');
-      return { point: null, source: 'none', quotaExhausted: false, usedPercent: null };
+      return nullOutcome('none');
     }
 
     if (auth.kind === 'apiKey') {
       const key = auth.getApiKey();
-      if (key === null || key.length === 0) {
-        return { point: null, source: 'apiKey', quotaExhausted: false, usedPercent: null };
-      }
-      this.inFlight = true;
-      const t0 = Date.now();
-      try {
-        const point = await this.request(query, key);
-        console.debug(
-          `[rest-ground] apiKey ${this.model} ${Date.now() - t0}ms -> ` +
-            (point === null ? 'null' : `(${point.x},${point.y})`),
-        );
-        return { point, source: 'apiKey', quotaExhausted: false, usedPercent: null };
-      } catch (err) {
-        console.debug(`[rest-ground] apiKey failed after ${Date.now() - t0}ms: ${reason(err)}`);
-        return { point: null, source: 'apiKey', quotaExhausted: false, usedPercent: null };
-      } finally {
-        this.inFlight = false;
-      }
+      if (key === null || key.length === 0) return nullOutcome('apiKey');
+      return this.runExclusive('apiKey', this.model, async () => ({
+        point: await this.requestApiKey(query, key),
+        source: 'apiKey',
+        quotaExhausted: false,
+        usedPercent: null,
+      }));
     }
 
     // chatgptCodex arm.
@@ -232,31 +195,57 @@ export class RestGrounder {
       bearer = await auth.getBearer();
     } catch {
       // Not signed in / refresh failed — Codex path unavailable, no quota hit.
-      return { point: null, source: 'codex', quotaExhausted: false, usedPercent: null };
+      return nullOutcome('codex');
     }
-    if (bearer.length === 0) {
-      return { point: null, source: 'codex', quotaExhausted: false, usedPercent: null };
-    }
+    if (bearer.length === 0) return nullOutcome('codex');
+    return this.runExclusive('codex', this.codexModel, () =>
+      this.requestCodex(query, bearer, auth.accountId),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+
+  /**
+   * The inFlight/t0/debug-log/finally idiom shared by both transport arms:
+   * marks the grounder busy for the duration of `run`, logs the outcome (or
+   * the failure reason — timeouts land here as AbortError, as do network
+   * failures) with per-arm tag + model, and NEVER lets `run` throw out.
+   */
+  private async runExclusive(
+    tag: 'apiKey' | 'codex',
+    model: string,
+    run: () => Promise<GroundOutcome>,
+  ): Promise<GroundOutcome> {
     this.inFlight = true;
     const t0 = Date.now();
     try {
-      const outcome = await this.requestCodex(query, bearer, auth.accountId);
+      const outcome = await run();
       console.debug(
-        `[rest-ground] codex ${this.codexModel} ${Date.now() - t0}ms -> ` +
-          (outcome.point === null
-            ? `null${outcome.quotaExhausted ? ' (quota)' : ''}`
-            : `(${outcome.point.x},${outcome.point.y})`),
+        `[rest-ground] ${tag} ${model} ${Date.now() - t0}ms -> ${describeOutcome(outcome)}`,
       );
       return outcome;
     } catch (err) {
-      console.debug(`[rest-ground] codex failed after ${Date.now() - t0}ms: ${reason(err)}`);
-      return { point: null, source: 'codex', quotaExhausted: false, usedPercent: null };
+      console.debug(`[rest-ground] ${tag} failed after ${Date.now() - t0}ms: ${reason(err)}`);
+      return nullOutcome(tag);
     } finally {
       this.inFlight = false;
     }
   }
 
-  // -------------------------------------------------------------------------
+  /**
+   * Run `fn` with an abort signal that fires after the per-call budget. The
+   * timer deliberately covers the WHOLE exchange — fetch AND body read — so a
+   * response that streams slower than the budget still aborts.
+   */
+  private async withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      return await fn(controller.signal);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   /**
    * Codex-subscription transport. Streams gpt-5.6-sol over
@@ -272,66 +261,33 @@ export class RestGrounder {
     bearer: string,
     accountId: string,
   ): Promise<GroundOutcome> {
-    const { jpegBase64, imageW, imageH, label, spokenContext } = query;
     const doFetch = this.options.fetchImpl ?? fetch;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    try {
-      // Prompt-enforced strict JSON (no request-level text.format on this
-      // endpoint). Same COORD-STUDY §8 posture: bare image, PIXEL coords.
-      const instructions =
-        'You are a precise UI grounding model. The user names an on-screen target in the ' +
-        `attached screenshot (${imageW}x${imageH} pixels, origin top-left). Respond with ONLY ` +
-        'a JSON object {"x": <int>, "y": <int>} — no prose, no code fence — giving the pixel ' +
-        'coordinates of the CENTER of the target.';
-      const ask =
-        `return the pixel coordinates of the center of: ${label}. ` +
-        `the screenshot is ${imageW}x${imageH} pixels. ` +
-        'reply with only {"x": <int>, "y": <int>}.' +
-        (spokenContext !== undefined && spokenContext.length > 0
-          ? ` context: ${spokenContext}`
-          : '');
+    const { instructions, ask } = buildGroundingPrompt(query, 'codex');
+    return this.withTimeout(async (signal) => {
       const res = await doFetch(CODEX_RESPONSES_URL, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${bearer}`,
-          'ChatGPT-Account-Id': accountId,
-          Accept: 'text/event-stream',
-          'OpenAI-Beta': 'responses=experimental',
-          originator: CODEX_ORIGINATOR,
-          'User-Agent': CODEX_USER_AGENT,
-          'Content-Type': 'application/json',
-        },
-        signal: controller.signal,
+        headers: buildCodexHeaders(bearer, accountId),
+        signal,
         body: JSON.stringify({
           model: this.codexModel,
           instructions,
-          input: [
-            {
-              type: 'message',
-              role: 'user',
-              content: [
-                { type: 'input_text', text: ask },
-                { type: 'input_image', image_url: `data:image/jpeg;base64,${jpegBase64}` },
-              ],
-            },
-          ],
+          input: [{ type: 'message', role: 'user', content: groundingContent(ask, query) }],
           stream: true,
           store: false,
-          reasoning: { effort: 'low' },
+          reasoning: { effort: CODEX_GROUNDING_EFFORT },
         }),
       });
 
       const usedPercent = parseUsedPercent(res.headers);
       if (!res.ok) {
         // 429 (and 403/402 usage rejections) = plan quota — fail closed.
-        const quota = res.status === 429 || res.status === 402 || res.status === 403;
+        const quota = isQuotaStatus(res.status);
         console.debug(`[rest-ground] codex http ${res.status}${quota ? ' (quota)' : ''}`);
         return { point: null, source: 'codex', quotaExhausted: quota, usedPercent };
       }
 
       const body = await res.text();
-      const parsed = parseCodexStream(body, imageW, imageH);
+      const parsed = parseCodexStream(body, query.imageW, query.imageH);
       return {
         point: parsed.point,
         source: 'codex',
@@ -339,49 +295,29 @@ export class RestGrounder {
         usedPercent,
         ...(parsed.usage !== null ? { usage: parsed.usage } : {}),
       };
-    } finally {
-      clearTimeout(timer);
-    }
+    });
   }
 
-  // -------------------------------------------------------------------------
-
-  private async request(query: RestGroundQuery, key: string): Promise<RestGroundResult | null> {
-    const { jpegBase64, imageW, imageH, label, spokenContext } = query;
+  /**
+   * Metered-key transport. COORD-STUDY §8 winning protocol: bare image, terse
+   * instruction, PIXEL coordinates of the provided image, strict JSON out.
+   */
+  private async requestApiKey(
+    query: RestGroundQuery,
+    key: string,
+  ): Promise<RestGroundResult | null> {
     const doFetch = this.options.fetchImpl ?? fetch;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    try {
-      // COORD-STUDY §8 winning protocol: bare image, terse instruction,
-      // PIXEL coordinates of the provided image, strict JSON out.
-      const instructions =
-        'You are a precise UI grounding model. The user names an on-screen target in the ' +
-        `attached screenshot (${imageW}x${imageH} pixels, origin top-left). Respond with ONLY ` +
-        'a JSON object {"x": <int>, "y": <int>} giving the pixel coordinates of the CENTER ' +
-        'of the target.';
-      const ask =
-        `return the pixel coordinates of the center of: ${label}. ` +
-        `the screenshot is ${imageW}x${imageH} pixels.` +
-        (spokenContext !== undefined && spokenContext.length > 0
-          ? ` context: ${spokenContext}`
-          : '');
+    const { instructions, ask } = buildGroundingPrompt(query, 'apiKey');
+    return this.withTimeout(async (signal) => {
       const res = await doFetch(RESPONSES_URL, {
         method: 'POST',
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        signal: controller.signal,
+        signal,
         body: JSON.stringify({
           model: this.model,
           reasoning: { effort: this.effort },
           instructions,
-          input: [
-            {
-              role: 'user',
-              content: [
-                { type: 'input_text', text: ask },
-                { type: 'input_image', image_url: `data:image/jpeg;base64,${jpegBase64}` },
-              ],
-            },
-          ],
+          input: [{ role: 'user', content: groundingContent(ask, query) }],
           text: {
             format: {
               type: 'json_schema',
@@ -398,11 +334,83 @@ export class RestGrounder {
         return null;
       }
       const payload: unknown = await res.json();
-      return parseGroundingResponse(payload, imageW, imageH);
-    } finally {
-      clearTimeout(timer);
-    }
+      return parseGroundingResponse(payload, query.imageW, query.imageH);
+    });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Prompt + request-shape helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * The grounding prompt, per transport. The two variants are deliberately NOT
+ * identical — each is the wording proven live for its backend (COORD-STUDY §8
+ * vs §11) and is pinned byte-for-byte by tests:
+ *  - `codex` adds "— no prose, no code fence —" to the instructions and a
+ *    "reply with only {…}." reminder to the ask, because that endpoint has no
+ *    request-level `text.format` (JSON is prompt-enforced),
+ *  - `apiKey` relies on the strict `json_schema` response format instead.
+ */
+function buildGroundingPrompt(
+  query: RestGroundQuery,
+  variant: 'apiKey' | 'codex',
+): { instructions: string; ask: string } {
+  const { imageW, imageH, label, spokenContext } = query;
+  const instructions =
+    'You are a precise UI grounding model. The user names an on-screen target in the ' +
+    `attached screenshot (${imageW}x${imageH} pixels, origin top-left). Respond with ONLY ` +
+    'a JSON object {"x": <int>, "y": <int>}' +
+    (variant === 'codex' ? ' — no prose, no code fence —' : '') +
+    ' giving the pixel coordinates of the CENTER of the target.';
+  const ask =
+    `return the pixel coordinates of the center of: ${label}. ` +
+    `the screenshot is ${imageW}x${imageH} pixels.` +
+    (variant === 'codex' ? ' reply with only {"x": <int>, "y": <int>}.' : '') +
+    (spokenContext !== undefined && spokenContext.length > 0 ? ` context: ${spokenContext}` : '');
+  return { instructions, ask };
+}
+
+/** The user-message content both transports send: the ask + the bare image. */
+function groundingContent(ask: string, query: RestGroundQuery): UserContentPart[] {
+  return [
+    { type: 'input_text', text: ask },
+    { type: 'input_image', image_url: `data:image/jpeg;base64,${query.jpegBase64}` },
+  ];
+}
+
+/** A failure outcome for the given source (point null, no quota signal). */
+function nullOutcome(source: GroundSource): GroundOutcome {
+  return { point: null, source, quotaExhausted: false, usedPercent: null };
+}
+
+/** Debug-log formatting of an outcome (point, or null with a quota marker). */
+function describeOutcome(outcome: GroundOutcome): string {
+  return outcome.point === null
+    ? `null${outcome.quotaExhausted ? ' (quota)' : ''}`
+    : `(${outcome.point.x},${outcome.point.y})`;
+}
+
+// ---------------------------------------------------------------------------
+// Pure parsers (exported for tests)
+// ---------------------------------------------------------------------------
+
+/**
+ * Shared coordinate gate: 'invalid' when x/y are not finite numbers, 'oob'
+ * when the point lies outside the image (= the model grounded something that
+ * is not in this image), else the point. The two outcomes stay distinct
+ * because `parseTolerantPoint` treats them differently (see there).
+ */
+function validatePoint(
+  x: unknown,
+  y: unknown,
+  imageW: number,
+  imageH: number,
+): RestGroundResult | 'invalid' | 'oob' {
+  if (typeof x !== 'number' || typeof y !== 'number') return 'invalid';
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return 'invalid';
+  if (x < 0 || y < 0 || x > imageW || y > imageH) return 'oob';
+  return { x, y };
 }
 
 /**
@@ -420,16 +428,7 @@ export function parseGroundingResponse(
   // output items for the message's output_text parts (reasoning items first).
   let text = typeof body['output_text'] === 'string' ? (body['output_text'] as string) : '';
   if (text.length === 0 && Array.isArray(body['output'])) {
-    for (const item of body['output'] as unknown[]) {
-      if (item === null || typeof item !== 'object') continue;
-      const it = item as Record<string, unknown>;
-      if (it['type'] !== 'message' || !Array.isArray(it['content'])) continue;
-      for (const part of it['content'] as unknown[]) {
-        if (part === null || typeof part !== 'object') continue;
-        const p = part as Record<string, unknown>;
-        if (p['type'] === 'output_text' && typeof p['text'] === 'string') text += p['text'];
-      }
-    }
+    text = extractMessageText(body['output']);
   }
   if (text.length === 0) return null;
   let parsed: unknown;
@@ -440,36 +439,13 @@ export function parseGroundingResponse(
   }
   if (parsed === null || typeof parsed !== 'object') return null;
   const pt = parsed as Record<string, unknown>;
-  const x = pt['x'];
-  const y = pt['y'];
-  if (typeof x !== 'number' || typeof y !== 'number') return null;
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  // Out-of-bounds = the model grounded something that is not in this image.
-  if (x < 0 || y < 0 || x > imageW || y > imageH) return null;
-  return { x, y };
+  const point = validatePoint(pt['x'], pt['y'], imageW, imageH);
+  return typeof point === 'string' ? null : point;
 }
 
 /** Short, token-free reason string for a caught error (never a message body). */
 function reason(err: unknown): string {
   return err instanceof Error ? err.name : String(err);
-}
-
-/**
- * Parse the ChatGPT-plan rate-limit headers into used-% telemetry. Header
- * names are lowercased by fetch; a missing/unparsable value yields null for
- * that field. Exported for tests.
- */
-export function parseUsedPercent(headers: Headers): CodexUsedPercent {
-  const num = (name: string): number | null => {
-    const raw = headers.get(name);
-    if (raw === null) return null;
-    const n = Number.parseFloat(raw);
-    return Number.isFinite(n) ? n : null;
-  };
-  return {
-    primary: num('x-codex-primary-used-percent'),
-    secondary: num('x-codex-secondary-used-percent'),
-  };
 }
 
 /** Result of walking a Codex SSE grounding stream. */
@@ -492,20 +468,7 @@ export function parseCodexStream(body: string, imageW: number, imageH: number): 
   let usage: GroundUsage | null = null;
   let quotaExhausted = false;
 
-  // SSE events are blank-line separated; we only care about `data:` payloads.
-  for (const line of body.split(/\r?\n/)) {
-    const trimmed = line.trimStart();
-    if (!trimmed.startsWith('data:')) continue;
-    const data = trimmed.slice('data:'.length).trim();
-    if (data.length === 0 || data === '[DONE]') continue;
-    let evt: Record<string, unknown>;
-    try {
-      const parsed: unknown = JSON.parse(data);
-      if (parsed === null || typeof parsed !== 'object') continue;
-      evt = parsed as Record<string, unknown>;
-    } catch {
-      continue;
-    }
+  forEachSseEvent(body, (evt) => {
     const type = typeof evt['type'] === 'string' ? (evt['type'] as string) : '';
     switch (type) {
       case 'response.output_text.delta': {
@@ -528,13 +491,13 @@ export function parseCodexStream(body: string, imageW: number, imageH: number): 
       }
       case 'response.failed':
       case 'error': {
-        if (isQuotaError(evt)) quotaExhausted = true;
+        if (isQuotaErrorEvent(evt)) quotaExhausted = true;
         break;
       }
       default:
         break;
     }
-  }
+  });
 
   const text = finalText.length > 0 ? finalText : deltaText;
   const point = text.length > 0 ? parseTolerantPoint(text, imageW, imageH) : null;
@@ -569,25 +532,13 @@ function extractUsage(usage: unknown): GroundUsage | null {
   };
 }
 
-/** True when a streamed error event is a plan usage / rate-limit rejection. */
-function isQuotaError(evt: Record<string, unknown>): boolean {
-  const err = evt['error'];
-  const rec = err !== null && typeof err === 'object' ? (err as Record<string, unknown>) : evt;
-  const hay = [
-    typeof rec['code'] === 'string' ? rec['code'] : '',
-    typeof rec['type'] === 'string' ? rec['type'] : '',
-    typeof rec['message'] === 'string' ? rec['message'] : '',
-  ]
-    .join(' ')
-    .toLowerCase();
-  return /quota|rate.?limit|usage.?limit|too many requests|insufficient/.test(hay);
-}
-
 /**
  * Tolerant {x,y} extraction from prompt-enforced JSON output. Strips code
  * fences, then tries a whole-string parse, then the first balanced object
- * containing numeric x/y. Returns null on no match or out-of-bounds coords.
- * Exported for tests.
+ * containing numeric x/y. An 'invalid' candidate (wrong types) moves on to
+ * the next candidate; an out-of-bounds candidate is TERMINAL — the model
+ * answered confidently but off-image, so no nested block gets cherry-picked.
+ * Returns null on no match or out-of-bounds coords. Exported for tests.
  */
 export function parseTolerantPoint(
   text: string,
@@ -609,12 +560,10 @@ export function parseTolerantPoint(
     }
     if (parsed === null || typeof parsed !== 'object') continue;
     const pt = parsed as Record<string, unknown>;
-    const x = pt['x'];
-    const y = pt['y'];
-    if (typeof x !== 'number' || typeof y !== 'number') continue;
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    if (x < 0 || y < 0 || x > imageW || y > imageH) return null;
-    return { x, y };
+    const point = validatePoint(pt['x'], pt['y'], imageW, imageH);
+    if (point === 'invalid') continue;
+    if (point === 'oob') return null;
+    return point;
   }
   return null;
 }

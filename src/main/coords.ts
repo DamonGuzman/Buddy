@@ -35,7 +35,7 @@ export interface ScreenMappedPoint {
   overlayLocal: Point;
 }
 
-/** Compat shape used by the M1 pointer plumbing. */
+/** Mapped-point shape consumed by the pointer plumbing (conversation.ts). */
 export interface MappedPoint {
   /** Overlay-window-local DIP (what the overlay renderer animates to). */
   local: Point;
@@ -70,16 +70,6 @@ function assertValidMeta(meta: CaptureMeta): void {
   if (!(meta.scaleFactor > 0)) {
     throw new Error(`invalid capture meta: scaleFactor ${meta.scaleFactor}`);
   }
-}
-
-/**
- * The width-axis resize ratio applied when the screenshot was produced (<= 1).
- * Kept for compatibility; mapping itself uses per-axis ratios.
- */
-export function resizeRatio(meta: CaptureMeta): number {
-  const { width } = physicalSize(meta);
-  if (width <= 0) throw new Error(`invalid capture meta: physical width ${width}`);
-  return meta.imageW / width;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,37 +154,4 @@ export function mapModelPoint(
     ...(point.label !== undefined ? { label: point.label } : {}),
     adjusted,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Compat surface (M1 shape, used by pointer plumbing)
-// ---------------------------------------------------------------------------
-
-/** Map one point from screenshot px space to overlay-local + global DIP. */
-export function mapScreenshotPoint(point: PointerPoint, meta: CaptureMeta): MappedPoint {
-  const mapped = mapPointToScreen(point, meta);
-  return {
-    local: mapped.overlayLocal,
-    global: mapped.globalDip,
-    ...(point.label !== undefined ? { label: point.label } : {}),
-  };
-}
-
-/**
- * Map a whole point_at payload against the capture batch it referenced.
- * Model coords are validated/clamped (never trust tool args).
- */
-export function mapPoints(
-  points: PointerPoint[],
-  screenIndex: number,
-  captures: CaptureMeta[],
-): MappedPoint[] {
-  const meta = captures.find((c) => c.screenIndex === screenIndex);
-  if (!meta) {
-    throw new Error(`point_at referenced unknown screenIndex ${screenIndex}`);
-  }
-  return points.map((p) => {
-    const { adjusted: _adjusted, ...mapped } = mapModelPoint(p, meta);
-    return mapped;
-  });
 }

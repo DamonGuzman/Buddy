@@ -20,8 +20,8 @@ import {
   RestGrounder,
   parseCodexStream,
   parseTolerantPoint,
-  parseUsedPercent,
 } from '../src/main/grounding/rest-grounder';
+import { parseUsedPercent } from '../src/main/codex/transport';
 import type { RestGrounderOptions } from '../src/main/grounding/rest-grounder';
 import type { AuthSource } from '../src/main/auth/auth-source';
 

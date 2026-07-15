@@ -27,7 +27,11 @@ function makeRecorder(): SessionRecorder {
 describe('SessionRecorder', () => {
   it('keeps a crash-readable journal and atomically closes the manifest', () => {
     const recorder = makeRecorder();
-    recorder.record('custom', {
+    // The journal accepts any event name at runtime (fail-soft, forward
+    // compatible); widen past the compile-time SessionEventMap to exercise
+    // sequencing + redaction with a synthetic event.
+    const recordRaw = recorder.record.bind(recorder) as (type: string, payload: unknown) => void;
+    recordRaw('custom', {
       inputTokens: 42,
       authorization: 'Bearer super-secret',
       nested: { password: 'hunter2', text: 'key sk-abcdefgh123456' },

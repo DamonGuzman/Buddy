@@ -1,7 +1,9 @@
 /**
- * GroundingService (M9): owns the persistent PowerShell "snapper" daemon
- * (snapper.ps1, embedded at build time) that enumerates UIA elements near a
- * point, and does the label->element SELECTION in TS (scoring.ts, pure).
+ * GroundingService (M9): the policy half of the grounding stack. It owns the
+ * per-snap budget bookkeeping and the two-radius retry, materializes the
+ * embedded PowerShell daemon script (snapper.ps1, bundled at build time), and
+ * does the label->element SELECTION in TS (scoring.ts, pure). The child
+ * process / JSON-lines transport lives in daemon-client.ts.
  *
  * Contract with the conversation layer:
  * - `snap()` takes the model's point in GLOBAL PHYSICAL px + its spoken
@@ -15,21 +17,26 @@
  *   the point clears the text threshold, budget permitting.
  */
 
-import { spawn } from 'node:child_process';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import snapperScript from './snapper.ps1?raw';
+import { JsonLinesDaemonClient, normalizeCandidates } from './daemon-client';
+import type { DaemonRequester, DaemonSpawnSpec } from './daemon-client';
 import { selectCandidate, textSimilarity } from './scoring';
-import type { SnapCandidate } from './scoring';
 
 /** Overall answer budget per snap (raw-point fallback afterwards). */
 const TIMEBOX_MS = 600;
 /** Initial + retry search radii, physical px. */
 const RADIUS_PX = 350;
 const RETRY_RADIUS_PX = 700;
-/** Consecutive request timeouts before the daemon is presumed wedged. */
-const MAX_CONSECUTIVE_TIMEOUTS = 2;
+/** Below this remaining budget another daemon round-trip isn't worth it. */
+const MIN_ATTEMPT_BUDGET_MS = 120;
+/** The daemon's own per-query budget: clamped, minus a transport reserve. */
+const DAEMON_BUDGET_MIN_MS = 100;
+const DAEMON_BUDGET_MAX_MS = 450;
+const DAEMON_TRANSPORT_RESERVE_MS = 60;
+/** UIA DFS node cap per query (rect-pruned walk; see snapper.ps1). */
+const DAEMON_MAX_NODES = 3000;
 
 export interface GroundingOptions {
   /** Directory the snapper script is materialized into (userData). */
@@ -77,66 +84,23 @@ export interface SnapOutcome {
   debug?: SnapDebugCandidate[];
 }
 
-interface DaemonResponse {
-  id: number;
-  elapsedMs?: number;
-  from?: string | null;
-  visited?: number;
-  error?: string;
-  candidates?: unknown;
-}
-
-interface Pending {
-  resolve: (resp: DaemonResponse | null) => void;
-  timer: NodeJS.Timeout;
-}
-
-/** PS 5.1 ConvertTo-Json can scalar-ize single-element arrays: normalize. */
-function normalizeCandidates(raw: unknown): SnapCandidate[] {
-  const arr = Array.isArray(raw) ? raw : raw !== null && raw !== undefined ? [raw] : [];
-  const out: SnapCandidate[] = [];
-  for (const item of arr) {
-    if (typeof item !== 'object' || item === null) continue;
-    const c = item as Record<string, unknown>;
-    if (
-      typeof c['name'] === 'string' &&
-      typeof c['x'] === 'number' &&
-      typeof c['y'] === 'number' &&
-      typeof c['w'] === 'number' &&
-      typeof c['h'] === 'number'
-    ) {
-      out.push({
-        name: c['name'],
-        x: c['x'],
-        y: c['y'],
-        w: c['w'],
-        h: c['h'],
-        ...(typeof c['ct'] === 'string' ? { ct: c['ct'] } : {}),
-      });
-    }
-  }
-  return out;
-}
-
 export class GroundingService {
   private readonly options: GroundingOptions;
   private readonly timeboxMs: number;
-  private child: ChildProcessWithoutNullStreams | null = null;
-  private pending = new Map<number, Pending>();
-  private nextId = 1;
-  private buffer = '';
-  private consecutiveTimeouts = 0;
+  private readonly client: DaemonRequester;
   private disposed = false;
 
-  constructor(options: GroundingOptions) {
+  constructor(options: GroundingOptions, client?: DaemonRequester) {
     this.options = options;
     this.timeboxMs = options.timeboxMs ?? TIMEBOX_MS;
+    this.client =
+      client ?? new JsonLinesDaemonClient({ resolveCommand: () => this.resolveCommand() });
   }
 
   /** Spawn the daemon ahead of the first snap (assembly load takes ~1s). */
   warmUp(): void {
     try {
-      this.ensureChild();
+      this.client.ensureSpawned();
     } catch (err) {
       console.warn('[grounding] warm-up failed:', err);
     }
@@ -145,7 +109,7 @@ export class GroundingService {
   /** Kill the daemon (app quit / settings rebuild). Idempotent. */
   dispose(): void {
     this.disposed = true;
-    this.killChild();
+    this.client.dispose();
   }
 
   /**
@@ -175,18 +139,21 @@ export class GroundingService {
     let debugList: SnapDebugCandidate[] | undefined;
     for (const radius of [query.radiusPx ?? RADIUS_PX, RETRY_RADIUS_PX]) {
       const remaining = deadline - Date.now();
-      if (remaining < 120)
+      if (remaining < MIN_ATTEMPT_BUDGET_MS)
         return {
           ...none(true, lastCount, lastDaemonMs),
           ...(debugList ? { debug: debugList } : {}),
         };
-      const resp = await this.request(
+      const resp = await this.client.request(
         {
           x: Math.round(query.x),
           y: Math.round(query.y),
           radiusPx: radius,
-          budgetMs: Math.max(100, Math.min(450, remaining - 60)),
-          maxNodes: 3000,
+          budgetMs: Math.max(
+            DAEMON_BUDGET_MIN_MS,
+            Math.min(DAEMON_BUDGET_MAX_MS, remaining - DAEMON_TRANSPORT_RESERVE_MS),
+          ),
+          maxNodes: DAEMON_MAX_NODES,
           ...(this.options.excludePid !== undefined ? { excludePid: this.options.excludePid } : {}),
         },
         remaining,
@@ -228,22 +195,21 @@ export class GroundingService {
 
   // -------------------------------------------------------------------------
 
-  private ensureChild(): ChildProcessWithoutNullStreams {
-    if (this.disposed) throw new Error('grounding service disposed');
-    if (this.child !== null && this.child.exitCode === null) return this.child;
-
-    let command: string;
-    let args: string[];
+  /**
+   * Resolve the daemon launch command. Called on EVERY (re)spawn so the
+   * embedded script is re-materialized too (survives packaging: no loose
+   * files; survives userData cleanup between crashes).
+   */
+  private resolveCommand(): DaemonSpawnSpec {
     if (this.options.command !== undefined) {
-      command = this.options.command;
-      args = this.options.args ?? [];
-    } else {
-      // Materialize the embedded script (survives packaging: no loose files).
-      mkdirSync(this.options.scriptDir, { recursive: true });
-      const scriptPath = join(this.options.scriptDir, 'snapper.ps1');
-      writeFileSync(scriptPath, snapperScript, 'utf8');
-      command = 'powershell.exe';
-      args = [
+      return { command: this.options.command, args: this.options.args ?? [] };
+    }
+    mkdirSync(this.options.scriptDir, { recursive: true });
+    const scriptPath = join(this.options.scriptDir, 'snapper.ps1');
+    writeFileSync(scriptPath, snapperScript, 'utf8');
+    return {
+      command: 'powershell.exe',
+      args: [
         '-NoProfile',
         '-NonInteractive',
         '-NoLogo',
@@ -251,114 +217,7 @@ export class GroundingService {
         'Bypass',
         '-File',
         scriptPath,
-      ];
-    }
-
-    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
-    this.child = child;
-    this.buffer = '';
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => this.onStdout(chunk));
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => {
-      const line = chunk.trim();
-      if (line.length > 0) console.warn('[grounding] daemon stderr:', line.slice(0, 300));
-    });
-    child.on('error', (err) => {
-      console.warn('[grounding] daemon spawn error:', err.message);
-      if (this.child === child) this.child = null;
-      this.flushPending();
-    });
-    child.on('exit', (code) => {
-      if (this.child === child) {
-        this.child = null;
-        if (!this.disposed)
-          console.warn(`[grounding] daemon exited (code ${code}); will respawn on demand`);
-      }
-      this.flushPending();
-    });
-    return child;
-  }
-
-  private killChild(): void {
-    const child = this.child;
-    this.child = null;
-    this.flushPending();
-    if (child !== null) {
-      try {
-        child.kill();
-      } catch {
-        /* already dead */
-      }
-    }
-  }
-
-  /** Resolve every in-flight request as failed (daemon gone). */
-  private flushPending(): void {
-    for (const [, p] of this.pending) {
-      clearTimeout(p.timer);
-      p.resolve(null);
-    }
-    this.pending.clear();
-  }
-
-  private onStdout(chunk: string): void {
-    this.buffer += chunk;
-    for (;;) {
-      const nl = this.buffer.indexOf('\n');
-      if (nl === -1) break;
-      const line = this.buffer.slice(0, nl).trim();
-      this.buffer = this.buffer.slice(nl + 1);
-      if (line.length === 0) continue;
-      let resp: DaemonResponse;
-      try {
-        resp = JSON.parse(line) as DaemonResponse;
-      } catch {
-        continue; // stray non-JSON output
-      }
-      const p = this.pending.get(resp.id);
-      if (p === undefined) continue; // late answer to a timed-out request
-      this.pending.delete(resp.id);
-      clearTimeout(p.timer);
-      this.consecutiveTimeouts = 0;
-      p.resolve(resp);
-    }
-  }
-
-  private request(
-    payload: Record<string, unknown>,
-    timeoutMs: number,
-  ): Promise<DaemonResponse | null> {
-    return new Promise((resolve) => {
-      let child: ChildProcessWithoutNullStreams;
-      try {
-        child = this.ensureChild();
-      } catch {
-        resolve(null);
-        return;
-      }
-      const id = this.nextId++;
-      const timer = setTimeout(() => {
-        if (this.pending.delete(id)) {
-          this.consecutiveTimeouts += 1;
-          // A wedged UIA walk blocks the single-threaded daemon for every
-          // later request too — restart it after repeated timeouts.
-          if (this.consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS && !this.disposed) {
-            console.warn('[grounding] daemon unresponsive; restarting');
-            this.consecutiveTimeouts = 0;
-            this.killChild();
-          }
-          resolve(null);
-        }
-      }, timeoutMs);
-      this.pending.set(id, { resolve, timer });
-      try {
-        child.stdin.write(`${JSON.stringify({ id, ...payload })}\n`);
-      } catch {
-        clearTimeout(timer);
-        this.pending.delete(id);
-        resolve(null);
-      }
-    });
+      ],
+    };
   }
 }
