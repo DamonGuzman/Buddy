@@ -15,4 +15,5 @@ export type {
   RecorderPort,
   SettingsPort,
 } from './conversation/ports';
-export type { RestGroundPort, UiaSnapPort } from './conversation/pointer-pipeline';
+export type { ElementGrounder } from './grounding/accessibility-grounder';
+export type { RestGroundPort } from './conversation/pointer-pipeline';

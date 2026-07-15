@@ -19,6 +19,12 @@ import type { DebugState } from '../src/shared/types';
 const control = vi.hoisted(() => ({
   isPackaged: false,
   userDataPath: '',
+  groundingQueries: [] as Array<{
+    x: number;
+    y: number;
+    label: string;
+    radiusDip?: number;
+  }>,
 }));
 
 vi.mock('electron', () => ({
@@ -96,7 +102,25 @@ beforeAll(async () => {
   process.env['CLICKY_DEBUG_TOKEN'] = TOKEN;
   process.env['CLICKY_DEBUG_PORT'] = String(PORT);
 
-  server = startDebugServer({ getState: () => FAKE_STATE });
+  server = startDebugServer({
+    getState: () => FAKE_STATE,
+    grounding: {
+      query: async (query) => {
+        control.groundingQueries.push(query);
+        return {
+          query,
+          matched: false,
+          snappedDip: null,
+          name: null,
+          score: null,
+          elapsedMs: 1,
+          nativeMs: null,
+          timedOut: false,
+          candidates: [],
+        };
+      },
+    },
+  });
   expect(server).not.toBeNull();
   await new Promise<void>((resolve) => server!.once('listening', resolve));
 });
@@ -196,6 +220,34 @@ describe('debug server routing', () => {
     });
     expect(res.status).toBe(503);
     expect(res.json).toEqual({ error: 'conversation pipeline not wired' });
+  });
+
+  it('passes a positive global-DIP search radius to native grounding', async () => {
+    control.groundingQueries.length = 0;
+    const res = await request({
+      method: 'POST',
+      path: '/grounding/query',
+      headers: { 'x-debug-token': TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({ x: 120, y: 80, label: 'save', radiusDip: 420 }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(control.groundingQueries).toEqual([{ x: 120, y: 80, label: 'save', radiusDip: 420 }]);
+  });
+
+  it('rejects the removed physical-pixel radius contract', async () => {
+    const res = await request({
+      method: 'POST',
+      path: '/grounding/query',
+      headers: { 'x-debug-token': TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({ x: 120, y: 80, label: 'save', radiusPx: 420 }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.json).toEqual({
+      error:
+        'expected {x: number, y: number, label: string, radiusDip?: positive number} (global DIP)',
+    });
   });
 });
 

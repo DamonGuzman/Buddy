@@ -5,6 +5,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { GroundingDebugReport } from '../conversation/pointer-pipeline';
 import type {
   AgentSummary,
   DebugState,
@@ -33,9 +34,14 @@ export interface AudioEvalDebugDeps {
   getTimings: () => { last: TurnTimings | null; history: TurnTimings[] };
 }
 
-/** M9: element-snap grounding hooks (drive the snapper without the model). */
+/** M9: native element-grounding hooks (drive accessibility without the model). */
 export interface GroundingDebugDeps {
-  query: (q: { x: number; y: number; label: string; radiusPx?: number }) => Promise<unknown>;
+  query: (q: {
+    x: number;
+    y: number;
+    label: string;
+    radiusDip?: number;
+  }) => Promise<GroundingDebugReport>;
 }
 
 export interface AgentDebugDeps {

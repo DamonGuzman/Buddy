@@ -59,6 +59,7 @@ import { classifyError, describeKind } from '../errors';
 import type { ErrorKind, ErrorParams } from '../errors';
 import { isCodexSubDisabled, isRestGroundDisabled, isSnapDisabled, mockRealtimeUrl } from '../env';
 import { createElementGrounder } from '../grounding/accessibility-grounder';
+import type { ElementGrounder } from '../grounding/accessibility-grounder';
 import { RestGrounder } from '../grounding/rest-grounder';
 import {
   getSessionInstructions,
@@ -88,7 +89,7 @@ import {
 } from './constants';
 import { ErrorSurfacer } from './error-surfacer';
 import { PointerPipeline } from './pointer-pipeline';
-import type { NativeSnapPort, RestGroundPort } from './pointer-pipeline';
+import type { RestGroundPort } from './pointer-pipeline';
 import type { AgentsPort, OverlayPort, PanelPort, RecorderPort, SettingsPort } from './ports';
 import {
   NO_CAPTURE_ERROR,
@@ -122,8 +123,8 @@ export interface ConversationDeps {
   phoneAudio?: PhoneAudioTransport;
   /** Durable local journal + turn artifacts; omitted in focused tests. */
   sessionRecorder?: RecorderPort;
-  /** M9 seam: the UIA element snapper. Optional — defaults to the real daemon. */
-  buildUiaSnapper?: () => NativeSnapPort;
+  /** Native accessibility seam (UIA on Windows, AX on macOS). */
+  buildElementGrounder?: () => ElementGrounder;
   /** M10 seam: the REST grounder. Optional — defaults to the real transport. */
   buildRestGrounder?: () => RestGroundPort;
 }
@@ -298,8 +299,8 @@ export class Conversation {
       codexProvider: () => this.codexProvider(),
       codexTextUsedPercent: () => this.codexText.lastUsedPercent(),
       surfacePlanLimitOnce: (token) => this.errors.surfacePlanLimitOnce(token),
-      buildUiaSnapper:
-        deps.buildUiaSnapper ??
+      buildElementGrounder:
+        deps.buildElementGrounder ??
         (() =>
           createElementGrounder({
             scriptDir: app.getPath('userData'),
@@ -359,8 +360,8 @@ export class Conversation {
     });
 
     this.session = this.buildSession();
-    // M9: front-load the snapper daemon's ~1s PowerShell/assembly load so
-    // the very first point_at of a session can still snap within the timebox.
+    // M9: front-load the platform provider so the first point_at can ground
+    // within its timebox.
     this.pointer.warmUpIfEnabled();
   }
 
@@ -893,7 +894,7 @@ export class Conversation {
     if (this.idleTimer !== null) clearTimeout(this.idleTimer);
     this.errorTimer = null;
     this.idleTimer = null;
-    this.pointer.dispose(); // M9: kill the snapper daemon
+    this.pointer.dispose(); // M9: dispose native accessibility resources
     this.computerUse.dispose();
     this.codexText.cancelActive(); // M18: abort any in-flight text turn
     if (this.fullRealtimeActive) {
@@ -1455,14 +1456,14 @@ export class Conversation {
   }
 
   /**
-   * M9 debug surface (POST /grounding/query): drive the snapper directly.
+   * M9 debug surface (POST /grounding/query): drive native accessibility directly.
    * Delegates to the pointer pipeline (typed result).
    */
   debugGroundingQuery(q: {
     x: number;
     y: number;
     label: string;
-    radiusPx?: number;
+    radiusDip?: number;
   }): ReturnType<PointerPipeline['debugGroundingQuery']> {
     return this.pointer.debugGroundingQuery(q);
   }

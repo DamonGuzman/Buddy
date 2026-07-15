@@ -3,8 +3,8 @@
  * §6-mapped) point, then fly the buddy. Layers, in order
  * (docs/ARCHITECTURE.md §6b):
  *
- *   1. UIA element snap (M9, 600ms timebox) — exact when the label matches
- *      a named element;
+ *   1. native accessibility snap (M9, 600ms timebox) — exact when the label
+ *      matches a named element;
  *   2. REST grounding fallback (M10, gpt-5.4-mini, 2.5s timeout) — the
  *      model's own label re-grounded against the SAME screenshot JPEG the
  *      realtime model saw, ~10px median (COORD-STUDY §8-§9); the result is
@@ -19,8 +19,8 @@
  * SHARED by the voice tool-call path AND the M18 text path. When
  * `primaryModelIsAccurate` is set (text mode: the point comes straight from
  * gpt-5.6-sol, which is 1px-median / 100% in-element per COORD-STUDY §11),
- * the redundant REST grounding call is SKIPPED — the UIA element-snap still
- * runs (it snaps to the true element center), otherwise the model's own
+ * the redundant REST grounding call is SKIPPED — native element grounding
+ * still runs (it snaps to the true element center), otherwise the model's own
  * already-accurate point stands. Voice keeps the full layered pipeline
  * because its raw coordinates need it.
  *
@@ -33,14 +33,12 @@ import type { AuthSource, CodexProvider } from '../auth/auth-source';
 import type { CaptureResult } from '../capture';
 import { clampToDisplay, mapModelPoint } from '../coords';
 import type { MappedPoint } from '../coords';
-import {
-  dipToPhysicalPreferScreen,
-  dipToPhysicalViaMeta,
-  physicalToDipPreferScreen,
-} from '../grounding/convert';
-import type { Pt, ScreenPointApi } from '../grounding/convert';
-import type { SnapDebugCandidate, SnapOutcome, SnapQuery } from '../grounding/snapper';
-import type { ElementGrounder, ElementGroundingOutcome } from '../grounding/accessibility-grounder';
+import type { Pt } from '../grounding/convert';
+import type {
+  ElementGrounder,
+  ElementGroundingDebugCandidate,
+  ElementGroundingOutcome,
+} from '../grounding/accessibility-grounder';
 import type {
   CodexUsedPercent,
   GroundOutcome,
@@ -59,22 +57,13 @@ import { POINTER_HISTORY_LIMIT } from './constants';
 import type { OverlayPort, RecorderPort, SettingsPort } from './ports';
 import type { TurnGuard } from './turn-guard';
 
-/** The slice of GroundingService the pipeline drives (fakes in tests). */
-export interface UiaSnapPort {
-  warmUp(): void;
-  dispose(): void;
-  snap(query: SnapQuery, opts?: { debug?: boolean; timeboxMs?: number }): Promise<SnapOutcome>;
-}
-
-export type NativeSnapPort = UiaSnapPort | ElementGrounder;
-
 /** The slice of RestGrounder the pipeline drives (fakes in tests). */
 export interface RestGroundPort {
   ground(query: RestGroundQuery, auth: AuthSource): Promise<GroundOutcome>;
 }
 
-/** Electron's `screen` slice the pipeline needs (point mapping + debug query). */
-export interface ScreenApi extends ScreenPointApi {
+/** Electron's `screen` slice used to select debug-query display metadata. */
+export interface ScreenApi {
   getDisplayNearestPoint(point: Pt): {
     bounds: { x: number; y: number; width: number; height: number };
     scaleFactor: number;
@@ -83,15 +72,15 @@ export interface ScreenApi extends ScreenPointApi {
 
 /** Typed result of POST /grounding/query (was Promise<unknown>). */
 export interface GroundingDebugReport {
-  query: { x: number; y: number; label: string; radiusPx?: number; physical: Pt };
+  query: { x: number; y: number; label: string; radiusDip?: number };
   matched: boolean;
   snappedDip: Pt | null;
   name: string | null;
   score: number | null;
   elapsedMs: number;
-  daemonMs: number | null;
+  nativeMs: number | null;
   timedOut: boolean;
-  candidates: SnapDebugCandidate[];
+  candidates: ElementGroundingDebugCandidate[];
 }
 
 export interface PointerPipelineDeps {
@@ -108,7 +97,7 @@ export interface PointerPipelineDeps {
   /** M17: fail-closed plan-limit copy, once per episode. */
   surfacePlanLimitOnce: (token: number) => void;
   /** Lazy constructors — injected fakes in tests, real services in the app. */
-  buildUiaSnapper: () => NativeSnapPort;
+  buildElementGrounder: () => ElementGrounder;
   buildRestGrounder: () => RestGroundPort;
   screen: ScreenApi;
   /** CLICKY_NO_SNAP / CLICKY_NO_REST_GROUND / CLICKY_NO_CODEX_SUB (eval A/B). */
@@ -119,8 +108,8 @@ export interface PointerPipelineDeps {
 
 export class PointerPipeline {
   // M9: element-snap grounding (docs/EVAL.md §9), spawned lazily.
-  private uia: NativeSnapPort | null = null;
-  // M10: REST grounding fallback behind the UIA snap (docs/COORD-STUDY.md §9).
+  private elementGrounder: ElementGrounder | null = null;
+  // M10: REST fallback behind native accessibility grounding (docs/COORD-STUDY.md §9).
   private rest: RestGroundPort | null = null;
   /** M13-core: attribution of the most recent grounding call. */
   private lastGroundingValue: GroundingAttribution | null = null;
@@ -131,10 +120,12 @@ export class PointerPipeline {
 
   constructor(private readonly deps: PointerPipelineDeps) {}
 
-  /** M9: lazy snapper (spawned once, killed in dispose()). */
-  private getUia(): NativeSnapPort {
-    if (this.uia === null) this.uia = this.deps.buildUiaSnapper();
-    return this.uia;
+  /** M9: lazy platform grounder (disposed with the pipeline). */
+  private getElementGrounder(): ElementGrounder {
+    if (this.elementGrounder === null) {
+      this.elementGrounder = this.deps.buildElementGrounder();
+    }
+    return this.elementGrounder;
   }
 
   /** M10: lazy REST grounder (same key source as the realtime session). */
@@ -144,16 +135,16 @@ export class PointerPipeline {
   }
 
   /**
-   * M9: front-load the snapper daemon's ~1s PowerShell/assembly load so the
-   * very first point_at of a session can still snap within the timebox.
+   * M9: front-load the platform provider so the first point_at can ground
+   * within its timebox.
    */
   warmUpIfEnabled(): void {
-    if (!this.deps.snapDisabled) this.getUia().warmUp();
+    if (!this.deps.snapDisabled) this.getElementGrounder().warmUp();
   }
 
-  /** M9: kill the snapper daemon (app quit). */
+  /** M9: dispose the native accessibility provider (app quit). */
   dispose(): void {
-    this.uia?.dispose();
+    this.elementGrounder?.dispose();
   }
 
   lastPointer(): PointerCommand | null {
@@ -178,44 +169,23 @@ export class PointerPipeline {
     this.pointerChain = this.pointerChain.then(() => this.dispatch(args, capture, mapped, opts));
   }
 
-  /** Normalize legacy Windows test fakes and the cross-platform UIA/AX provider to global DIP. */
+  /** Run the cross-platform UIA/AX provider using the global-DIP product contract. */
   private async snapElement(
     point: Pt,
     label: string,
     meta: Pick<CaptureResult['meta'], 'displayBounds' | 'scaleFactor'>,
     opts: { debug?: boolean; timeboxMs?: number } = {},
+    radiusDip?: number,
   ): Promise<ElementGroundingOutcome> {
-    const grounder = this.getUia();
-    if (isElementGrounder(grounder)) {
-      return grounder.snap({ point, label, display: meta }, opts);
-    }
-    const physical = dipToPhysicalPreferScreen(point, meta, this.deps.screen);
-    const outcome = await grounder.snap({ x: physical.x, y: physical.y, label }, opts);
-    return {
-      provider: 'uia',
-      matched: outcome.matched,
-      point:
-        outcome.point === null
-          ? null
-          : physicalToDipPreferScreen(outcome.point, meta, this.deps.screen),
-      name: outcome.name,
-      score: outcome.score,
-      elapsedMs: outcome.elapsedMs,
-      nativeMs: outcome.daemonMs,
-      candidates: outcome.candidates,
-      timedOut: outcome.timedOut,
-      ...(outcome.debug !== undefined
-        ? {
-            debug: outcome.debug.map((candidate) => ({
-              name: candidate.name,
-              ...(candidate.ct !== undefined ? { ct: candidate.ct } : {}),
-              rect: candidate.rect,
-              textScore: candidate.textScore,
-              ...(candidate.windowRank !== undefined ? { windowRank: candidate.windowRank } : {}),
-            })),
-          }
-        : {}),
-    };
+    return this.getElementGrounder().snap(
+      {
+        point,
+        label,
+        display: meta,
+        ...(radiusDip !== undefined ? { radiusDip } : {}),
+      },
+      opts,
+    );
   }
 
   private async dispatch(
@@ -281,7 +251,7 @@ export class PointerPipeline {
         };
       }
     }
-    // M10: UIA snap found nothing (or was disabled) — REST grounding
+    // M10: native accessibility found nothing (or was disabled) — REST grounding
     // fallback. The grounder re-locates the model's own label in the SAME
     // screenshot the model saw (capture is closure-retained here even after
     // the turn settles and releases turnCaptures), and its answer is a point
@@ -392,48 +362,38 @@ export class PointerPipeline {
   }
 
   /**
-   * M9 debug surface (POST /grounding/query): drive the snapper directly
+   * M9 debug surface (POST /grounding/query): drive native accessibility directly
    * against whatever is on screen — no model, no cost. Coordinates in/out
-   * are GLOBAL DIP (converted here); the full scored candidate list is
+   * remain GLOBAL DIP; the full scored candidate list is
    * returned for diagnosis.
    */
   async debugGroundingQuery(q: {
     x: number;
     y: number;
     label: string;
-    radiusPx?: number;
+    radiusDip?: number;
   }): Promise<GroundingDebugReport> {
     const { screen } = this.deps;
     const display = screen.getDisplayNearestPoint({ x: Math.round(q.x), y: Math.round(q.y) });
     const geom = { displayBounds: display.bounds, scaleFactor: display.scaleFactor };
-    const phys = (() => {
-      try {
-        const p = screen.dipToScreenPoint({ x: Math.round(q.x), y: Math.round(q.y) });
-        if (p && Number.isFinite(p.x)) return p;
-      } catch {
-        /* fall through */
-      }
-      return dipToPhysicalViaMeta({ x: q.x, y: q.y }, geom);
-    })();
-    const outcome = await this.snapElement({ x: q.x, y: q.y }, q.label, geom, {
-      debug: true,
-      timeboxMs: 2_500,
-    });
+    const outcome = await this.snapElement(
+      { x: q.x, y: q.y },
+      q.label,
+      geom,
+      { debug: true, timeboxMs: 2_500 },
+      q.radiusDip,
+    );
     const snappedDip = outcome.matched ? outcome.point : null;
     return {
-      query: { ...q, physical: phys },
+      query: q,
       matched: outcome.matched,
       snappedDip,
       name: outcome.name,
       score: outcome.score,
       elapsedMs: outcome.elapsedMs,
-      daemonMs: outcome.nativeMs,
+      nativeMs: outcome.nativeMs,
       timedOut: outcome.timedOut,
       candidates: outcome.debug ?? [],
     };
   }
-}
-
-function isElementGrounder(port: NativeSnapPort): port is ElementGrounder {
-  return 'provider' in port;
 }

@@ -20,29 +20,37 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import type { PointerCommand } from '../src/shared/types';
 import type { AuthSource } from '../src/main/auth/auth-source';
 import type { ConversationDeps } from '../src/main/conversation';
+import type {
+  AccessibilityProvider,
+  ElementGrounder,
+  ElementGroundingOutcome,
+  ElementGroundingQuery,
+} from '../src/main/grounding/accessibility-grounder';
 import type { GroundOutcome, RestGroundQuery } from '../src/main/grounding/rest-grounder';
-import type { SnapOutcome, SnapQuery } from '../src/main/grounding/snapper';
 import type * as MockRealtime from '../tools/mock-realtime/server';
 
 // ---------------------------------------------------------------------------
 // Controllable grounding layers (injected via the ConversationDeps seams)
 // ---------------------------------------------------------------------------
 
-const noMatch: SnapOutcome = {
+const noMatch: ElementGroundingOutcome = {
+  provider: 'uia',
   matched: false,
   point: null,
   name: null,
   score: null,
   elapsedMs: 5,
-  daemonMs: 5,
+  nativeMs: 5,
   candidates: 0,
   timedOut: false,
 };
 
 const ctl = {
   noMatch,
-  snapQueries: [] as SnapQuery[],
-  snap: (async () => noMatch) as (q: SnapQuery) => Promise<SnapOutcome>,
+  provider: 'uia' as AccessibilityProvider,
+  snapQueries: [] as ElementGroundingQuery[],
+  snapOptions: [] as NonNullable<Parameters<ElementGrounder['snap']>[1]>[],
+  snap: (async () => noMatch) as (q: ElementGroundingQuery) => Promise<ElementGroundingOutcome>,
   restQueries: [] as RestGroundQuery[],
   rest: (async () => null) as (q: RestGroundQuery) => Promise<{ x: number; y: number } | null>,
   // M13-core: a quota-exhausted flag to drive the fail-closed assertion, and
@@ -58,12 +66,19 @@ const ctl = {
   } | null,
 };
 
-/** The fake UIA snapper injected through `buildUiaSnapper`. */
+/** The fake native accessibility grounder injected through the product seam. */
 const fakeSnapper = {
+  get provider(): AccessibilityProvider {
+    return ctl.provider;
+  },
   warmUp(): void {},
   dispose(): void {},
-  snap(q: SnapQuery): Promise<SnapOutcome> {
+  snap(
+    q: ElementGroundingQuery,
+    opts: NonNullable<Parameters<ElementGrounder['snap']>[1]> = {},
+  ): Promise<ElementGroundingOutcome> {
     ctl.snapQueries.push(q);
+    ctl.snapOptions.push(opts);
     return ctl.snap(q);
   },
 };
@@ -161,7 +176,7 @@ function fakeDeps(pointers: PointerCommand[]): ConversationDeps {
       getCodexAuth: () => ctl.codexInfo,
       getBearer: async () => ctl.codexInfo?.accessToken ?? '',
     },
-    buildUiaSnapper: () => fakeSnapper,
+    buildElementGrounder: () => fakeSnapper,
     buildRestGrounder: () => fakeRestGrounder,
   };
 }
@@ -183,8 +198,10 @@ describe('Conversation: layered grounding dispatch (M10)', () => {
   afterEach(() => {
     for (const c of conversations.splice(0)) c.close();
     ctl.snap = async () => ctl.noMatch;
+    ctl.provider = 'uia';
     ctl.rest = async () => null;
     ctl.snapQueries.length = 0;
+    ctl.snapOptions.length = 0;
     ctl.restQueries.length = 0;
     ctl.restQuota = false;
     ctl.restUsedPercent = null;
@@ -212,11 +229,60 @@ describe('Conversation: layered grounding dispatch (M10)', () => {
     return cmd as AnimateCommand;
   }
 
+  it('debug grounding preserves the global-DIP radius and reports platform timing', async () => {
+    ctl.snap = async () => ({
+      ...ctl.noMatch,
+      nativeMs: 7,
+      debug: [
+        {
+          name: 'Save',
+          rect: { x: 100, y: 60, w: 40, h: 40 },
+          textScore: 0.95,
+        },
+      ],
+    });
+    const conversation = makeConversation([]);
+
+    const report = await conversation.debugGroundingQuery({
+      x: 120,
+      y: 80,
+      label: 'save',
+      radiusDip: 420,
+    });
+
+    expect(ctl.snapQueries).toEqual([
+      {
+        point: { x: 120, y: 80 },
+        label: 'save',
+        display: {
+          displayBounds: { x: 0, y: 0, width: 2560, height: 1440 },
+          scaleFactor: 1.5,
+        },
+        radiusDip: 420,
+      },
+    ]);
+    expect(report.query).toEqual({
+      x: 120,
+      y: 80,
+      label: 'save',
+      radiusDip: 420,
+    });
+    expect(report.nativeMs).toBe(7);
+    expect(report.candidates).toEqual([
+      {
+        name: 'Save',
+        rect: { x: 100, y: 60, w: 40, h: 40 },
+        textScore: 0.95,
+      },
+    ]);
+    expect(ctl.snapOptions).toEqual([{ debug: true, timeboxMs: 2_500 }]);
+  });
+
   it('UIA hit: pointer at the snapped element, no REST call', async () => {
     ctl.snap = async () => ({
       ...ctl.noMatch,
       matched: true,
-      point: { x: 600, y: 450 }, // physical px; identity DIP mock
+      point: { x: 600, y: 450 }, // global DIP
       name: 'The Button',
       score: 1,
       candidates: 3,
@@ -236,6 +302,28 @@ describe('Conversation: layered grounding dispatch (M10)', () => {
     expect((debug.lastPointer as AnimateCommand).groundingSource).toBe('uia');
   });
 
+  it('AX hit: pointer at the snapped element, no REST call', async () => {
+    ctl.provider = 'ax';
+    ctl.snap = async () => ({
+      ...ctl.noMatch,
+      provider: 'ax',
+      matched: true,
+      point: { x: 700, y: 500 },
+      name: 'The Button',
+      score: 1,
+      candidates: 2,
+    });
+    const pointers: PointerCommand[] = [];
+    const conversation = makeConversation(pointers);
+    const cmd = await askAndAwaitPointer(conversation, pointers);
+
+    expect(cmd.groundingSource).toBe('ax');
+    expect(cmd.restUsed).toBe(false);
+    expect(ctl.restQueries).toHaveLength(0);
+    expect(cmd.points[0]!.x).toBeCloseTo(700, 5);
+    expect(cmd.points[0]!.y).toBeCloseTo(500, 5);
+  });
+
   it('UIA miss -> REST ground with the SAME screenshot jpeg the model saw', async () => {
     ctl.rest = async () => ({ x: 512, y: 288 }); // image px -> DIP x1.25
     const pointers: PointerCommand[] = [];
@@ -243,6 +331,16 @@ describe('Conversation: layered grounding dispatch (M10)', () => {
     const cmd = await askAndAwaitPointer(conversation, pointers);
 
     expect(ctl.snapQueries).toHaveLength(1);
+    expect(ctl.snapQueries[0]).toEqual(
+      expect.objectContaining({
+        point: { x: 1280, y: 720 },
+        label: 'the button',
+        display: expect.objectContaining({
+          displayBounds: { x: 0, y: 0, width: 2560, height: 1440 },
+          scaleFactor: 1.5,
+        }),
+      }),
+    );
     expect(ctl.restQueries).toHaveLength(1);
     // The REST layer gets the exact turn capture: same jpeg, same dims,
     // and the model's own spoken label.

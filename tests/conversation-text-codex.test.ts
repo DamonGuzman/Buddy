@@ -25,37 +25,42 @@ import type {
   CodexUserTurn,
 } from '../src/main/codex/responses-session';
 import type { AgentsPort, CodexTextSession, ConversationDeps } from '../src/main/conversation';
+import type {
+  ElementGroundingOutcome,
+  ElementGroundingQuery,
+} from '../src/main/grounding/accessibility-grounder';
 import type { GroundOutcome } from '../src/main/grounding/rest-grounder';
-import type { SnapOutcome, SnapQuery } from '../src/main/grounding/snapper';
 import type * as MockRealtime from '../tools/mock-realtime/server';
 
 // ---------------------------------------------------------------------------
 // Controllable grounding layers (injected via the ConversationDeps seams)
 // ---------------------------------------------------------------------------
 
-const noMatch: SnapOutcome = {
+const noMatch: ElementGroundingOutcome = {
+  provider: 'uia',
   matched: false,
   point: null,
   name: null,
   score: null,
   elapsedMs: 5,
-  daemonMs: 5,
+  nativeMs: 5,
   candidates: 0,
   timedOut: false,
 };
 
 const ctl = {
   noMatch,
-  snapQueries: [] as SnapQuery[],
-  snap: (async () => noMatch) as (q: SnapQuery) => Promise<SnapOutcome>,
+  snapQueries: [] as ElementGroundingQuery[],
+  snap: (async () => noMatch) as (q: ElementGroundingQuery) => Promise<ElementGroundingOutcome>,
   restCalls: 0,
 };
 
-/** The fake UIA snapper injected through `buildUiaSnapper`. */
+/** The fake native accessibility grounder injected through the product seam. */
 const fakeSnapper = {
+  provider: 'uia' as const,
   warmUp(): void {},
   dispose(): void {},
-  snap(q: SnapQuery): Promise<SnapOutcome> {
+  snap(q: ElementGroundingQuery): Promise<ElementGroundingOutcome> {
     ctl.snapQueries.push(q);
     return ctl.snap(q);
   },
@@ -209,7 +214,7 @@ function makeDeps(opts: {
       getCodexAuth: () => codexInfo,
       getBearer: async () => codexInfo?.accessToken ?? '',
     },
-    buildUiaSnapper: () => fakeSnapper,
+    buildElementGrounder: () => fakeSnapper,
     buildRestGrounder: () => fakeRestGrounder,
     ...(opts.agents !== undefined ? { agents: opts.agents } : {}),
     ...(opts.fake !== undefined
@@ -540,7 +545,7 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
     ctl.snap = async () => ({
       ...ctl.noMatch,
       matched: true,
-      point: { x: 600, y: 450 }, // physical px; identity DIP mock
+      point: { x: 600, y: 450 }, // global DIP
       name: 'Save',
       score: 1,
       candidates: 2,
@@ -569,12 +574,22 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
     expect(cmd.type).toBe('animate');
     // UIA snap ran...
     expect(ctl.snapQueries).toHaveLength(1);
+    expect(ctl.snapQueries[0]).toEqual(
+      expect.objectContaining({
+        point: { x: 1280, y: 720 },
+        label: 'the save button',
+        display: expect.objectContaining({
+          displayBounds: { x: 0, y: 0, width: 2560, height: 1440 },
+          scaleFactor: 1.5,
+        }),
+      }),
+    );
     expect(cmd.groundingSource).toBe('uia');
     // ...but the REST grounding model was never called.
     expect(ctl.restCalls).toBe(0);
     expect(cmd.restUsed).toBe(false);
     expect(cmd.restMs).toBeUndefined();
-    // Snapped to the element center (physical 600,450 -> DIP identity mock).
+    // Snapped to the element center in global DIP.
     expect(cmd.points[0]!.x).toBeCloseTo(600, 5);
     expect(cmd.points[0]!.label).toBe('the save button');
     // The tool output was buffered and a continue was issued.
