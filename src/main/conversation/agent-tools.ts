@@ -24,6 +24,13 @@ export interface AgentToolsDeps {
   noteOrigin: (agentId: string, mode: AgentContinuationMode) => void;
   /** Route actionable agent gates through the same persistent error policy. */
   surfaceError: (kind: ErrorKind) => void;
+  /** Picker-backed read grant and lazy staging task prepared for every background helper. */
+  prepareFilesystem: (
+    task: string,
+    agentId: string,
+  ) => Promise<{ taskId: string; rootName: string }>;
+  /** Release a prepared workspace when manager admission fails. */
+  failFilesystem: (taskId: string, reason: string) => Promise<void>;
 }
 
 export class AgentTools {
@@ -31,14 +38,12 @@ export class AgentTools {
 
   constructor(private readonly deps: AgentToolsDeps) {}
 
-  spawnAgent(value: unknown, mode: AgentContinuationMode): object {
+  async spawnAgent(value: unknown, mode: AgentContinuationMode): Promise<object> {
     const { agents, transcript, noteOrigin } = this.deps;
     if (agents === null) return { error: 'agent mode is unavailable' };
     const args = asRecord(value) ?? {};
     const task = asString(args['task']).trim().slice(0, 2_000);
     if (!task) return { error: 'task is required' };
-    const browserAccess = args['browser_access'];
-    if (typeof browserAccess !== 'boolean') return { error: 'browser_access must be a boolean' };
     const why = asString(args['why']).trim().slice(0, 1_000);
     const captures = this.deps.turnCaptures();
     const capture = captures.find((item) => item.meta.isActive) ?? captures[0];
@@ -49,11 +54,28 @@ export class AgentTools {
     const userRequest = latestUserEntry?.text.trim().slice(0, 2_000);
     if (!userRequest) return { error: 'the original user request is unavailable' };
     const id = `agent_${(this.agentSeq += 1)}_${Date.now()}`;
+    if (!agents.isReady()) {
+      this.deps.surfaceError('agent_not_signed_in');
+      return { error: 'agent mode needs chatgpt sign-in' };
+    }
+    if (
+      agents.list().filter((agent) => agent.status === 'queued' || agent.status === 'running')
+        .length >= 3
+    ) {
+      return { error: 'at capacity — three agents are already running' };
+    }
+    let filesystem: { taskId: string; rootName: string };
+    try {
+      filesystem = await this.deps.prepareFilesystem(task, id);
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
     const brief: AgentBrief = {
       id,
       userRequest,
       task,
-      browserEnabled: browserAccess,
+      browserEnabled: false,
+      filesystem,
       ...(why ? { why } : {}),
       ...(capture ? { screenshot: { jpegBase64: capture.jpegBase64, meta: capture.meta } } : {}),
       recentTranscript: transcriptEntries
@@ -68,10 +90,17 @@ export class AgentTools {
       noteOrigin(result.agentId, mode);
       return { ok: true, agent_id: result.agentId };
     }
+    const failure =
+      result.reason === 'at_capacity'
+        ? 'Buddy already has too many helpers running.'
+        : result.reason === 'not_signed_in'
+          ? 'Buddy needs ChatGPT sign-in.'
+          : 'Filesystem execution is unavailable.';
+    await this.deps.failFilesystem(filesystem.taskId, failure);
     if (result.reason === 'at_capacity')
       return { error: 'at capacity — three agents are already running' };
-    if (result.reason === 'browser_unavailable')
-      return { error: 'browser use is unavailable for background buddies right now' };
+    if (result.reason === 'filesystem_unavailable')
+      return { error: 'filesystem use is unavailable for background buddies right now' };
     this.deps.surfaceError('agent_not_signed_in');
     return { error: 'agent mode needs chatgpt sign-in' };
   }

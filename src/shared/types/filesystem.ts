@@ -22,7 +22,7 @@ export type FilesystemTaskStatus =
   | 'discarded'
   | 'failed';
 
-/** One picker-issued, process-local capability. The renderer cannot mint this identifier. */
+/** One picker-issued capability persisted by the main process. The renderer cannot mint this identifier. */
 export interface FilesystemSelection {
   id: string;
   name: string;

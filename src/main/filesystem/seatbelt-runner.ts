@@ -1,7 +1,9 @@
 import { spawn } from 'node:child_process';
-import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { constants } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
+import { hostFs, hostFsPromises } from './host-fs';
+
+const { constants } = hostFs;
+const { access, mkdir, readFile, rm, writeFile } = hostFsPromises;
 
 const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
 const SHELL = '/bin/zsh';
@@ -16,6 +18,7 @@ export interface ShellRunResult {
 
 export interface ShellTaskPaths {
   taskRoot: string;
+  source: string;
   workspace: string;
   home: string;
   temp: string;
@@ -41,8 +44,27 @@ export class MacSeatbeltRunner {
     await writeFile(paths.profile, seatbeltProfile(paths), { mode: 0o600 });
   }
 
-  async run(
+  async runSource(
     paths: ShellTaskPaths,
+    script: string,
+    cwdRelative: string,
+    signal: AbortSignal,
+  ): Promise<ShellRunResult> {
+    return this.runAt(paths, paths.source, script, cwdRelative, signal);
+  }
+
+  async runStaged(
+    paths: ShellTaskPaths,
+    script: string,
+    cwdRelative: string,
+    signal: AbortSignal,
+  ): Promise<ShellRunResult> {
+    return this.runAt(paths, paths.workspace, script, cwdRelative, signal);
+  }
+
+  private async runAt(
+    paths: ShellTaskPaths,
+    root: string,
     script: string,
     cwdRelative: string,
     signal: AbortSignal,
@@ -50,17 +72,20 @@ export class MacSeatbeltRunner {
     await this.assertAvailable();
     if (script.length === 0 || script.length > 32_000)
       throw new Error('shell script is empty or too large');
-    const cwd = resolveWorkspacePath(paths.workspace, cwdRelative);
+    const cwd = resolveContainedPath(root, cwdRelative);
     await access(cwd, constants.R_OK);
     return runProcess(SANDBOX_EXEC, ['-f', paths.profile, SHELL, '-dfc', script], {
       cwd,
       env: {
         HOME: paths.home,
         TMPDIR: paths.temp,
-        PATH: '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Library/Apple/usr/bin',
+        PATH: `${join(paths.source, 'node_modules', '.bin')}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Library/Apple/usr/bin`,
+        NODE_PATH: join(paths.source, 'node_modules'),
         LANG: 'en_US.UTF-8',
         LC_ALL: 'en_US.UTF-8',
         PWD: cwd,
+        BUDDY_SOURCE_ROOT: paths.source,
+        BUDDY_STAGED_ROOT: paths.workspace,
         BUDDY_SANDBOX: 'seatbelt',
         BUDDY_NETWORK_DISABLED: '1',
       },
@@ -75,12 +100,14 @@ export class MacSeatbeltRunner {
     const root = join(this.basePath, '.seatbelt-self-test');
     const paths: ShellTaskPaths = {
       taskRoot: root,
+      source: join(root, 'source'),
       workspace: join(root, 'workspace'),
       home: join(root, 'home'),
       temp: join(root, 'tmp'),
       profile: join(root, 'profile.sb'),
     };
     await rm(root, { recursive: true, force: true });
+    await mkdir(paths.source, { recursive: true });
     await this.prepare(paths);
     const forbidden = join(root, 'must-not-exist');
     const controller = new AbortController();
@@ -198,11 +225,11 @@ function runProcess(
   });
 }
 
-function resolveWorkspacePath(workspace: string, cwdRelative: string): string {
-  const candidate = resolve(workspace, cwdRelative || '.');
-  const prefix = workspace.endsWith(sep) ? workspace : `${workspace}${sep}`;
-  if (candidate !== workspace && !candidate.startsWith(prefix))
-    throw new Error('working directory escapes the workspace');
+function resolveContainedPath(root: string, cwdRelative: string): string {
+  const candidate = resolve(root, cwdRelative || '.');
+  const prefix = root.endsWith(sep) ? root : `${root}${sep}`;
+  if (candidate !== root && !candidate.startsWith(prefix))
+    throw new Error('working directory escapes the authorized folder');
   return candidate;
 }
 
@@ -219,6 +246,7 @@ function seatbeltProfile(paths: ShellTaskPaths): string {
     '/Applications/Xcode.app',
     '/opt/homebrew',
     '/usr/local',
+    paths.source,
     paths.taskRoot,
   ];
   const readRules = allowedReadRoots.map((path) => `(subpath ${schemeQuote(path)})`).join('\n    ');
@@ -229,6 +257,7 @@ function seatbeltProfile(paths: ShellTaskPaths): string {
     '/Applications/Xcode.app',
     '/opt/homebrew',
     '/usr/local',
+    paths.source,
     paths.workspace,
   ];
   const executableRules = executableRoots

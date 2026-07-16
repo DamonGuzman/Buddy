@@ -228,7 +228,16 @@ function makeDeps(opts: {
     },
     buildElementGrounder: () => fakeSnapper,
     buildRestGrounder: () => fakeRestGrounder,
-    ...(opts.agents !== undefined ? { agents: opts.agents } : {}),
+    ...(opts.agents !== undefined
+      ? {
+          agents: opts.agents,
+          prepareAgentFilesystem: async () => ({
+            taskId: 'filesystem-task',
+            rootName: 'project',
+          }),
+          failAgentFilesystem: async () => undefined,
+        }
+      : {}),
     ...(opts.fake !== undefined
       ? {
           buildCodexSession: (): CodexTextSession => {
@@ -328,7 +337,7 @@ describe('Conversation: askText routing + text-accurate dispatch (M18)', () => {
         cb.onFunctionCall?.({
           callId: 'call_spawn',
           name: 'spawn_agent',
-          argsJson: JSON.stringify({ task: 'compare <unsafe> options', browser_access: false }),
+          argsJson: JSON.stringify({ task: 'compare <unsafe> options' }),
         });
         return { ...RESULT_OK, functionCalls: 1 };
       }

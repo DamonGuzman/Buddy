@@ -122,6 +122,12 @@ export interface ConversationDeps {
   buildCodexSession?: (auth: ChatGptCodexAuthSource) => CodexTextSession;
   /** Background-agent runtime; omitted in focused conversation tests. */
   agents?: AgentsPort;
+  /** Every foreground-delegated helper is prepared with one staged folder workspace. */
+  prepareAgentFilesystem?: (
+    task: string,
+    agentId: string,
+  ) => Promise<{ taskId: string; rootName: string }>;
+  failAgentFilesystem?: (taskId: string, reason: string) => Promise<void>;
   /** Disposable QA-only phone audio transport; absent in normal Clicky. */
   phoneAudio?: PhoneAudioTransport;
   /** Durable local journal + turn artifacts; omitted in focused tests. */
@@ -394,6 +400,10 @@ export class Conversation {
       turnCaptures: () => this.turnCaptures,
       noteOrigin: (agentId, mode) => this.continuations.noteOrigin(agentId, mode),
       surfaceError: (kind) => this.errors.surface(describeKind(kind)),
+      prepareFilesystem:
+        deps.prepareAgentFilesystem ??
+        (() => Promise.reject(new Error('choose a folder for helper buddies first'))),
+      failFilesystem: deps.failAgentFilesystem ?? (() => Promise.resolve()),
     });
     this.computerUse = new ComputerUseRunner({
       settings: this.settings,
@@ -891,7 +901,13 @@ export class Conversation {
     );
     switch (invocation.kind) {
       case 'spawn_agent':
-        session.sendToolOutput(call.callId, this.agentTools.spawnAgent(invocation.args, 'text'));
+        this.codexText.trackToolPromise(
+          this.agentTools.spawnAgent(invocation.args, 'text').then((output) => {
+            if (!this.guard.isStale(token) && this.codexText.currentSession() === session) {
+              session.sendToolOutput(call.callId, output);
+            }
+          }),
+        );
         return;
       case 'check_agents':
         session.sendToolOutput(call.callId, this.agentTools.checkAgents(invocation.args));
@@ -1532,11 +1548,15 @@ export class Conversation {
     const invocation = parseRealtimeToolCall(call);
     switch (invocation.kind) {
       case 'spawn_agent':
-        this.session.sendToolOutput(
-          call.callId,
-          this.agentTools.spawnAgent(invocation.args, 'voice'),
-        );
-        this.session.continueResponse();
+        {
+          const origin = this.session;
+          const token = this.guard.currentToken();
+          void this.agentTools.spawnAgent(invocation.args, 'voice').then((output) => {
+            if (this.guard.isStale(token) || this.session !== origin) return;
+            origin.sendToolOutput(call.callId, output);
+            origin.continueResponse();
+          });
+        }
         return;
       case 'check_agents':
         this.session.sendToolOutput(call.callId, this.agentTools.checkAgents(invocation.args));

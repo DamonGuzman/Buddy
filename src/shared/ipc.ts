@@ -139,6 +139,8 @@ export interface MainToWhisperEvents {
   'whisper:shown': null;
   /** Current staged filesystem task, or null when no retained task exists. */
   'whisper:filesystem-state': FilesystemTaskView | null;
+  /** Folder currently authorized for newly delegated helper buddies. */
+  'whisper:filesystem-selection': FilesystemSelection | null;
 }
 
 // ===========================================================================
@@ -188,7 +190,7 @@ export interface InvokeChannels {
   'settings:set': { args: [patch: SettingsPatch]; result: Settings };
   /** Submit a typed question (text fallback -> same pipeline as voice). */
   'panel:ask-text': { args: [text: string]; result: void };
-  /** Explicitly pick one folder and receive a non-forgeable, process-local capability. */
+  /** Explicitly pick one folder and receive a non-forgeable capability persisted by the main process. */
   'filesystem:select-root': { args: []; result: FilesystemSelection | null };
   /** Start a no-web filesystem helper against a disposable clone of the grant. */
   'filesystem:start': {
@@ -196,6 +198,8 @@ export interface InvokeChannels {
     result: FilesystemTaskView;
   };
   'filesystem:get-state': { args: []; result: FilesystemTaskView | null };
+  'filesystem:get-selection': { args: []; result: FilesystemSelection | null };
+  'filesystem:clear-root': { args: []; result: void };
   /** Publish a reviewed staged change set into the selected folder. */
   'filesystem:publish': { args: [taskId: string]; result: FilesystemTaskView };
   /** Delete an unpublished workspace without touching the selected folder. */
@@ -405,15 +409,18 @@ export interface WhisperApi {
   /** The window was just shown — focus the composer input. */
   onShown(cb: () => void): Unsubscribe;
   onFilesystemState(cb: (state: FilesystemTaskView | null) => void): Unsubscribe;
+  onFilesystemSelection(cb: (selection: FilesystemSelection | null) => void): Unsubscribe;
 
   /** Bootstrap snapshots (push updates ride on the whisper:* channels). */
   getSettings(): Promise<Settings>;
   getAssistantState(): Promise<AssistantState>;
   getFilesystemState(): Promise<FilesystemTaskView | null>;
+  getFilesystemSelection(): Promise<FilesystemSelection | null>;
 
   /** Same pipeline as the panel composer ('panel:ask-text'). */
   askText(text: string): Promise<void>;
   selectFilesystemRoot(): Promise<FilesystemSelection | null>;
+  clearFilesystemRoot(): Promise<void>;
   startFilesystemTask(grantId: string, request: string): Promise<FilesystemTaskView>;
   publishFilesystemTask(taskId: string): Promise<FilesystemTaskView>;
   discardFilesystemTask(taskId: string): Promise<FilesystemTaskView>;

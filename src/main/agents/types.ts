@@ -52,7 +52,17 @@ export interface AgentBrief {
 }
 
 export interface AgentFilesystemToolPort {
+  /** Real shell rooted at the picker-authorized folder; Seatbelt denies writes to that folder. */
   runShell(
+    taskId: string,
+    script: string,
+    cwdRelative: string,
+    signal: AbortSignal,
+  ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  /** Materialize only explicitly requested relative paths into the private staging area. */
+  stagePaths(taskId: string, paths: string[]): Promise<string>;
+  /** Writable shell rooted at the sparse staging area. */
+  runStagedShell(
     taskId: string,
     script: string,
     cwdRelative: string,

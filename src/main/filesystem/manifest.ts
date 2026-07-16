@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto';
-import {
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { finished } from 'node:stream/promises';
+import type { FilesystemChange } from '../../shared/types';
+import { hostFs, hostFsPromises } from './host-fs';
+
+const { constants, createReadStream } = hostFs;
+const {
   chmod,
   chown,
   copyFile,
@@ -12,12 +18,7 @@ import {
   rm,
   symlink,
   utimes,
-} from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
-import { basename, dirname, join, relative, resolve, sep } from 'node:path';
-import { finished } from 'node:stream/promises';
-import { constants } from 'node:fs';
-import type { FilesystemChange } from '../../shared/types';
+} = hostFsPromises;
 
 export type ManifestEntry =
   | { type: 'directory'; mode: number; uid: number; gid: number }
@@ -40,34 +41,38 @@ export async function buildManifest(root: string): Promise<TreeManifest> {
   return output;
 }
 
+/**
+ * Hash only explicitly staged roots and their ancestor directories. Missing roots are represented
+ * by absence, which lets callers track new files without scanning the surrounding project.
+ */
+export async function buildSparseManifest(
+  root: string,
+  relativeRoots: readonly string[],
+): Promise<TreeManifest> {
+  const output: TreeManifest = { [ROOT_KEY]: await inspectEntry(root) };
+  const roots = minimalRoots(relativeRoots);
+  for (const relativeRoot of roots) {
+    for (const ancestor of ancestors(relativeRoot)) {
+      if (output[ancestor]) continue;
+      const entry = await inspectEntryIfPresent(resolveInside(root, ancestor));
+      if (entry) output[ancestor] = entry;
+    }
+    const absolute = resolveInside(root, relativeRoot);
+    if (!(await exists(absolute))) continue;
+    await walk(absolute, relativeRoot, output);
+  }
+  return output;
+}
+
+/** One exact entry without recursing into a directory. */
+export async function inspectManifestEntry(path: string): Promise<ManifestEntry | null> {
+  return inspectEntryIfPresent(path);
+}
+
 async function walk(absolutePath: string, key: string, output: TreeManifest): Promise<void> {
-  const info = await lstat(absolutePath);
-  const mode = info.mode & 0o7777;
-  if (info.isSymbolicLink()) {
-    output[key] = {
-      type: 'symlink',
-      mode,
-      uid: info.uid,
-      gid: info.gid,
-      target: await readlink(absolutePath),
-    };
-    return;
-  }
-  if (info.isFile()) {
-    output[key] = {
-      type: 'file',
-      mode,
-      uid: info.uid,
-      gid: info.gid,
-      size: info.size,
-      hash: await hashFile(absolutePath),
-    };
-    return;
-  }
-  if (!info.isDirectory()) {
-    throw new Error(`unsupported filesystem object at ${key}`);
-  }
-  output[key] = { type: 'directory', mode, uid: info.uid, gid: info.gid };
+  const entry = await inspectEntry(absolutePath, key);
+  output[key] = entry;
+  if (entry.type !== 'directory') return;
   const dir = await opendir(absolutePath);
   const names: string[] = [];
   for await (const entry of dir) names.push(entry.name);
@@ -76,6 +81,81 @@ async function walk(absolutePath: string, key: string, output: TreeManifest): Pr
     const childKey = key === ROOT_KEY ? name : `${key}/${name}`;
     await walk(join(absolutePath, name), childKey, output);
   }
+}
+
+async function inspectEntry(absolutePath: string, key = absolutePath): Promise<ManifestEntry> {
+  const info = await lstat(absolutePath);
+  const mode = info.mode & 0o7777;
+  if (info.isSymbolicLink()) {
+    return {
+      type: 'symlink',
+      mode,
+      uid: info.uid,
+      gid: info.gid,
+      target: await readlink(absolutePath),
+    };
+  }
+  if (info.isFile()) {
+    return {
+      type: 'file',
+      mode,
+      uid: info.uid,
+      gid: info.gid,
+      size: info.size,
+      hash: await hashFile(absolutePath),
+    };
+  }
+  if (info.isDirectory()) return { type: 'directory', mode, uid: info.uid, gid: info.gid };
+  throw new Error(`unsupported filesystem object at ${key}`);
+}
+
+async function inspectEntryIfPresent(path: string): Promise<ManifestEntry | null> {
+  try {
+    return await inspectEntry(path);
+  } catch (error) {
+    if (isMissing(error)) return null;
+    throw error;
+  }
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if (isMissing(error)) return false;
+    throw error;
+  }
+}
+
+function isMissing(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ENOENT'
+  );
+}
+
+function minimalRoots(values: readonly string[]): string[] {
+  const sorted = [...new Set(values)].sort((a, b) => depth(a) - depth(b) || a.localeCompare(b));
+  return sorted.filter(
+    (candidate, index) =>
+      !sorted.some(
+        (parent, parentIndex) =>
+          parentIndex !== index &&
+          depth(parent) < depth(candidate) &&
+          candidate.startsWith(`${parent}/`),
+      ),
+  );
+}
+
+function ancestors(path: string): string[] {
+  const parts = path.split('/');
+  const output: string[] = [];
+  for (let index = 1; index < parts.length; index += 1)
+    output.push(parts.slice(0, index).join('/'));
+  return output;
 }
 
 async function hashFile(path: string): Promise<string> {

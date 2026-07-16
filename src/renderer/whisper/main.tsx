@@ -53,10 +53,12 @@ function App(): React.JSX.Element {
       clicky.onSettings(setSettings),
       clicky.onShown(() => inputRef.current?.focus()),
       clicky.onFilesystemState(setFilesystem),
+      clicky.onFilesystemSelection(setFolder),
     ];
     void clicky.getSettings().then(setSettings);
     void clicky.getAssistantState().then(setState);
     void clicky.getFilesystemState().then(setFilesystem);
+    void clicky.getFilesystemSelection().then(setFolder);
     inputRef.current?.focus();
     return () => unsubs.forEach((u) => u());
   }, []);
@@ -80,23 +82,7 @@ function App(): React.JSX.Element {
     const text = draft.trim();
     if (text.length === 0) return;
     setDraft('');
-    if (folder) {
-      setFilesystemBusy(true);
-      setFilesystemError(null);
-      void clicky
-        .startFilesystemTask(folder.id, text)
-        .then((next) => {
-          setFilesystem(next);
-          setFolder(null);
-        })
-        .catch((error: unknown) => {
-          setDraft(text);
-          setFilesystemError(messageOf(error));
-        })
-        .finally(() => setFilesystemBusy(false));
-    } else {
-      void clicky.askText(text);
-    }
+    void clicky.askText(text);
     inputRef.current?.focus();
   };
 
@@ -132,6 +118,20 @@ function App(): React.JSX.Element {
     }
   };
 
+  const clearFolder = async (): Promise<void> => {
+    if (filesystemBusy || taskActive) return;
+    setFilesystemBusy(true);
+    setFilesystemError(null);
+    try {
+      await clicky.clearFilesystemRoot();
+      setFolder(null);
+    } catch (error) {
+      setFilesystemError(messageOf(error));
+    } finally {
+      setFilesystemBusy(false);
+    }
+  };
+
   const mutateFilesystem = async (
     operation: () => Promise<FilesystemTaskView | void>,
   ): Promise<void> => {
@@ -140,7 +140,9 @@ function App(): React.JSX.Element {
     setFilesystemError(null);
     try {
       const next = await operation();
-      if (next) setFilesystem(next);
+      if (next) {
+        setFilesystem(['kept', 'undone', 'discarded'].includes(next.status) ? null : next);
+      }
     } catch (error) {
       setFilesystemError(messageOf(error));
     } finally {
@@ -197,9 +199,14 @@ function App(): React.JSX.Element {
         <div className="folder-chip">
           <span className="folder-copy">
             <strong>{folder.name}</strong>
-            <span>private copy · review before apply</span>
+            <span>helpers read directly · edits are staged</span>
           </span>
-          <button type="button" onClick={() => setFolder(null)} aria-label="remove selected folder">
+          <button
+            type="button"
+            disabled={filesystemBusy || taskActive}
+            onClick={() => void clearFolder()}
+            aria-label="remove helper folder"
+          >
             ×
           </button>
         </div>
@@ -210,14 +217,8 @@ function App(): React.JSX.Element {
           ref={inputRef}
           rows={1}
           value={draft}
-          placeholder={
-            noKey && !folder
-              ? 'add your key in settings first'
-              : folder
-                ? `what should buddy change in ${folder.name}?`
-                : 'whisper to buddy…'
-          }
-          disabled={(noKey && !folder) || filesystemBusy || taskActive}
+          placeholder={noKey ? 'add your key in settings first' : 'whisper to buddy…'}
+          disabled={noKey || filesystemBusy}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={onKeyDown}
         />
@@ -239,7 +240,11 @@ function App(): React.JSX.Element {
           disabled={filesystemBusy || taskActive}
           onClick={() => void chooseFolder()}
         >
-          {filesystemBusy && !taskActive ? 'opening…' : 'work in a folder'}
+          {filesystemBusy && !taskActive
+            ? 'opening…'
+            : folder
+              ? 'change helper folder'
+              : 'work in a folder'}
         </button>
         <button
           type="button"
@@ -277,7 +282,7 @@ function FilesystemCard({
 }: FilesystemCardProps): React.JSX.Element {
   const working = task.status === 'preparing' || task.status === 'running';
   const label: Record<FilesystemTaskView['status'], string> = {
-    preparing: 'making a safe copy…',
+    preparing: 'starting the secure shell…',
     running: 'buddy is working…',
     review: task.changes.length === 0 ? 'finished · no file changes' : 'changes ready to review',
     publishing: 'applying reviewed changes…',
@@ -298,7 +303,7 @@ function FilesystemCard({
         </span>
       </div>
       {working ? (
-        <p>the original folder is unchanged while buddy works in its private copy.</p>
+        <p>the folder is read-only to the helper; only requested edit paths enter staging.</p>
       ) : null}
       {task.summary && task.status === 'review' ? <p>{task.summary}</p> : null}
       {task.error ? <p className="filesystem-error">{task.error}</p> : null}

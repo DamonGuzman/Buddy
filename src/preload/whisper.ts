@@ -25,13 +25,16 @@ const api: WhisperApi = {
   onSettings: (cb) => subscribe('whisper:settings', cb),
   onShown: (cb) => subscribe('whisper:shown', () => cb()),
   onFilesystemState: (cb) => subscribe('whisper:filesystem-state', cb),
+  onFilesystemSelection: (cb) => subscribe('whisper:filesystem-selection', cb),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),
   getAssistantState: () => ipcRenderer.invoke('overlay:get-state'),
   getFilesystemState: () => ipcRenderer.invoke('filesystem:get-state'),
+  getFilesystemSelection: () => ipcRenderer.invoke('filesystem:get-selection'),
 
   askText: (text) => ipcRenderer.invoke('panel:ask-text', text),
   selectFilesystemRoot: () => ipcRenderer.invoke('filesystem:select-root'),
+  clearFilesystemRoot: () => ipcRenderer.invoke('filesystem:clear-root'),
   startFilesystemTask: (grantId, request) =>
     ipcRenderer.invoke('filesystem:start', grantId, request),
   publishFilesystemTask: (taskId) => ipcRenderer.invoke('filesystem:publish', taskId),

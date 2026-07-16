@@ -261,6 +261,7 @@ function createServices(tray: TrayRef): Services {
   const filesystem = new FilesystemTaskService({
     basePath: join(app.getPath('userData'), 'filesystem'),
     onState: (state) => whisper.send('whisper:filesystem-state', state),
+    onSelection: (selection) => whisper.send('whisper:filesystem-selection', selection),
   });
   const hotkey = new HotkeyManager();
 
@@ -445,6 +446,29 @@ function createServices(tray: TrayRef): Services {
     panel: panelPortWithWhisperMirror,
     codexAuth,
     agents,
+    prepareAgentFilesystem: async (task, agentId) => {
+      let selection = filesystem.activeSelection();
+      if (!selection) {
+        const result = await dialog.showOpenDialog({
+          title: 'Choose a folder for helper buddies',
+          buttonLabel: 'Give helpers this folder',
+          properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'],
+          message:
+            'Helpers read this folder directly. Only paths they edit are staged for your review.',
+        });
+        if (result.canceled || !result.filePaths[0]) {
+          throw new Error('choose a folder before starting a helper buddy');
+        }
+        selection = await filesystem.grant(result.filePaths[0]);
+        whisper.show();
+      }
+      const prepared = await filesystem.prepare(selection.id, task);
+      await filesystem.attachAgent(prepared.taskId, agentId);
+      return { taskId: prepared.taskId, rootName: prepared.rootName };
+    },
+    failAgentFilesystem: async (taskId, reason) => {
+      await filesystem.fail(taskId, reason);
+    },
     computerUseSecurity: {
       gate: computerUseRuntime.gate,
       approvals: computerUseRuntime.approvals,
@@ -677,7 +701,7 @@ function registerInvokeHandlers(
       buttonLabel: 'Work in this folder',
       properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'],
       message:
-        'Buddy will work in a private copy. You review changes before they reach this folder.',
+        'Helpers can read this folder immediately. Only files they edit are staged for your review.',
     });
     if (result.canceled || !result.filePaths[0]) return null;
     const selection = await filesystem.grant(result.filePaths[0]);
@@ -713,15 +737,17 @@ function registerInvokeHandlers(
     return filesystem.state() ?? prepared;
   });
   handle('filesystem:get-state', () => filesystem.state());
+  handle('filesystem:get-selection', () => filesystem.activeSelection());
+  handle('filesystem:clear-root', () => filesystem.clearGrant());
   handle('filesystem:publish', (taskId) => filesystem.publish(taskId));
   handle('filesystem:discard', (taskId) => filesystem.discard(taskId));
   handle('filesystem:undo', (taskId) => filesystem.undo(taskId));
   handle('filesystem:keep', (taskId) => filesystem.keep(taskId));
-  handle('filesystem:cancel', (taskId) => {
+  handle('filesystem:cancel', async (taskId) => {
     const state = filesystem.state();
-    if (!state || state.taskId !== taskId || !state.agentId)
-      throw new Error('filesystem task not found');
-    agents.cancel(state.agentId);
+    if (!state || state.taskId !== taskId) return;
+    if (state.agentId) agents.cancel(state.agentId);
+    else await filesystem.cancelPending(taskId);
   });
   // Known limitation: mic devices are enumerated by the panel renderer
   // locally; main has no device list to serve (mic:list returns []).
@@ -938,6 +964,7 @@ function wirePanelLifecycle(
     conversation.replayToPanel();
     whisper.send('whisper:settings', settings.get());
     whisper.send('whisper:filesystem-state', filesystem.state());
+    whisper.send('whisper:filesystem-selection', filesystem.activeSelection());
   });
 }
 

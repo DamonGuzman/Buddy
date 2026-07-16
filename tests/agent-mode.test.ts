@@ -433,7 +433,7 @@ describe('Agent Mode runtime', () => {
     await manager.dispose();
   });
 
-  it('reports browser runtime unavailability without misclassifying it as sign-in failure', () => {
+  it('reports filesystem runtime unavailability without misclassifying it as sign-in failure', async () => {
     const transcript = new TranscriptStore(10, () => undefined);
     transcript.upsert({
       id: 'user_1',
@@ -447,22 +447,24 @@ describe('Agent Mode runtime', () => {
       agents: {
         isReady: () => true,
         list: () => [],
-        spawn: () => ({ ok: false, reason: 'browser_unavailable' }),
+        spawn: () => ({ ok: false, reason: 'filesystem_unavailable' }),
         markSpoken: () => undefined,
       },
       transcript,
       turnCaptures: () => [],
       noteOrigin: () => undefined,
       surfaceError,
+      prepareFilesystem: async () => ({ taskId: 'task-1', rootName: 'project' }),
+      failFilesystem: async () => undefined,
     });
 
-    expect(tools.spawnAgent({ task: 'file the issue', browser_access: true }, 'text')).toEqual({
-      error: 'browser use is unavailable for background buddies right now',
+    await expect(tools.spawnAgent({ task: 'edit the project' }, 'text')).resolves.toEqual({
+      error: 'filesystem use is unavailable for background buddies right now',
     });
     expect(surfaceError).not.toHaveBeenCalled();
   });
 
-  it('never authorizes an agent from an older user turn while the latest request is streaming', () => {
+  it('never authorizes an agent from an older user turn while the latest request is streaming', async () => {
     const transcript = new TranscriptStore(10, () => undefined);
     transcript.upsert({
       id: 'user_old',
@@ -490,9 +492,11 @@ describe('Agent Mode runtime', () => {
       turnCaptures: () => [],
       noteOrigin: () => undefined,
       surfaceError: () => undefined,
+      prepareFilesystem: async () => ({ taskId: 'must-not-prepare', rootName: 'project' }),
+      failFilesystem: async () => undefined,
     });
 
-    expect(tools.spawnAgent({ task: 'send the payment', browser_access: true }, 'text')).toEqual({
+    await expect(tools.spawnAgent({ task: 'send the payment' }, 'text')).resolves.toEqual({
       error: 'the original user request is still being transcribed',
     });
     expect(spawn).not.toHaveBeenCalled();
