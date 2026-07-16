@@ -54,6 +54,7 @@ export interface FilesystemTaskServiceOptions {
 export class FilesystemTaskService implements AgentFilesystemToolPort {
   private readonly grants = new Map<string, string>();
   private readonly runner: MacSeatbeltRunner;
+  private activeGrant: FilesystemSelection | null = null;
   private record: TaskRecord | null = null;
   private mutation: Promise<FilesystemTaskView> | null = null;
 
@@ -63,6 +64,7 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
 
   async initialize(): Promise<void> {
     await mkdir(this.options.basePath, { recursive: true, mode: 0o700 });
+    await this.loadGrant();
     await this.loadLatest();
     if (!this.record) return;
     const status = this.record.view.status;
@@ -83,11 +85,18 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
     return this.record ? cloneView(this.record.view) : null;
   }
 
+  activeSelection(): FilesystemSelection | null {
+    return this.activeGrant ? { ...this.activeGrant } : null;
+  }
+
   async grant(selectedPath: string): Promise<FilesystemSelection> {
     const rootPath = await this.validateSelectedRoot(selectedPath);
     const id = randomUUID();
     this.grants.set(id, rootPath);
-    return { id, name: basename(rootPath), displayPath: rootPath };
+    const selection = { id, name: basename(rootPath), displayPath: rootPath };
+    this.activeGrant = selection;
+    await writeJson(join(this.options.basePath, 'grant.json'), { id, rootPath });
+    return { ...selection };
   }
 
   async prepare(grantId: string, request: string): Promise<FilesystemTaskView> {
@@ -454,6 +463,25 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
       this.record = raw;
     } catch {
       this.record = null;
+    }
+  }
+
+  private async loadGrant(): Promise<void> {
+    try {
+      const parsed = JSON.parse(
+        await readFile(join(this.options.basePath, 'grant.json'), 'utf8'),
+      ) as { id?: unknown; rootPath?: unknown };
+      if (typeof parsed.id !== 'string' || typeof parsed.rootPath !== 'string') return;
+      const rootPath = await this.validateSelectedRoot(parsed.rootPath);
+      this.grants.set(parsed.id, rootPath);
+      this.activeGrant = {
+        id: parsed.id,
+        name: basename(rootPath),
+        displayPath: rootPath,
+      };
+    } catch {
+      this.activeGrant = null;
+      await rm(join(this.options.basePath, 'grant.json'), { force: true }).catch(() => undefined);
     }
   }
 }
