@@ -13,6 +13,7 @@ export * from './types/actionable-error';
 export * from './types/audio';
 export * from './types/capture';
 export * from './types/debug';
+export * from './types/filesystem';
 export * from './types/overlay';
 export * from './types/permissions';
 export * from './types/pointer';

@@ -47,6 +47,18 @@ export interface AgentBrief {
   createdAt: number;
   /** Explicit per-task capability grant. False keeps every acting tool out of the model request. */
   browserEnabled: boolean;
+  /** Present only for a picker-authorized, no-web staged filesystem task. */
+  filesystem?: { taskId: string; rootName: string };
+}
+
+export interface AgentFilesystemToolPort {
+  runShell(
+    taskId: string,
+    script: string,
+    cwdRelative: string,
+    signal: AbortSignal,
+  ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  describeChanges(taskId: string): Promise<string>;
 }
 
 export type AgentBrowserAction = Exclude<TriggerAction, { kind: 'screenshot' }>;
@@ -152,6 +164,8 @@ export interface AgentToolContext {
   noteFetch(): void;
   /** Present only when this task was explicitly granted browser use. */
   browser?: AgentBrowserToolPort;
+  /** Present only for a picker-authorized staged filesystem task. */
+  filesystem?: AgentFilesystemToolPort;
 }
 
 export interface AgentBrowserToolResult {
@@ -207,7 +221,12 @@ export interface AgentManagerDeps {
   monotonicNow?(): number;
   /** Absent means browser tasks fail closed and cannot be accepted. */
   browser?: AgentBrowserDeps;
+  /** Absent means filesystem tasks fail closed and cannot be accepted. */
+  filesystem?: AgentFilesystemToolPort;
 }
 export type SpawnResult =
   | { ok: true; agentId: string }
-  | { ok: false; reason: 'at_capacity' | 'not_signed_in' | 'browser_unavailable' };
+  | {
+      ok: false;
+      reason: 'at_capacity' | 'not_signed_in' | 'browser_unavailable' | 'filesystem_unavailable';
+    };

@@ -10,7 +10,7 @@ export type AgentStatus =
 
 /** One activity-log line on the agent Card (docs/AGENT-MODE.md §5.2). */
 export interface AgentStep {
-  kind: 'search' | 'fetch' | 'note' | 'think' | 'browse' | 'action' | 'review';
+  kind: 'search' | 'fetch' | 'note' | 'think' | 'browse' | 'action' | 'review' | 'shell' | 'file';
   /** e.g. 'searched "best 27 inch monitor 2026"', 'read rtings.com/…'. */
   label: string;
   /** Epoch ms. */

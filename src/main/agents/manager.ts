@@ -63,11 +63,16 @@ export class AgentManager {
       return { ok: false, reason: 'browser_unavailable' };
     if (brief.browserEnabled && !this.deps.browser)
       return { ok: false, reason: 'browser_unavailable' };
+    if (brief.browserEnabled && brief.filesystem)
+      throw new Error('browser and filesystem capabilities are mutually exclusive');
+    if (brief.filesystem && !this.deps.filesystem)
+      return { ok: false, reason: 'filesystem_unavailable' };
     if (this.runners.size >= AGENT_MAX_CONCURRENT) return { ok: false, reason: 'at_capacity' };
     const runner = new AgentRunner({
       brief,
       backend: this.deps.backend,
       ...(brief.browserEnabled && this.deps.browser ? { browser: this.deps.browser } : {}),
+      ...(brief.filesystem && this.deps.filesystem ? { filesystem: this.deps.filesystem } : {}),
       ...(this.deps.now ? { now: this.deps.now } : {}),
       ...(this.deps.monotonicNow ? { monotonicNow: this.deps.monotonicNow } : {}),
       onUpdate: (summary) => {
@@ -278,6 +283,8 @@ const KNOWN_STEP_KINDS: readonly string[] = [
   'browse',
   'action',
   'review',
+  'shell',
+  'file',
 ] satisfies AgentStep['kind'][];
 
 function isStep(value: unknown): value is AgentStep {

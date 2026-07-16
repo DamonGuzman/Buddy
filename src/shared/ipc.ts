@@ -24,6 +24,8 @@ import type {
   CaptureIndicatorUpdate,
   CodexSignInState,
   EnrolledSite,
+  FilesystemSelection,
+  FilesystemTaskView,
   MicDevice,
   OverlayDisplaySurface,
   OverlayHoverConfig,
@@ -135,6 +137,8 @@ export interface MainToWhisperEvents {
   'whisper:settings': Settings;
   /** The window was just shown — focus the composer input. */
   'whisper:shown': null;
+  /** Current staged filesystem task, or null when no retained task exists. */
+  'whisper:filesystem-state': FilesystemTaskView | null;
 }
 
 // ===========================================================================
@@ -184,6 +188,23 @@ export interface InvokeChannels {
   'settings:set': { args: [patch: SettingsPatch]; result: Settings };
   /** Submit a typed question (text fallback -> same pipeline as voice). */
   'panel:ask-text': { args: [text: string]; result: void };
+  /** Explicitly pick one folder and receive a non-forgeable, process-local capability. */
+  'filesystem:select-root': { args: []; result: FilesystemSelection | null };
+  /** Start a no-web filesystem helper against a disposable clone of the grant. */
+  'filesystem:start': {
+    args: [grantId: string, request: string];
+    result: FilesystemTaskView;
+  };
+  'filesystem:get-state': { args: []; result: FilesystemTaskView | null };
+  /** Publish a reviewed staged change set into the selected folder. */
+  'filesystem:publish': { args: [taskId: string]; result: FilesystemTaskView };
+  /** Delete an unpublished workspace without touching the selected folder. */
+  'filesystem:discard': { args: [taskId: string]; result: FilesystemTaskView };
+  /** Restore the durable before-image, after verifying no later edits would be lost. */
+  'filesystem:undo': { args: [taskId: string]; result: FilesystemTaskView };
+  /** Accept a published transaction and delete its retained Undo snapshot. */
+  'filesystem:keep': { args: [taskId: string]; result: FilesystemTaskView };
+  'filesystem:cancel': { args: [taskId: string]; result: void };
   /** Microphone devices as enumerated by the panel-visible renderer. */
   'mic:list': { args: []; result: MicDevice[] };
   /** Select the preferred mic ('' = system default); persisted in settings. */
@@ -383,13 +404,22 @@ export interface WhisperApi {
   onSettings(cb: (settings: Settings) => void): Unsubscribe;
   /** The window was just shown — focus the composer input. */
   onShown(cb: () => void): Unsubscribe;
+  onFilesystemState(cb: (state: FilesystemTaskView | null) => void): Unsubscribe;
 
   /** Bootstrap snapshots (push updates ride on the whisper:* channels). */
   getSettings(): Promise<Settings>;
   getAssistantState(): Promise<AssistantState>;
+  getFilesystemState(): Promise<FilesystemTaskView | null>;
 
   /** Same pipeline as the panel composer ('panel:ask-text'). */
   askText(text: string): Promise<void>;
+  selectFilesystemRoot(): Promise<FilesystemSelection | null>;
+  startFilesystemTask(grantId: string, request: string): Promise<FilesystemTaskView>;
+  publishFilesystemTask(taskId: string): Promise<FilesystemTaskView>;
+  discardFilesystemTask(taskId: string): Promise<FilesystemTaskView>;
+  undoFilesystemTask(taskId: string): Promise<FilesystemTaskView>;
+  keepFilesystemTask(taskId: string): Promise<FilesystemTaskView>;
+  cancelFilesystemTask(taskId: string): Promise<void>;
   /** Toggle quiet mode etc. — only voiceMuted is expected from here. */
   setSettings(patch: SettingsPatch): Promise<Settings>;
   /** Tuck the whisper away (esc / close affordance). */

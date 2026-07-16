@@ -78,6 +78,6 @@ export const PANEL_HEIGHT = 520;
 // M20: the whisper — small floating composer summoned by a hotkey tap or a
 // buddy click. Sized for a short reply stack + a one-line composer.
 export const WHISPER_WIDTH = 340;
-export const WHISPER_HEIGHT = 244;
+export const WHISPER_HEIGHT = 390;
 
 export const APP_NAME = 'Buddy';

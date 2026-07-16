@@ -15,7 +15,7 @@
  *   permission prompt (use-fake-ui-for-media-stream).
  */
 
-import { app, Notification, powerMonitor, shell } from 'electron';
+import { app, dialog, Notification, powerMonitor, shell } from 'electron';
 import type { Tray } from 'electron';
 import { appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,7 +25,7 @@ import { CodexAgentBackend } from './agents/backend';
 import { ComputerUseRuntime } from './agents/computer-use-runtime';
 import { AgentManager } from './agents/manager';
 import { MockActionReviewer, MockAgentBackend } from './agents/mock-backend';
-import type { AgentBackend } from './agents/types';
+import type { AgentBackend, AgentBrief } from './agents/types';
 import { assertPublicBrowserDestination, BuddyBrowserProfile } from './computer/browser-profile';
 import { runCaptureSelfTest } from './capture-self-test';
 import { Conversation } from './conversation';
@@ -66,6 +66,7 @@ import { PhoneAudioBridgeClient } from './phone-audio-bridge';
 import { PhoneAudioBridgeSupervisor } from './phone-audio-bridge-supervisor';
 import { resolvePhoneAudioConfiguration } from './phone-audio-config';
 import { NativeReceiverLiveDesktopEvidence } from './computer/live-desktop-evidence';
+import { FilesystemTaskService } from './filesystem/service';
 import type { MainToPanelChannel, MainToPanelEvents } from '../shared/ipc';
 import type {
   AssistantState,
@@ -126,6 +127,7 @@ interface Services {
   hotkey: HotkeyManager;
   permissions: PermissionController;
   computerUseRuntime: ComputerUseRuntime;
+  filesystem: FilesystemTaskService;
   agents: AgentManager;
   conversation: Conversation;
   phoneAudio: PhoneAudioBridgeClient | null;
@@ -159,6 +161,9 @@ async function main(): Promise<void> {
   // Boot
   // ---------------------------------------------------------------------
   await app.whenReady();
+  await services.filesystem.initialize().catch((error: unknown) => {
+    console.error('[filesystem] recovery initialization failed', error);
+  });
   if (process.platform === 'win32') app.setAppUserModelId('ai.fastyr.buddy');
   if (process.platform === 'darwin') app.dock?.hide();
 
@@ -253,6 +258,10 @@ function createServices(tray: TrayRef): Services {
   // M20: the whisper composer, anchored beside the buddy's rest spot.
   const whisper = new WhisperManager({ getAnchor: () => overlays.restAnchor() });
   whisper.start(); // pre-create hidden so the first summon is instant
+  const filesystem = new FilesystemTaskService({
+    basePath: join(app.getPath('userData'), 'filesystem'),
+    onState: (state) => whisper.send('whisper:filesystem-state', state),
+  });
   const hotkey = new HotkeyManager();
 
   const codexAuth = getCodexAuthProvider();
@@ -361,6 +370,7 @@ function createServices(tray: TrayRef): Services {
     isReady: () => agentMock || codexAgentBackend.isReady(),
     persistencePath: join(app.getPath('userData'), 'agents.json'),
     browser: computerUseRuntime.browser,
+    filesystem,
     // M19: the overlays mirror the same renderer-safe list (helper sprites).
     // M21: the panel's agents view is gone — the overlay helper sprites are
     // the agents surface now.
@@ -368,7 +378,33 @@ function createServices(tray: TrayRef): Services {
       sessionRecorder?.record('agents_changed', list);
       overlays.broadcast('overlay:agents', list);
     },
-    onFinished: (summary) => conversationRef.current?.deliverAgentResult(summary),
+    onFinished: (summary) => {
+      void filesystem
+        .completeAgent(summary)
+        .then((handled) => {
+          if (!handled) {
+            conversationRef.current?.deliverAgentResult(summary);
+            return;
+          }
+          const state = filesystem.state();
+          const body =
+            state?.status === 'review'
+              ? `${state.changes.length} file change${state.changes.length === 1 ? '' : 's'} ready to review.`
+              : (state?.error ?? 'The folder task finished.');
+          try {
+            if (process.platform === 'darwin' && Notification.isSupported()) {
+              const notification = new Notification({ title: 'Buddy folder task', body });
+              notification.on('click', () => whisper.show());
+              notification.show();
+            } else {
+              tray.current?.displayBalloon({ title: 'Buddy folder task', content: body });
+            }
+          } catch {
+            /* the helper sprite remains available when notifications are disabled */
+          }
+        })
+        .catch((error: unknown) => console.error('[filesystem] completion failed', error));
+    },
     notify: (title, body) => {
       try {
         tray.current?.displayBalloon({ title, content: body });
@@ -485,6 +521,7 @@ function createServices(tray: TrayRef): Services {
     hotkey,
     permissions,
     computerUseRuntime,
+    filesystem,
     agents,
     conversation,
     phoneAudio,
@@ -618,13 +655,74 @@ function startCodexSigninPolling(push: (force: boolean) => void): NodeJS.Timeout
 // ===========================================================================
 
 function registerInvokeHandlers(
-  { settings, conversation, agents, permissions, panel, computerUseRuntime }: Services,
+  {
+    settings,
+    conversation,
+    agents,
+    permissions,
+    panel,
+    whisper,
+    computerUseRuntime,
+    filesystem,
+  }: Services,
   codexOAuth: CodexOAuthLoopback,
   runtime: RuntimeReporter,
 ): void {
   handle('settings:get', () => settings.get());
   handle('settings:set', (patch) => settings.set(patch));
   handle('panel:ask-text', (text) => conversation.askText(text));
+  handle('filesystem:select-root', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Choose a folder for Buddy',
+      buttonLabel: 'Work in this folder',
+      properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'],
+      message:
+        'Buddy will work in a private copy. You review changes before they reach this folder.',
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const selection = await filesystem.grant(result.filePaths[0]);
+    whisper.show();
+    return selection;
+  });
+  handle('filesystem:start', async (grantId, request) => {
+    if (typeof grantId !== 'string' || typeof request !== 'string')
+      throw new Error('invalid filesystem task');
+    const prepared = await filesystem.prepare(grantId, request);
+    const agentId = `agent_fs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    await filesystem.attachAgent(prepared.taskId, agentId);
+    const brief: AgentBrief = {
+      id: agentId,
+      userRequest: request.trim(),
+      task: request.trim(),
+      recentTranscript: '',
+      createdAt: Date.now(),
+      browserEnabled: false,
+      filesystem: { taskId: prepared.taskId, rootName: prepared.rootName },
+    };
+    const spawned = agents.spawn(brief);
+    if (!spawned.ok) {
+      const reason =
+        spawned.reason === 'not_signed_in'
+          ? 'Sign in to ChatGPT in Buddy Settings before starting a folder task.'
+          : spawned.reason === 'at_capacity'
+            ? 'Buddy already has too many helpers running. Stop one and try again.'
+            : 'Filesystem execution is unavailable.';
+      return filesystem.fail(prepared.taskId, reason);
+    }
+    whisper.show();
+    return filesystem.state() ?? prepared;
+  });
+  handle('filesystem:get-state', () => filesystem.state());
+  handle('filesystem:publish', (taskId) => filesystem.publish(taskId));
+  handle('filesystem:discard', (taskId) => filesystem.discard(taskId));
+  handle('filesystem:undo', (taskId) => filesystem.undo(taskId));
+  handle('filesystem:keep', (taskId) => filesystem.keep(taskId));
+  handle('filesystem:cancel', (taskId) => {
+    const state = filesystem.state();
+    if (!state || state.taskId !== taskId || !state.agentId)
+      throw new Error('filesystem task not found');
+    agents.cancel(state.agentId);
+  });
   // Known limitation: mic devices are enumerated by the panel renderer
   // locally; main has no device list to serve (mic:list returns []).
   handle('mic:list', () => []);
@@ -703,6 +801,7 @@ function registerRendererEvents({
   agents,
   panel,
   computerUseRuntime,
+  filesystem,
 }: Services): void {
   onRendererEvent('audio:chunk', (chunk) => {
     conversation.handleAudioChunk(chunk);
@@ -725,7 +824,8 @@ function registerRendererEvents({
     const id = validAgentId(payload);
     if (id === null) return;
     const agent = agents.list().find((item) => item.id === id);
-    if (agent?.status === 'waiting_approval') panel.show();
+    if (filesystem.state()?.agentId === id) whisper.show();
+    else if (agent?.status === 'waiting_approval') panel.show();
   });
   onRendererEvent('overlay:agent-cancel', (payload) => {
     const id = validAgentId(payload);
@@ -799,7 +899,7 @@ function wireHotkey({ hotkey, settings, conversation, whisper, overlays }: Servi
 }
 
 function wirePanelLifecycle(
-  { panel, whisper, settings, conversation, permissions, computerUseRuntime }: Services,
+  { panel, whisper, settings, conversation, permissions, computerUseRuntime, filesystem }: Services,
   tray: TrayRef,
   runtime: RuntimeReporter,
   pushCodexSignin: (force: boolean) => void,
@@ -837,6 +937,7 @@ function wirePanelLifecycle(
   whisper.onRendererReady(() => {
     conversation.replayToPanel();
     whisper.send('whisper:settings', settings.get());
+    whisper.send('whisper:filesystem-state', filesystem.state());
   });
 }
 

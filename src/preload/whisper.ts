@@ -24,11 +24,21 @@ const api: WhisperApi = {
   onAssistantState: (cb) => subscribe('whisper:assistant-state', cb),
   onSettings: (cb) => subscribe('whisper:settings', cb),
   onShown: (cb) => subscribe('whisper:shown', () => cb()),
+  onFilesystemState: (cb) => subscribe('whisper:filesystem-state', cb),
 
   getSettings: () => ipcRenderer.invoke('settings:get'),
   getAssistantState: () => ipcRenderer.invoke('overlay:get-state'),
+  getFilesystemState: () => ipcRenderer.invoke('filesystem:get-state'),
 
   askText: (text) => ipcRenderer.invoke('panel:ask-text', text),
+  selectFilesystemRoot: () => ipcRenderer.invoke('filesystem:select-root'),
+  startFilesystemTask: (grantId, request) =>
+    ipcRenderer.invoke('filesystem:start', grantId, request),
+  publishFilesystemTask: (taskId) => ipcRenderer.invoke('filesystem:publish', taskId),
+  discardFilesystemTask: (taskId) => ipcRenderer.invoke('filesystem:discard', taskId),
+  undoFilesystemTask: (taskId) => ipcRenderer.invoke('filesystem:undo', taskId),
+  keepFilesystemTask: (taskId) => ipcRenderer.invoke('filesystem:keep', taskId),
+  cancelFilesystemTask: (taskId) => ipcRenderer.invoke('filesystem:cancel', taskId),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
   hide: () => ipcRenderer.send('whisper:hide', null),
 };

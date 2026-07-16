@@ -11,6 +11,7 @@ import type {
   AgentToolContext,
   AgentBrowserDeps,
   AgentBrowserToolResult,
+  AgentFilesystemToolPort,
   ResponseItem,
 } from './types';
 import {
@@ -55,6 +56,16 @@ you have an explicitly granted buddy browser for this task. it is your own hidde
 - if the target or effect is unclear, stop or ask for human help instead of guessing.
 - do not perform a materially different action from the user's task.`;
 
+const FILESYSTEM_INSTRUCTIONS = `you are a background filesystem agent working for buddy on a folder the user explicitly selected.
+you have real macos zsh, but it runs in a disposable on-disk clone. the user's selected folder is not live and will not change until the user reviews the diff and chooses apply.
+- inspect the workspace before editing. use run_shell with cwd "." or a workspace-relative subdirectory.
+- use normal macos shell tools and scripts. shell startup files and network are disabled.
+- never attempt to escape the workspace, inspect unrelated user data, enable network, launch apps, or weaken the sandbox.
+- do not use web knowledge or claim to have browsed. this run intentionally has no web or browser tools.
+- make only changes needed for the user's exact request. validate the result with appropriate local checks.
+- before finishing, call workspace_changes and summarize what is ready for the user's review.
+- do not ask the user to approve shell commands; the only user decision is whether to apply the final file changes.`;
+
 /**
  * Pure retry policy for one backend round: retry only failed results the
  * backend marked retryable (or generic backend-down blips), and never past
@@ -75,6 +86,7 @@ export interface AgentRunnerOptions {
   /** Monotonic elapsed-time clock; separate from wall-clock activity timestamps. */
   monotonicNow?: () => number;
   browser?: AgentBrowserDeps;
+  filesystem?: AgentFilesystemToolPort;
 }
 
 export class AgentRunner {
@@ -96,6 +108,10 @@ export class AgentRunner {
     this.model = options.model ?? agentModelOverride() ?? AGENT_DEFAULT_MODEL;
     if (options.brief.browserEnabled && !options.browser)
       throw new Error('browser-enabled agent requires browser dependencies');
+    if (options.brief.browserEnabled && options.brief.filesystem)
+      throw new Error('browser and filesystem capabilities cannot share one agent');
+    if (options.brief.filesystem && !options.filesystem)
+      throw new Error('filesystem agent requires filesystem dependencies');
     this.summary = {
       id: options.brief.id,
       task: options.brief.task,
@@ -243,9 +259,14 @@ export class AgentRunner {
         model: this.model,
         instructions: this.options.brief.browserEnabled
           ? BROWSER_INSTRUCTIONS
-          : READ_ONLY_INSTRUCTIONS,
+          : this.options.brief.filesystem
+            ? FILESYSTEM_INSTRUCTIONS
+            : READ_ONLY_INSTRUCTIONS,
         input: compactedHistory,
-        tools: agentToolDefinitions(this.options.brief.browserEnabled),
+        tools: agentToolDefinitions(
+          this.options.brief.browserEnabled,
+          this.options.brief.filesystem !== undefined,
+        ),
         effort: AGENT_REASONING_EFFORT,
         signal,
       });
@@ -261,7 +282,11 @@ export class AgentRunner {
   }
 
   private async executeTool(name: string, argsJson: string): Promise<AgentBrowserToolResult> {
-    const tool = findAgentTool(name, this.options.brief.browserEnabled);
+    const tool = findAgentTool(
+      name,
+      this.options.brief.browserEnabled,
+      this.options.brief.filesystem !== undefined,
+    );
     if (!tool) return { output: JSON.stringify({ error: `unknown tool: ${name}` }) };
     let args: Record<string, unknown>;
     try {
@@ -303,6 +328,7 @@ export class AgentRunner {
         this.fetches += 1;
       },
       ...(this.browser ? { browser: this.browser } : {}),
+      ...(this.options.filesystem ? { filesystem: this.options.filesystem } : {}),
     };
     try {
       return { output: await tool.execute(args, ctx) };
