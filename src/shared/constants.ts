@@ -1,5 +1,5 @@
 /**
- * Shared constants for Clicky.
+ * Shared constants for Buddy.
  *
  * Part of the frozen `src/shared/*` contract (docs/ARCHITECTURE.md §5, §9).
  */

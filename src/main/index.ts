@@ -18,7 +18,7 @@
 import { app, dialog, Notification, powerMonitor, shell } from 'electron';
 import type { Tray } from 'electron';
 import { appendFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { getCodexAuthProvider } from './auth/codex-auth';
 import { CodexOAuthLoopback } from './auth/oauth-loopback';
 import { CodexAgentBackend } from './agents/backend';
@@ -50,7 +50,9 @@ import { describeKind } from './errors';
 import { HotkeyManager } from './hotkey';
 import { handle, onRendererEvent } from './ipc';
 import { SettingsStore } from './settings';
+import { FirecrawlClient } from './firecrawl/client';
 import { SessionRecorder } from './session-recorder';
+import { installModelExecutionRecorder, ModelExecutionRecorder } from './model-execution-recorder';
 import {
   TRAY_HINT_CRASHED,
   TRAY_HINT_HOTKEY_DEAD,
@@ -121,6 +123,7 @@ if (!app.requestSingleInstanceLock()) {
 interface Services {
   settings: SettingsStore;
   sessionRecorder: SessionRecorder | null;
+  modelExecutionRecorder: ModelExecutionRecorder;
   overlays: OverlayManager;
   panel: PanelManager;
   whisper: WhisperManager;
@@ -246,6 +249,17 @@ function createServices(tray: TrayRef): Services {
     );
   }
 
+  // Model observability is fail-closed: unlike the user-facing session
+  // recorder, this recorder is mandatory. If its journal cannot be created,
+  // service construction stops before any model transport exists.
+  const modelExecutionRecorder = new ModelExecutionRecorder({
+    userDataPath: app.getPath('userData'),
+    appVersion: app.getVersion(),
+    appSessionId: sessionRecorder?.sessionId ?? null,
+  });
+  installModelExecutionRecorder(modelExecutionRecorder);
+  console.log(`[model-executions] storing full model traces in ${modelExecutionRecorder.filePath}`);
+
   const overlays = new OverlayManager(settings);
   const panel = new PanelManager({
     showOnLaunch: showPanelOnLaunch(),
@@ -260,13 +274,16 @@ function createServices(tray: TrayRef): Services {
   whisper.start(); // pre-create hidden so the first summon is instant
   const filesystem = new FilesystemTaskService({
     basePath: join(app.getPath('userData'), 'filesystem'),
-    onState: (state) => whisper.send('whisper:filesystem-state', state),
+    onState: (states) => whisper.send('whisper:filesystem-state', states),
     onSelection: (selection) => whisper.send('whisper:filesystem-selection', selection),
   });
   const hotkey = new HotkeyManager();
 
   const codexAuth = getCodexAuthProvider();
   const codexAgentBackend = new CodexAgentBackend(codexAuth);
+  const firecrawl = new FirecrawlClient({
+    getApiKey: () => settings.getFirecrawlApiKey(),
+  });
   const agentMock = isAgentMockEnabled();
   const agentBackend: AgentBackend = agentMock ? new MockAgentBackend() : codexAgentBackend;
   let visibleApprovalIds = new Set<string>();
@@ -370,6 +387,7 @@ function createServices(tray: TrayRef): Services {
     backend: agentBackend,
     isReady: () => agentMock || codexAgentBackend.isReady(),
     persistencePath: join(app.getPath('userData'), 'agents.json'),
+    firecrawl,
     browser: computerUseRuntime.browser,
     filesystem,
     // M19: the overlays mirror the same renderer-safe list (helper sprites).
@@ -382,29 +400,49 @@ function createServices(tray: TrayRef): Services {
     onFinished: (summary) => {
       void filesystem
         .completeAgent(summary)
-        .then((handled) => {
-          if (!handled) {
+        .then(async (completion) => {
+          if (!completion.handled) {
             conversationRef.current?.deliverAgentResult(summary);
             return;
           }
-          const state = filesystem.state();
-          const body =
-            state?.status === 'review'
-              ? `${state.changes.length} file change${state.changes.length === 1 ? '' : 's'} ready to review.`
-              : (state?.error ?? 'The folder task finished.');
-          try {
-            if (process.platform === 'darwin' && Notification.isSupported()) {
-              const notification = new Notification({ title: 'Buddy folder task', body });
-              notification.on('click', () => whisper.show());
-              notification.show();
+
+          let delivered = summary;
+          if (completion.error) {
+            delivered = {
+              ...summary,
+              status: 'failed',
+              error: completion.error,
+              summary: `the helper finished, but its file handoff stopped safely: ${completion.error}`,
+            };
+          } else if (completion.presentation) {
+            const openError = await shell.openPath(completion.presentation.path);
+            const name = basename(completion.presentation.path);
+            if (openError) {
+              delivered = {
+                ...summary,
+                summary: `${summary.summary ?? 'the folder task finished.'} The changes were applied, but I couldn't open ${name}: ${openError}`,
+              };
+              whisper.show();
             } else {
-              tray.current?.displayBalloon({ title: 'Buddy folder task', content: body });
+              delivered = {
+                ...summary,
+                summary: `${summary.summary ?? 'the folder task finished.'} I applied the verified changes and opened ${completion.presentation.kind === 'file' ? name : 'the output folder'} for you.`,
+              };
             }
-          } catch {
-            /* the helper sprite remains available when notifications are disabled */
           }
+          conversationRef.current?.deliverAgentResult(delivered);
         })
-        .catch((error: unknown) => console.error('[filesystem] completion failed', error));
+        .catch((error: unknown) => {
+          const detail = error instanceof Error ? error.message : String(error);
+          console.error('[filesystem] completion failed', error);
+          conversationRef.current?.deliverAgentResult({
+            ...summary,
+            status: 'failed',
+            error: detail,
+            summary: `the helper finished, but its file handoff failed before Buddy could present it: ${detail}`,
+          });
+          whisper.show();
+        });
     },
     notify: (title, body) => {
       try {
@@ -454,7 +492,7 @@ function createServices(tray: TrayRef): Services {
           buttonLabel: 'Give helpers this folder',
           properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'],
           message:
-            'Helpers read this folder directly. Only paths they edit are staged for your review.',
+            'Helpers read this folder directly. Verified edits are applied automatically with Undo.',
         });
         if (result.canceled || !result.filePaths[0]) {
           throw new Error('choose a folder before starting a helper buddy');
@@ -539,6 +577,7 @@ function createServices(tray: TrayRef): Services {
   return {
     settings,
     sessionRecorder,
+    modelExecutionRecorder,
     overlays,
     panel,
     whisper,
@@ -701,7 +740,7 @@ function registerInvokeHandlers(
       buttonLabel: 'Work in this folder',
       properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'],
       message:
-        'Helpers can read this folder immediately. Only files they edit are staged for your review.',
+        'Helpers can read this folder immediately. Verified edits are applied automatically with Undo.',
     });
     if (result.canceled || !result.filePaths[0]) return null;
     const selection = await filesystem.grant(result.filePaths[0]);
@@ -728,24 +767,25 @@ function registerInvokeHandlers(
       const reason =
         spawned.reason === 'not_signed_in'
           ? 'Sign in to ChatGPT in Buddy Settings before starting a folder task.'
-          : spawned.reason === 'at_capacity'
-            ? 'Buddy already has too many helpers running. Stop one and try again.'
-            : 'Filesystem execution is unavailable.';
+          : 'Filesystem execution is unavailable.';
       return filesystem.fail(prepared.taskId, reason);
     }
     whisper.show();
-    return filesystem.state() ?? prepared;
+    return filesystem.state(prepared.taskId) ?? prepared;
   });
-  handle('filesystem:get-state', () => filesystem.state());
+  handle('filesystem:get-state', () => filesystem.states());
   handle('filesystem:get-selection', () => filesystem.activeSelection());
   handle('filesystem:clear-root', () => filesystem.clearGrant());
-  handle('filesystem:publish', (taskId) => filesystem.publish(taskId));
+  handle('filesystem:open-safe-copy', async (taskId) => {
+    const openError = await shell.openPath(filesystem.retainedWorkspacePath(taskId));
+    if (openError) throw new Error(`the safe copy could not be opened: ${openError}`);
+  });
   handle('filesystem:discard', (taskId) => filesystem.discard(taskId));
   handle('filesystem:undo', (taskId) => filesystem.undo(taskId));
   handle('filesystem:keep', (taskId) => filesystem.keep(taskId));
   handle('filesystem:cancel', async (taskId) => {
-    const state = filesystem.state();
-    if (!state || state.taskId !== taskId) return;
+    const state = filesystem.state(taskId);
+    if (!state) return;
     if (state.agentId) agents.cancel(state.agentId);
     else await filesystem.cancelPending(taskId);
   });
@@ -913,14 +953,11 @@ function wireHotkey({ hotkey, settings, conversation, whisper, overlays }: Servi
     // the renderer owns the contextmenu event and this fallback stays silent.
     if (!overlays.isBuddyInteractive()) overlays.openSettingsIfBuddyClicked();
   });
-  // F1 fix (C1): forced release (max-hold watchdog / lock / suspend) cancels
-  // the hold — mic released, held audio cleared, NO turn committed.
-  // M11 (hold_too_long): the 30s watchdog cancel additionally TELLS the user
-  // (it used to be silent — the answer just never came).
-  hotkey.on('hold-cancel', (reason) => {
+  // Lock/suspend force-releases the hold — mic released, held audio cleared,
+  // and no turn committed. Ordinary holds have no duration limit.
+  hotkey.on('hold-cancel', () => {
     if (settings.get().fullRealtimeMode) return;
     conversation.cancelHold();
-    if (reason === 'watchdog') conversation.reportError('hold_too_long');
   });
 }
 
@@ -963,7 +1000,7 @@ function wirePanelLifecycle(
   whisper.onRendererReady(() => {
     conversation.replayToPanel();
     whisper.send('whisper:settings', settings.get());
-    whisper.send('whisper:filesystem-state', filesystem.state());
+    whisper.send('whisper:filesystem-state', filesystem.states());
     whisper.send('whisper:filesystem-selection', filesystem.activeSelection());
   });
 }
@@ -1138,6 +1175,7 @@ function registerShutdown(
     agents,
     computerUseRuntime,
     sessionRecorder,
+    modelExecutionRecorder,
     overlays,
     panel,
     whisper,
@@ -1177,6 +1215,7 @@ function registerShutdown(
       await attempt('phone bridge', () => phoneBridgeSupervisor?.close());
       await attempt('agents', () => agents.dispose());
       await attempt('computer use', () => computerUseRuntime.dispose());
+      await attempt('model execution recorder', () => modelExecutionRecorder.close('app_quit'));
       await attempt('session recorder', () => sessionRecorder?.close('app_quit'));
       await attempt('overlays', () => overlays.destroy());
       await attempt('panel', () => panel.destroy());

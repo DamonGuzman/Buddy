@@ -1,5 +1,5 @@
 /**
- * Typed subset of the OpenAI Realtime API (GA v1, WebSocket) that Clicky
+ * Typed subset of the OpenAI Realtime API (GA v1, WebSocket) that Buddy
  * speaks (docs/ARCHITECTURE.md §7). The mock server in tools/mock-realtime
  * implements exactly this subset.
  *
@@ -15,7 +15,7 @@ import type { CaptureMeta } from '../../shared/types';
 // Session config (client -> server, inside session.update)
 // ---------------------------------------------------------------------------
 
-/** The only audio format Clicky uses: PCM16 mono @ 24kHz, both directions. */
+/** The only audio format Buddy uses: PCM16 mono @ 24kHz, both directions. */
 export interface AudioPcmFormat {
   type: 'audio/pcm';
   rate: 24000;
@@ -38,11 +38,15 @@ export interface ServerVadTurnDetection {
   interrupt_response: true;
 }
 
+/** Reasoning effort supported by reasoning-capable Realtime models. */
+export type RealtimeReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
 /** GA `session` object for `session.update` (type: 'realtime' sessions). */
 export interface RealtimeSessionConfig {
   type: 'realtime';
   instructions?: string;
   output_modalities?: Array<'audio' | 'text'>;
+  reasoning?: { effort: RealtimeReasoningEffort };
   audio?: {
     input?: {
       format?: AudioPcmFormat;
@@ -112,7 +116,7 @@ export interface ConversationItemCreateEvent {
 export interface ResponseCreateEvent {
   type: 'response.create';
   event_id?: string;
-  /** Optional per-response overrides; Clicky doesn't use them. */
+  /** Optional per-response overrides; Buddy doesn't use them. */
   response?: Record<string, unknown>;
 }
 

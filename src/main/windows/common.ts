@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { lockdownNavigation } from './harden';
 
 /**
- * Keep Clicky above ordinary application windows without crossing above the
+ * Keep Buddy above ordinary application windows without crossing above the
  * Windows taskbar. Electron's `screen-saver` band sits above the taskbar and a
  * full-display overlay in that band can make the shell demote the taskbar as
  * though a fullscreen app were active.

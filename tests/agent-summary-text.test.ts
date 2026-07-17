@@ -117,7 +117,6 @@ describe('isTerminal', () => {
   it('is true only for final statuses', () => {
     expect(isTerminal('done')).toBe(true);
     expect(isTerminal('failed')).toBe(true);
-    expect(isTerminal('timed_out')).toBe(true);
     expect(isTerminal('cancelled')).toBe(true);
     expect(isTerminal('queued')).toBe(false);
     expect(isTerminal('running')).toBe(false);
@@ -131,7 +130,6 @@ describe('cloneAgentSummary', () => {
       task: 't',
       status: 'done',
       createdAt: 1,
-      maxSteps: null,
       steps: [{ kind: 'note', label: 'l', at: 2 }],
       spoken: false,
       unseen: true,

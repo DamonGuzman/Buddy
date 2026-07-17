@@ -8,7 +8,6 @@ function agent(patch: Partial<AgentSummary>): AgentSummary {
     task: 'compare displays',
     status: 'running',
     createdAt: 1,
-    maxSteps: null,
     steps: [],
     spoken: false,
     unseen: false,

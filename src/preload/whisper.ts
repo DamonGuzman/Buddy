@@ -37,7 +37,7 @@ const api: WhisperApi = {
   clearFilesystemRoot: () => ipcRenderer.invoke('filesystem:clear-root'),
   startFilesystemTask: (grantId, request) =>
     ipcRenderer.invoke('filesystem:start', grantId, request),
-  publishFilesystemTask: (taskId) => ipcRenderer.invoke('filesystem:publish', taskId),
+  openFilesystemSafeCopy: (taskId) => ipcRenderer.invoke('filesystem:open-safe-copy', taskId),
   discardFilesystemTask: (taskId) => ipcRenderer.invoke('filesystem:discard', taskId),
   undoFilesystemTask: (taskId) => ipcRenderer.invoke('filesystem:undo', taskId),
   keepFilesystemTask: (taskId) => ipcRenderer.invoke('filesystem:keep', taskId),

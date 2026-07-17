@@ -15,10 +15,10 @@ import {
   resolveInside,
   type TreeManifest,
 } from './manifest';
-import { MacSeatbeltRunner, type ShellTaskPaths } from './seatbelt-runner';
+import { HostShellRunner, type HostShellPaths, type ShellRunResult } from './host-shell-runner';
 
 const { constants } = hostFs;
-const { access, mkdir, readFile, realpath, rename, rm, stat, writeFile } = hostFsPromises;
+const { access, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } = hostFsPromises;
 
 const MAX_PUBLISH_CHANGES = 5_000;
 const MAX_STAGED_ROOTS = 200;
@@ -26,7 +26,7 @@ const MAX_STAGED_ENTRIES = 20_000;
 const MAX_STAGED_BYTES = 2 * 1024 * 1024 * 1024;
 
 interface TaskRecord {
-  version: 2;
+  version: 3;
   rootPath: string;
   taskRoot: string;
   workspacePath: string;
@@ -34,53 +34,70 @@ interface TaskRecord {
   baselinePath: string;
   stagedPath: string;
   stagedRoots: string[];
+  presentationFile: string | null;
   view: FilesystemTaskView;
+}
+
+export interface FilesystemAgentCompletion {
+  handled: boolean;
+  view: FilesystemTaskView | null;
+  error: string | null;
+  presentation: { kind: 'file' | 'folder'; path: string } | null;
 }
 
 export interface FilesystemTaskServiceOptions {
   basePath: string;
-  onState(state: FilesystemTaskView | null): void;
+  onState(states: FilesystemTaskView[]): void;
   onSelection(selection: FilesystemSelection | null): void;
 }
 
 /**
- * Owns picker grants, a lazy path-scoped staging area, Seatbelt shells, publication, and Undo.
+ * Owns picker grants, a lazy path-scoped staging area, host shells, publication, and Undo.
  * Selecting a folder and admitting a helper never hashes or copies the complete folder.
  */
 export class FilesystemTaskService implements AgentFilesystemToolPort {
   private readonly grants = new Map<string, string>();
-  private readonly runner: MacSeatbeltRunner;
+  private readonly runner: HostShellRunner;
+  private readonly records = new Map<string, TaskRecord>();
+  private readonly rootMutations = new Map<string, Promise<void>>();
   private activeGrant: FilesystemSelection | null = null;
-  private record: TaskRecord | null = null;
-  private mutation: Promise<FilesystemTaskView> | null = null;
+  private visibleTaskId: string | null = null;
 
   constructor(private readonly options: FilesystemTaskServiceOptions) {
-    this.runner = new MacSeatbeltRunner(options.basePath);
+    this.runner = new HostShellRunner();
   }
 
   async initialize(): Promise<void> {
     await mkdir(this.options.basePath, { recursive: true, mode: 0o700 });
     await this.loadGrant();
-    await this.loadLatest();
-    if (!this.record) return;
-    const status = this.record.view.status;
-    if (status === 'publishing' || status === 'undoing') {
-      await this.recoverInterruptedMutation(status);
-      return;
-    }
-    if (status === 'running' || status === 'preparing') {
-      this.record.view = {
-        ...this.record.view,
-        status: 'failed',
-        error: 'Buddy closed before this task finished. Your selected folder was never changed.',
-      };
-      await this.persistRecord();
+    await this.loadTasks();
+    for (const record of [...this.records.values()]) {
+      const status = record.view.status;
+      if (status === 'publishing' || status === 'undoing') {
+        await this.exclusive(record, () => this.recoverInterruptedMutation(record, status));
+        continue;
+      }
+      if (status === 'running' || status === 'preparing') {
+        record.view = {
+          ...record.view,
+          status: 'failed',
+          error: 'Buddy closed before this task finished. Your selected folder was never changed.',
+        };
+        await this.persistRecord(record);
+      }
     }
     this.emit();
   }
 
-  state(): FilesystemTaskView | null {
-    return this.record ? cloneView(this.record.view) : null;
+  state(taskId?: string): FilesystemTaskView | null {
+    const record = taskId ? this.records.get(taskId) : this.visibleRecord();
+    return record ? cloneView(record.view) : null;
+  }
+
+  states(): FilesystemTaskView[] {
+    return [...this.records.values()]
+      .sort((left, right) => right.view.createdAt - left.view.createdAt)
+      .map((record) => cloneView(record.view));
   }
 
   activeSelection(): FilesystemSelection | null {
@@ -100,7 +117,6 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
   }
 
   async clearGrant(): Promise<void> {
-    if (this.hasUnresolvedTask()) throw new Error('finish the current folder task first');
     this.grants.clear();
     this.activeGrant = null;
     await rm(join(this.options.basePath, 'grant.json'), { force: true });
@@ -111,8 +127,6 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
     const text = request.trim();
     if (text.length === 0 || text.length > 8_000)
       throw new Error('describe the folder task in 8,000 characters or fewer');
-    if (this.hasUnresolvedTask())
-      throw new Error('finish, discard, or undo the current folder task first');
     const rootPath = this.grants.get(grantId);
     if (!rootPath) throw new Error('that folder permission expired; choose the folder again');
     await this.runner.assertAvailable();
@@ -131,7 +145,7 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
       canUndo: false,
     };
     const record: TaskRecord = {
-      version: 2,
+      version: 3,
       rootPath,
       taskRoot,
       workspacePath,
@@ -139,24 +153,24 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
       baselinePath: join(taskRoot, 'baseline.json'),
       stagedPath: join(taskRoot, 'staged.json'),
       stagedRoots: [],
+      presentationFile: null,
       view,
     };
-    this.record = record;
-    this.emit();
+    this.records.set(taskId, record);
+    this.emit(record);
     try {
       await mkdir(workspacePath, { recursive: true, mode: 0o700 });
-      await writeJson(join(this.options.basePath, 'latest.json'), { taskId });
       await writeJson(record.baselinePath, await buildSparseManifest(rootPath, []));
       await this.runner.prepare(this.shellPaths(record));
       record.view = { ...view, status: 'running' };
-      await this.persistRecord();
-      this.emit();
+      await this.persistRecord(record);
+      this.emit(record);
       return cloneView(record.view);
     } catch (error) {
-      if (this.record === record) {
+      if (this.records.get(taskId) === record) {
         record.view = { ...view, status: 'failed', error: errorText(error) };
-        await this.persistRecord().catch(() => undefined);
-        this.emit();
+        await this.persistRecord(record).catch(() => undefined);
+        this.emit(record);
       }
       throw error;
     }
@@ -167,34 +181,42 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
     if (record.view.status !== 'running')
       throw new Error('filesystem task is not ready for an agent');
     record.view = { ...record.view, agentId };
-    await this.persistRecord();
-    this.emit();
+    await this.persistRecord(record);
+    this.emit(record);
     return cloneView(record.view);
   }
 
   async fail(taskId: string, message: string): Promise<FilesystemTaskView> {
     const record = this.requireTask(taskId);
     record.view = { ...record.view, status: 'failed', error: message, canUndo: false };
-    await this.persistRecord();
-    this.emit();
+    await this.persistRecord(record);
+    this.emit(record);
     return cloneView(record.view);
   }
 
   /** Idempotent stale/pre-agent cancellation; a missing task is already cancelled. */
   async cancelPending(taskId: string): Promise<void> {
-    const record = this.record;
-    if (!record || record.view.taskId !== taskId) return;
+    const record = this.records.get(taskId);
+    if (!record) return;
     if (record.view.agentId) return;
     await this.clearRecord(record);
   }
 
-  async completeAgent(summary: AgentSummary): Promise<boolean> {
-    const record = this.record;
-    if (!record || record.view.agentId !== summary.id) return false;
-    if (record.view.status !== 'running') return true;
+  async completeAgent(summary: AgentSummary): Promise<FilesystemAgentCompletion> {
+    const record = this.findRecordForAgent(summary.id);
+    if (!record) return { handled: false, view: null, error: null, presentation: null };
+    if (record.view.status !== 'running') {
+      const view = cloneView(record.view);
+      return {
+        handled: true,
+        view,
+        error: view.error ?? null,
+        presentation: null,
+      };
+    }
     if (summary.status === 'cancelled') {
       await this.clearRecord(record);
-      return true;
+      return { handled: true, view: null, error: null, presentation: null };
     }
     if (summary.status !== 'done') {
       record.view = {
@@ -205,25 +227,48 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
           summary.error ??
           `The folder task ${summary.status.replaceAll('_', ' ')}. Your selected folder was not changed.`,
       };
-      await this.persistRecord();
-      this.emit();
-      return true;
-    }
-    try {
-      const { staged, changes } = await this.computeStagedState(record);
-      await writeJson(record.stagedPath, staged);
-      record.view = {
-        ...record.view,
-        status: 'review',
-        summary: summary.summary ?? 'The folder task is ready to review.',
-        changes: rendererChanges(changes),
+      await this.persistRecord(record);
+      this.emit(record);
+      return {
+        handled: true,
+        view: cloneView(record.view),
+        error: record.view.error ?? 'the folder task stopped',
+        presentation: null,
       };
-    } catch (error) {
-      record.view = { ...record.view, status: 'failed', error: errorText(error) };
     }
-    await this.persistRecord();
-    this.emit();
-    return true;
+    return this.exclusive(record, async () => {
+      try {
+        const { staged, changes } = await this.computeStagedState(record);
+        const presentation = await this.resolvePresentation(record, staged, changes);
+        await writeJson(record.stagedPath, staged);
+        if (changes.length === 0) {
+          await this.clearRecord(record);
+          return { handled: true, view: null, error: null, presentation };
+        }
+        const view = await this.publishCompletedAgent(record, staged, changes, summary);
+        return { handled: true, view, error: null, presentation };
+      } catch (error) {
+        const message = errorText(error);
+        if (this.records.get(record.view.taskId) === record && record.view.status !== 'failed') {
+          record.view = {
+            ...record.view,
+            ...(record.view.status === 'publishing' ? {} : { status: 'failed' as const }),
+            error:
+              record.view.status === 'publishing'
+                ? `The handoff could not be recovered automatically: ${message}`
+                : `Nothing was changed: ${message}`,
+          };
+          await this.persistRecord(record).catch(() => undefined);
+          this.emit(record);
+        }
+        return {
+          handled: true,
+          view: this.records.get(record.view.taskId) === record ? cloneView(record.view) : null,
+          error: record.view.error ?? message,
+          presentation: null,
+        };
+      }
+    });
   }
 
   async runShell(
@@ -231,43 +276,45 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
     script: string,
     cwdRelative: string,
     signal: AbortSignal,
-  ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  ): Promise<ShellRunResult> {
     const record = this.requireRunningTask(taskId);
     return this.runner.runSource(this.shellPaths(record), script, cwdRelative, signal);
   }
 
   async stagePaths(taskId: string, paths: string[]): Promise<string> {
     const record = this.requireRunningTask(taskId);
-    const requested = minimalRelativeRoots(paths.map(validateRelativePath));
-    if (requested.length === 0) throw new Error('provide at least one path to stage');
-    for (const candidate of requested) {
-      if (record.stagedRoots.some((existing) => overlaps(existing, candidate)))
-        throw new Error(`path overlaps an already staged root: ${candidate}`);
-    }
-    const combinedRoots = minimalRelativeRoots([...record.stagedRoots, ...requested]);
-    if (combinedRoots.length > MAX_STAGED_ROOTS)
-      throw new Error(`refusing to stage more than ${MAX_STAGED_ROOTS} path roots`);
+    return this.exclusive(record, async () => {
+      const requested = minimalRelativeRoots(paths.map(validateRelativePath));
+      if (requested.length === 0) throw new Error('provide at least one path to stage');
+      for (const candidate of requested) {
+        if (record.stagedRoots.some((existing) => overlaps(existing, candidate)))
+          throw new Error(`path overlaps an already staged root: ${candidate}`);
+      }
+      const combinedRoots = minimalRelativeRoots([...record.stagedRoots, ...requested]);
+      if (combinedRoots.length > MAX_STAGED_ROOTS)
+        throw new Error(`refusing to stage more than ${MAX_STAGED_ROOTS} path roots`);
 
-    const [baseline, currentWorkspace, sourceSnapshot] = await Promise.all([
-      readManifest(record.baselinePath),
-      buildManifest(record.workspacePath),
-      buildSparseManifest(record.rootPath, requested),
-    ]);
-    const combinedBaseline = { ...baseline, ...sourceSnapshot };
-    assertStageBudget(combinedBaseline);
-    // Existing staged edits win over newly materialized ancestor metadata.
-    const desiredWorkspace = { ...sourceSnapshot, ...currentWorkspace };
-    await applyManifest(
-      record.rootPath,
-      record.workspacePath,
-      currentWorkspace,
-      desiredWorkspace,
-      record.view.taskId,
-    );
-    record.stagedRoots = combinedRoots;
-    await writeJson(record.baselinePath, combinedBaseline);
-    await this.persistRecord();
-    return `Staged paths:\n${requested.join('\n')}`;
+      const [baseline, currentWorkspace, sourceSnapshot] = await Promise.all([
+        readManifest(record.baselinePath),
+        buildManifest(record.workspacePath),
+        buildSparseManifest(record.rootPath, requested),
+      ]);
+      const combinedBaseline = { ...baseline, ...sourceSnapshot };
+      assertStageBudget(combinedBaseline);
+      // Existing staged edits win over newly materialized ancestor metadata.
+      const desiredWorkspace = { ...sourceSnapshot, ...currentWorkspace };
+      await applyManifest(
+        record.rootPath,
+        record.workspacePath,
+        currentWorkspace,
+        desiredWorkspace,
+        record.view.taskId,
+      );
+      record.stagedRoots = combinedRoots;
+      await writeJson(record.baselinePath, combinedBaseline);
+      await this.persistRecord(record);
+      return `Staged paths:\n${requested.join('\n')}`;
+    });
   }
 
   async runStagedShell(
@@ -275,7 +322,7 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
     script: string,
     cwdRelative: string,
     signal: AbortSignal,
-  ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  ): Promise<ShellRunResult> {
     const record = this.requireRunningTask(taskId);
     return this.runner.runStaged(this.shellPaths(record), script, cwdRelative, signal);
   }
@@ -293,80 +340,25 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
       .join('\n');
   }
 
-  publish(taskId: string): Promise<FilesystemTaskView> {
-    return this.exclusive(async () => {
-      const record = this.requireTask(taskId);
-      if (record.view.status !== 'review')
-        throw new Error('this task is not waiting for publication');
-      const [baseline, staged] = await Promise.all([
-        readManifest(record.baselinePath),
-        readManifest(record.stagedPath),
-      ]);
-      const live = await buildSparseManifest(record.rootPath, record.stagedRoots);
-      if (!manifestsEqual(baseline, live)) {
-        throw new Error(
-          'One of the staged paths changed while Buddy was working. Nothing was applied; start a fresh task so those edits are preserved.',
-        );
-      }
-      const changes = diffManifests(baseline, staged);
-      if (changes.length > MAX_PUBLISH_CHANGES)
-        throw new Error(
-          `refusing to publish more than ${MAX_PUBLISH_CHANGES.toLocaleString()} changes at once`,
-        );
-      if (changes.length === 0) {
-        const terminal = {
-          ...record.view,
-          status: 'discarded' as const,
-          changes: [],
-          canUndo: false,
-        };
-        await this.clearRecord(record);
-        return terminal;
-      }
-
-      await mkdir(record.backupPath, { recursive: true, mode: 0o700 });
-      const emptyBackup = await buildManifest(record.backupPath);
-      await applyManifest(
-        record.rootPath,
-        record.backupPath,
-        emptyBackup,
-        { ...baseline, '.': emptyBackup['.']! },
-        taskId,
-      );
-      record.view = { ...record.view, status: 'publishing' };
-      await this.persistRecord();
-      this.emit();
-      try {
-        await applyManifest(record.workspacePath, record.rootPath, live, staged, taskId);
-        const published = await buildSparseManifest(record.rootPath, record.stagedRoots);
-        if (!manifestsEqual(staged, published))
-          throw new Error('published files did not match the reviewed staging area');
-      } catch (error) {
-        await this.restoreBeforeImage(record, baseline).catch((restoreError: unknown) => {
-          throw new Error(
-            `publication failed and automatic recovery also failed: ${errorText(restoreError)}`,
-          );
-        });
-        record.view = {
-          ...record.view,
-          status: 'review',
-          error: `Nothing was changed: ${errorText(error)}`,
-        };
-        await this.persistRecord();
-        this.emit();
-        throw error;
-      }
-      const { error: _previousError, ...cleanView } = record.view;
-      record.view = { ...cleanView, status: 'published', canUndo: true };
-      await this.persistRecord();
-      this.emit();
-      return cloneView(record.view);
-    });
+  async presentFile(taskId: string, path: string): Promise<string> {
+    const record = this.requireRunningTask(taskId);
+    const relativePath = validateRelativePath(path);
+    const workspaceEntry = await inspectManifestEntry(
+      resolveInside(record.workspacePath, relativePath),
+    );
+    if (workspaceEntry && !isAuthorizedStagedKey(record.stagedRoots, relativePath, false))
+      throw new Error(`stage the presentation file before selecting it: ${relativePath}`);
+    const entry =
+      workspaceEntry ?? (await inspectManifestEntry(resolveInside(record.rootPath, relativePath)));
+    assertSafePresentationFile(relativePath, entry);
+    record.presentationFile = relativePath;
+    await this.persistRecord(record);
+    return `Buddy will open ${relativePath} as soon as the verified transaction is published.`;
   }
 
   undo(taskId: string): Promise<FilesystemTaskView> {
-    return this.exclusive(async () => {
-      const record = this.requireTask(taskId);
+    const record = this.requireTask(taskId);
+    return this.exclusive(record, async () => {
       if (record.view.status !== 'published' || !record.view.canUndo)
         throw new Error('this task is not undoable');
       const [baseline, staged] = await Promise.all([
@@ -380,8 +372,8 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
         );
       }
       record.view = { ...record.view, status: 'undoing' };
-      await this.persistRecord();
-      this.emit();
+      await this.persistRecord(record);
+      this.emit(record);
       await applyManifest(record.backupPath, record.rootPath, live, baseline, taskId);
       const restored = await buildSparseManifest(record.rootPath, record.stagedRoots);
       if (!manifestsEqual(baseline, restored))
@@ -393,19 +385,25 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
   }
 
   discard(taskId: string): Promise<FilesystemTaskView> {
-    return this.exclusive(async () => {
-      const record = this.requireTask(taskId);
-      if (!['review', 'failed'].includes(record.view.status))
-        throw new Error('this task cannot be discarded now');
+    const record = this.requireTask(taskId);
+    return this.exclusive(record, async () => {
+      if (record.view.status !== 'failed') throw new Error('this task cannot be discarded now');
       const terminal = { ...record.view, status: 'discarded' as const, canUndo: false };
       await this.clearRecord(record);
       return terminal;
     });
   }
 
+  retainedWorkspacePath(taskId: string): string {
+    const record = this.requireTask(taskId);
+    if (record.view.status !== 'failed')
+      throw new Error('only a failed task has a safe copy to inspect');
+    return record.workspacePath;
+  }
+
   keep(taskId: string): Promise<FilesystemTaskView> {
-    return this.exclusive(async () => {
-      const record = this.requireTask(taskId);
+    const record = this.requireTask(taskId);
+    return this.exclusive(record, async () => {
       if (record.view.status !== 'published')
         throw new Error('only published changes can be finalized');
       const terminal = { ...record.view, status: 'kept' as const, canUndo: false };
@@ -439,9 +437,94 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
     assertStageBudget(staged);
     if (baselineChanged) {
       await writeJson(record.baselinePath, baseline);
-      await this.persistRecord();
+      await this.persistRecord(record);
     }
     return { staged, changes: diffManifests(baseline, staged) };
+  }
+
+  private async resolvePresentation(
+    record: TaskRecord,
+    staged: TreeManifest,
+    changes: ReturnType<typeof diffManifests>,
+  ): Promise<{ kind: 'file' | 'folder'; path: string } | null> {
+    if (record.presentationFile) {
+      const stagedEntry = staged[record.presentationFile];
+      const entry =
+        stagedEntry ??
+        (await inspectManifestEntry(resolveInside(record.rootPath, record.presentationFile)));
+      assertSafePresentationFile(record.presentationFile, entry);
+      return { kind: 'file', path: resolveInside(record.rootPath, record.presentationFile) };
+    }
+    const fileOutputs = changes.filter(
+      (change) =>
+        change.after?.type === 'file' && isSafePresentationFile(change.path, change.after.mode),
+    );
+    if (fileOutputs.length === 1)
+      return { kind: 'file', path: resolveInside(record.rootPath, fileOutputs[0]!.path) };
+    return changes.length > 0 ? { kind: 'folder', path: record.rootPath } : null;
+  }
+
+  private async publishCompletedAgent(
+    record: TaskRecord,
+    staged: TreeManifest,
+    changes: ReturnType<typeof diffManifests>,
+    summary: AgentSummary,
+  ): Promise<FilesystemTaskView> {
+    const baseline = await readManifest(record.baselinePath);
+    const live = await buildSparseManifest(record.rootPath, record.stagedRoots);
+    if (!manifestsEqual(baseline, live)) {
+      throw new Error(
+        'One of the staged paths changed while Buddy was working. The automatic handoff stopped so those newer edits are preserved.',
+      );
+    }
+    if (changes.length > MAX_PUBLISH_CHANGES)
+      throw new Error(
+        `refusing to publish more than ${MAX_PUBLISH_CHANGES.toLocaleString()} changes at once`,
+      );
+
+    await mkdir(record.backupPath, { recursive: true, mode: 0o700 });
+    const emptyBackup = await buildManifest(record.backupPath);
+    await applyManifest(
+      record.rootPath,
+      record.backupPath,
+      emptyBackup,
+      { ...baseline, '.': emptyBackup['.']! },
+      record.view.taskId,
+    );
+    record.view = {
+      ...record.view,
+      status: 'publishing',
+      summary: summary.summary ?? 'The folder task finished.',
+      changes: rendererChanges(changes),
+      canUndo: false,
+    };
+    await this.persistRecord(record);
+    this.emit(record);
+    try {
+      await applyManifest(record.workspacePath, record.rootPath, live, staged, record.view.taskId);
+      const published = await buildSparseManifest(record.rootPath, record.stagedRoots);
+      if (!manifestsEqual(staged, published))
+        throw new Error('published files did not match the verified staging area');
+    } catch (error) {
+      await this.restoreBeforeImage(record, baseline).catch((restoreError: unknown) => {
+        throw new Error(
+          `publication failed and automatic recovery also failed: ${errorText(restoreError)}`,
+        );
+      });
+      record.view = {
+        ...record.view,
+        status: 'failed',
+        error: `Nothing was changed: ${errorText(error)}`,
+      };
+      await this.persistRecord(record);
+      this.emit(record);
+      throw error;
+    }
+    const { error: _previousError, ...cleanView } = record.view;
+    record.view = { ...cleanView, status: 'published', canUndo: true };
+    await this.persistRecord(record);
+    this.emit(record);
+    return cloneView(record.view);
   }
 
   private async validateSelectedRoot(selectedPath: string): Promise<string> {
@@ -479,9 +562,10 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
     if (!manifestsEqual(baseline, restored)) throw new Error('before-image verification failed');
   }
 
-  private async recoverInterruptedMutation(status: 'publishing' | 'undoing'): Promise<void> {
-    const record = this.record;
-    if (!record) return;
+  private async recoverInterruptedMutation(
+    record: TaskRecord,
+    status: 'publishing' | 'undoing',
+  ): Promise<void> {
     const baseline = await readManifest(record.baselinePath);
     await this.restoreBeforeImage(record, baseline);
     if (status === 'undoing') {
@@ -491,39 +575,29 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
     const { error: _previousError, ...cleanView } = record.view;
     record.view = {
       ...cleanView,
-      status: 'review',
+      status: 'failed',
       canUndo: false,
       error:
         'Buddy recovered the selected paths after an interrupted publication. Nothing remains applied.',
     };
-    await this.persistRecord();
-    this.emit();
+    await this.persistRecord(record);
+    this.emit(record);
   }
 
-  private hasUnresolvedTask(): boolean {
-    return (
-      !!this.record &&
-      ['preparing', 'running', 'review', 'publishing', 'published', 'undoing'].includes(
-        this.record.view.status,
-      )
-    );
-  }
-
-  private shellPaths(record: TaskRecord): ShellTaskPaths {
+  private shellPaths(record: TaskRecord): HostShellPaths {
     return {
       taskRoot: record.taskRoot,
       source: record.rootPath,
       workspace: record.workspacePath,
       home: join(record.taskRoot, 'home'),
       temp: join(record.taskRoot, 'tmp'),
-      profile: join(record.taskRoot, 'profile.sb'),
     };
   }
 
   private requireTask(taskId: string): TaskRecord {
-    if (!this.record || this.record.view.taskId !== taskId)
-      throw new Error('filesystem task not found');
-    return this.record;
+    const record = this.records.get(taskId);
+    if (!record) throw new Error('filesystem task not found');
+    return record;
   }
 
   private requireRunningTask(taskId: string): TaskRecord {
@@ -532,74 +606,78 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
     return record;
   }
 
-  private exclusive(operation: () => Promise<FilesystemTaskView>): Promise<FilesystemTaskView> {
-    if (this.mutation) throw new Error('a filesystem transaction is already in progress');
-    const run = operation().finally(() => {
-      this.mutation = null;
+  private exclusive<T>(record: TaskRecord, operation: () => Promise<T>): Promise<T> {
+    const rootPath = record.rootPath;
+    const predecessor = this.rootMutations.get(rootPath) ?? Promise.resolve();
+    const run = predecessor.then(operation);
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.rootMutations.set(rootPath, tail);
+    void tail.then(() => {
+      if (this.rootMutations.get(rootPath) === tail) this.rootMutations.delete(rootPath);
     });
-    this.mutation = run;
     return run;
   }
 
-  private emit(): void {
-    this.options.onState(this.state());
+  private emit(record?: TaskRecord): void {
+    if (record && this.records.get(record.view.taskId) === record)
+      this.visibleTaskId = record.view.taskId;
+    this.options.onState(this.states());
   }
 
-  private async persistRecord(): Promise<void> {
-    if (!this.record) return;
-    await writeJson(join(this.record.taskRoot, 'task.json'), this.record);
+  private visibleRecord(): TaskRecord | undefined {
+    const visible = this.visibleTaskId ? this.records.get(this.visibleTaskId) : undefined;
+    if (visible) return visible;
+    const latest = [...this.records.values()].sort(
+      (left, right) => right.view.createdAt - left.view.createdAt,
+    )[0];
+    this.visibleTaskId = latest?.view.taskId ?? null;
+    return latest;
+  }
+
+  private findRecordForAgent(agentId: string): TaskRecord | undefined {
+    return [...this.records.values()].find((record) => record.view.agentId === agentId);
+  }
+
+  private async persistRecord(record: TaskRecord): Promise<void> {
+    if (this.records.get(record.view.taskId) !== record) return;
+    await writeJson(join(record.taskRoot, 'task.json'), record);
   }
 
   private async clearRecord(record: TaskRecord): Promise<void> {
     await rm(record.taskRoot, { recursive: true, force: true });
-    if (this.record === record) this.record = null;
-    await removeLatest(this.options.basePath, record.view.taskId);
+    if (this.records.get(record.view.taskId) === record) this.records.delete(record.view.taskId);
+    if (this.visibleTaskId === record.view.taskId) this.visibleTaskId = null;
     this.emit();
   }
 
-  private async loadLatest(): Promise<void> {
-    const latestPath = join(this.options.basePath, 'latest.json');
-    let taskId: string | null = null;
-    try {
-      const pointer = JSON.parse(await readFile(latestPath, 'utf8')) as { taskId?: unknown };
-      if (
-        typeof pointer.taskId !== 'string' ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-          pointer.taskId,
-        )
-      )
-        throw new Error('invalid task pointer');
-      taskId = pointer.taskId;
-      const taskRoot = join(this.options.basePath, 'tasks', taskId);
-      const taskPath = join(taskRoot, 'task.json');
-      const raw = JSON.parse(await readFile(taskPath, 'utf8')) as TaskRecord;
-      if (
-        raw.version !== 2 ||
-        raw.view?.taskId !== taskId ||
-        typeof raw.rootPath !== 'string' ||
-        !Array.isArray(raw.stagedRoots) ||
-        !raw.stagedRoots.every(
-          (value) => typeof value === 'string' && validateRelativePath(value) === value,
-        )
-      )
-        throw new Error('unsupported task record');
-      this.record = {
-        ...raw,
-        taskRoot,
-        workspacePath: join(taskRoot, 'workspace'),
-        backupPath: join(taskRoot, 'before'),
-        baselinePath: join(taskRoot, 'baseline.json'),
-        stagedPath: join(taskRoot, 'staged.json'),
-      };
-    } catch {
-      this.record = null;
-      await rm(latestPath, { force: true }).catch(() => undefined);
-      if (taskId)
-        await rm(join(this.options.basePath, 'tasks', taskId), {
-          recursive: true,
-          force: true,
-        }).catch(() => undefined);
+  private async loadTasks(): Promise<void> {
+    const tasksRoot = join(this.options.basePath, 'tasks');
+    await mkdir(tasksRoot, { recursive: true, mode: 0o700 });
+    const entries = await readdir(tasksRoot, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !isTaskId(entry.name)) continue;
+      const taskId = entry.name;
+      const taskRoot = join(tasksRoot, taskId);
+      try {
+        const raw = JSON.parse(await readFile(join(taskRoot, 'task.json'), 'utf8')) as TaskRecord;
+        assertTaskRecord(raw, taskId);
+        this.records.set(taskId, {
+          ...raw,
+          taskRoot,
+          workspacePath: join(taskRoot, 'workspace'),
+          backupPath: join(taskRoot, 'before'),
+          baselinePath: join(taskRoot, 'baseline.json'),
+          stagedPath: join(taskRoot, 'staged.json'),
+        });
+      } catch {
+        await rm(taskRoot, { recursive: true, force: true });
+      }
     }
+    this.visibleTaskId = this.visibleRecord()?.view.taskId ?? null;
+    await rm(join(this.options.basePath, 'latest.json'), { force: true }).catch(() => undefined);
   }
 
   private async loadGrant(): Promise<void> {
@@ -633,13 +711,27 @@ async function writeJson(path: string, value: unknown): Promise<void> {
   await rename(temporary, path);
 }
 
-async function removeLatest(basePath: string, taskId: string): Promise<void> {
-  const path = join(basePath, 'latest.json');
-  try {
-    const parsed = JSON.parse(await readFile(path, 'utf8')) as { taskId?: unknown };
-    if (parsed.taskId === taskId) await rm(path, { force: true });
-  } catch {
-    await rm(path, { force: true }).catch(() => undefined);
+function isTaskId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function assertTaskRecord(raw: TaskRecord, taskId: string): void {
+  if (
+    raw.version !== 3 ||
+    raw.view?.taskId !== taskId ||
+    typeof raw.view.createdAt !== 'number' ||
+    typeof raw.rootPath !== 'string' ||
+    !Array.isArray(raw.stagedRoots) ||
+    !raw.stagedRoots.every(
+      (value) => typeof value === 'string' && validateRelativePath(value) === value,
+    ) ||
+    !(
+      raw.presentationFile === null ||
+      (typeof raw.presentationFile === 'string' &&
+        validateRelativePath(raw.presentationFile) === raw.presentationFile)
+    )
+  ) {
+    throw new Error('unsupported task record');
   }
 }
 
@@ -706,4 +798,39 @@ function cloneView(view: FilesystemTaskView): FilesystemTaskView {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+const UNSAFE_PRESENTATION_EXTENSIONS = new Set([
+  '.action',
+  '.app',
+  '.applescript',
+  '.command',
+  '.dmg',
+  '.inetloc',
+  '.iso',
+  '.jar',
+  '.mobileconfig',
+  '.pkg',
+  '.scpt',
+  '.terminal',
+  '.url',
+  '.webloc',
+  '.workflow',
+]);
+
+function isSafePresentationFile(path: string, mode: number): boolean {
+  if ((mode & 0o111) !== 0) return false;
+  const name = basename(path).toLowerCase();
+  const dot = name.lastIndexOf('.');
+  return dot < 0 || !UNSAFE_PRESENTATION_EXTENSIONS.has(name.slice(dot));
+}
+
+function assertSafePresentationFile(
+  path: string,
+  entry: Awaited<ReturnType<typeof inspectManifestEntry>>,
+): asserts entry is NonNullable<typeof entry> & { type: 'file' } {
+  if (entry?.type !== 'file')
+    throw new Error(`the presentation path must be a regular file: ${path}`);
+  if (!isSafePresentationFile(path, entry.mode))
+    throw new Error(`the presentation file must be non-executable and safe to open: ${path}`);
 }

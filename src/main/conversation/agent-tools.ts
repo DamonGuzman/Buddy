@@ -58,12 +58,6 @@ export class AgentTools {
       this.deps.surfaceError('agent_not_signed_in');
       return { error: 'agent mode needs chatgpt sign-in' };
     }
-    if (
-      agents.list().filter((agent) => agent.status === 'queued' || agent.status === 'running')
-        .length >= 3
-    ) {
-      return { error: 'at capacity — three agents are already running' };
-    }
     let filesystem: { taskId: string; rootName: string };
     try {
       filesystem = await this.deps.prepareFilesystem(task, id);
@@ -91,14 +85,10 @@ export class AgentTools {
       return { ok: true, agent_id: result.agentId };
     }
     const failure =
-      result.reason === 'at_capacity'
-        ? 'Buddy already has too many helpers running.'
-        : result.reason === 'not_signed_in'
-          ? 'Buddy needs ChatGPT sign-in.'
-          : 'Filesystem execution is unavailable.';
+      result.reason === 'not_signed_in'
+        ? 'Buddy needs ChatGPT sign-in.'
+        : 'Filesystem execution is unavailable.';
     await this.deps.failFilesystem(filesystem.taskId, failure);
-    if (result.reason === 'at_capacity')
-      return { error: 'at capacity — three agents are already running' };
     if (result.reason === 'filesystem_unavailable')
       return { error: 'filesystem use is unavailable for background buddies right now' };
     this.deps.surfaceError('agent_not_signed_in');
@@ -132,7 +122,6 @@ export class AgentTools {
         status: agent.status,
         elapsed_ms: Math.max(0, (agent.finishedAt ?? now) - agent.createdAt),
         ...(agent.step !== undefined ? { step: agent.step } : {}),
-        max_steps: agent.maxSteps,
         ...(agent.steps.length > 0
           ? { latest_activity: agent.steps.at(-1)?.label.slice(0, 500) ?? '' }
           : {}),

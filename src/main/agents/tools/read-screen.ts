@@ -11,7 +11,6 @@ export const readScreenTool: AgentToolSpec = {
   },
   timeoutMs: AGENT_TOOL_TIMEOUT_MS,
   stepKind: 'think',
-  stepLabel: () => 're-read the handoff screen',
   async execute(_args, ctx) {
     if (!ctx.brief.screenshot)
       return JSON.stringify({ error: 'no handoff screenshot was available' });

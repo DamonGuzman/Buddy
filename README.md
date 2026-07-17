@@ -21,6 +21,8 @@ you can't talk.
 - A microphone.
 - An OpenAI API key with access to the Realtime API (`gpt-realtime` models). Usage is billed to
   your own OpenAI account.
+- A Firecrawl API key for helper-buddy web research. OpenAI remains the reasoning backend, but it
+  does not receive or execute Buddy's web requests.
 
 ## Install
 
@@ -36,14 +38,16 @@ Choose the artifact for your computer. MVP builds are unsigned:
 1. Launch Buddy. A menu-bar/tray icon appears, and settings opens by itself on first run.
 2. Open **Settings** from the menu-bar/tray icon and paste your OpenAI API key. It is encrypted on your
    machine before it's stored and never shown again.
-3. On macOS, use **Settings → Permissions** to grant microphone, screen recording, accessibility,
+3. Paste your Firecrawl key in **Settings → Firecrawl** to enable search, full-page scrape, map,
+   crawl, batch scrape, and research for helper buddies.
+4. On macOS, use **Settings → Permissions** to grant microphone, screen recording, accessibility,
    and input monitoring only when Buddy asks for each capability.
-4. **Hold the platform hotkey and talk** ("what am I looking at?"). Keep holding while you
+5. **Hold the platform hotkey and talk** ("what am I looking at?"). Keep holding while you
    speak; release to send. Buddy answers in voice and points at what it mentions.
-5. For a hands-free back-and-forth, enable **full realtime mode** in settings. Press the hotkey
+6. For a hands-free back-and-forth, enable **full realtime mode** in settings. Press the hotkey
    once to activate and once more to deactivate; silence ends each turn automatically, and Buddy
    takes a fresh screenshot for every speech turn.
-6. Somewhere quiet? Tap the hotkey to open the whisper composer and type instead — same pipeline.
+7. Somewhere quiet? Tap the hotkey to open the whisper composer and type instead — same pipeline.
 
 The hotkey is fixed at Control plus the left Option/Alt key for the MVP. Right Option/Alt never
 triggers it, avoiding AltGr on international Windows layouts.
@@ -58,11 +62,12 @@ conversation quality stay comparable.
 - **Capture only on an explicit action**: hotkey press/hold, full-realtime activation, or a typed
   question. Full realtime captures once at activation; it does not continuously watch the screen.
 - Capture is **always signposted**: a visible indicator shows whenever Buddy is looking/listening.
-- Your API key is stored **encrypted locally** (macOS Keychain or Windows DPAPI via Electron
+- Your OpenAI and Firecrawl API keys are stored **encrypted locally** (macOS Keychain or Windows DPAPI via Electron
   `safeStorage`) and
   never leaves the main process.
-- No servers of ours: audio and screenshots go **directly from your machine to OpenAI**, and
-  nowhere else. Uninstalling removes the app; the compatibility data dir (`%APPDATA%/heyclicky`)
+- No servers of ours: audio and screenshots go **directly from your machine to OpenAI**. When a
+  helper uses a web tool, only that tool's query, URL, and options go directly to Firecrawl; the
+  Firecrawl key never goes to OpenAI. Uninstalling removes the app; the compatibility data dir (`%APPDATA%/heyclicky`)
   is kept unless
   you delete it.
 
@@ -145,3 +150,14 @@ Read `docs/ARCHITECTURE.md` first (scope, module ownership, IPC/coordinate contr
 - **Unsigned Windows binaries** — expect the SmartScreen warning.
 - **macOS distribution builds need signing credentials** for a trusted direct-distribution build.
 - One realtime session at a time; no wake word, no integrations yet.
+
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the development
+workflow and project invariants, and read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before
+touching anything structural. Security issues go through [SECURITY.md](SECURITY.md), not the
+public issue tracker.
+
+## License
+
+[MIT](LICENSE) © Fastyr, Inc.

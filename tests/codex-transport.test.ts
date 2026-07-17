@@ -201,12 +201,51 @@ describe('readSseLines', () => {
     });
     const res = { body: stream, text: async () => '' } as unknown as Response;
     const lines: string[] = [];
-    await readSseLines(
-      res,
-      (line) => lines.push(line),
-      () => lines.length >= 2,
-    );
+    await readSseLines(res, (line) => lines.push(line), { shouldStop: () => lines.length >= 2 });
     expect(lines.length).toBe(2);
+    expect(cancelled).toBe(true);
+  });
+
+  it('resets the idle deadline whenever another stream chunk arrives', async () => {
+    const encoder = new TextEncoder();
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"n":1}\n'));
+        timers.push(
+          setTimeout(() => controller.enqueue(encoder.encode('data: {"n":2}\n')), 10),
+          setTimeout(() => controller.enqueue(encoder.encode('data: {"n":3}\n')), 20),
+          setTimeout(() => controller.close(), 30),
+        );
+      },
+      cancel() {
+        for (const timer of timers) clearTimeout(timer);
+      },
+    });
+    const lines: string[] = [];
+
+    await readSseLines(
+      { body: stream, text: async () => '' } as unknown as Response,
+      (line) => lines.push(line),
+      { idleTimeoutMs: 15 },
+    );
+
+    expect(lines).toEqual(['data: {"n":1}', 'data: {"n":2}', 'data: {"n":3}']);
+  });
+
+  it('cancels and fails a stream that remains genuinely idle', async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+    });
+
+    await expect(
+      readSseLines({ body: stream, text: async () => '' } as unknown as Response, () => undefined, {
+        idleTimeoutMs: 10,
+      }),
+    ).rejects.toThrow('backend stream was idle for 10ms');
     expect(cancelled).toBe(true);
   });
 });

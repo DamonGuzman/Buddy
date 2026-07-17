@@ -32,6 +32,14 @@ function upsert(entries: TranscriptEntry[], entry: TranscriptEntry): TranscriptE
   return next.slice(-STACK_LIMIT);
 }
 
+function upsertFilesystemTask(
+  tasks: FilesystemTaskView[],
+  task: FilesystemTaskView,
+): FilesystemTaskView[] {
+  const next = tasks.filter((candidate) => candidate.taskId !== task.taskId);
+  return [...next, task].sort((left, right) => right.createdAt - left.createdAt);
+}
+
 function App(): React.JSX.Element {
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [state, setState] = useState<AssistantState>('idle');
@@ -40,7 +48,7 @@ function App(): React.JSX.Element {
   const [savingVoice, setSavingVoice] = useState(false);
   const [draft, setDraft] = useState('');
   const [folder, setFolder] = useState<FilesystemSelection | null>(null);
-  const [filesystem, setFilesystem] = useState<FilesystemTaskView | null>(null);
+  const [filesystemTasks, setFilesystemTasks] = useState<FilesystemTaskView[]>([]);
   const [filesystemError, setFilesystemError] = useState<string | null>(null);
   const [filesystemBusy, setFilesystemBusy] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -52,12 +60,12 @@ function App(): React.JSX.Element {
       clicky.onAssistantState(setState),
       clicky.onSettings(setSettings),
       clicky.onShown(() => inputRef.current?.focus()),
-      clicky.onFilesystemState(setFilesystem),
+      clicky.onFilesystemState(setFilesystemTasks),
       clicky.onFilesystemSelection(setFolder),
     ];
     void clicky.getSettings().then(setSettings);
     void clicky.getAssistantState().then(setState);
-    void clicky.getFilesystemState().then(setFilesystem);
+    void clicky.getFilesystemState().then(setFilesystemTasks);
     void clicky.getFilesystemSelection().then(setFolder);
     inputRef.current?.focus();
     return () => unsubs.forEach((u) => u());
@@ -98,14 +106,8 @@ function App(): React.JSX.Element {
 
   const voiceMuted = settings?.voiceMuted ?? false;
   const noKey = settings !== null && !settings.apiKeyPresent;
-  const taskActive =
-    filesystem !== null &&
-    ['preparing', 'running', 'review', 'publishing', 'published', 'undoing'].includes(
-      filesystem.status,
-    );
-
   const chooseFolder = async (): Promise<void> => {
-    if (filesystemBusy || taskActive) return;
+    if (filesystemBusy) return;
     setFilesystemBusy(true);
     setFilesystemError(null);
     try {
@@ -119,7 +121,7 @@ function App(): React.JSX.Element {
   };
 
   const clearFolder = async (): Promise<void> => {
-    if (filesystemBusy || taskActive) return;
+    if (filesystemBusy) return;
     setFilesystemBusy(true);
     setFilesystemError(null);
     try {
@@ -141,7 +143,11 @@ function App(): React.JSX.Element {
     try {
       const next = await operation();
       if (next) {
-        setFilesystem(['kept', 'undone', 'discarded'].includes(next.status) ? null : next);
+        setFilesystemTasks((current) =>
+          ['kept', 'undone', 'discarded'].includes(next.status)
+            ? current.filter((task) => task.taskId !== next.taskId)
+            : upsertFilesystemTask(current, next),
+        );
       }
     } catch (error) {
       setFilesystemError(messageOf(error));
@@ -178,32 +184,35 @@ function App(): React.JSX.Element {
           </div>
         ))}
       </div>
-      {filesystem ? (
-        <FilesystemCard
-          task={filesystem}
-          busy={filesystemBusy}
-          onCancel={() =>
-            void mutateFilesystem(() => clicky.cancelFilesystemTask(filesystem.taskId))
-          }
-          onPublish={() =>
-            void mutateFilesystem(() => clicky.publishFilesystemTask(filesystem.taskId))
-          }
-          onDiscard={() =>
-            void mutateFilesystem(() => clicky.discardFilesystemTask(filesystem.taskId))
-          }
-          onUndo={() => void mutateFilesystem(() => clicky.undoFilesystemTask(filesystem.taskId))}
-          onKeep={() => void mutateFilesystem(() => clicky.keepFilesystemTask(filesystem.taskId))}
-        />
+      {filesystemTasks.length > 0 ? (
+        <div className="filesystem-cards">
+          {filesystemTasks.map((task) => (
+            <FilesystemCard
+              key={task.taskId}
+              task={task}
+              busy={filesystemBusy}
+              onCancel={() => void mutateFilesystem(() => clicky.cancelFilesystemTask(task.taskId))}
+              onInspect={() =>
+                void mutateFilesystem(() => clicky.openFilesystemSafeCopy(task.taskId))
+              }
+              onDiscard={() =>
+                void mutateFilesystem(() => clicky.discardFilesystemTask(task.taskId))
+              }
+              onUndo={() => void mutateFilesystem(() => clicky.undoFilesystemTask(task.taskId))}
+              onKeep={() => void mutateFilesystem(() => clicky.keepFilesystemTask(task.taskId))}
+            />
+          ))}
+        </div>
       ) : null}
       {folder ? (
         <div className="folder-chip">
           <span className="folder-copy">
             <strong>{folder.name}</strong>
-            <span>helpers read directly · edits are staged</span>
+            <span>host filesystem · edits auto-apply with undo</span>
           </span>
           <button
             type="button"
-            disabled={filesystemBusy || taskActive}
+            disabled={filesystemBusy}
             onClick={() => void clearFolder()}
             aria-label="remove helper folder"
           >
@@ -237,14 +246,10 @@ function App(): React.JSX.Element {
         <button
           type="button"
           className="folder-button"
-          disabled={filesystemBusy || taskActive}
+          disabled={filesystemBusy}
           onClick={() => void chooseFolder()}
         >
-          {filesystemBusy && !taskActive
-            ? 'opening…'
-            : folder
-              ? 'change helper folder'
-              : 'work in a folder'}
+          {filesystemBusy ? 'opening…' : folder ? 'change helper folder' : 'work in a folder'}
         </button>
         <button
           type="button"
@@ -265,7 +270,7 @@ interface FilesystemCardProps {
   task: FilesystemTaskView;
   busy: boolean;
   onCancel(): void;
-  onPublish(): void;
+  onInspect(): void;
   onDiscard(): void;
   onUndo(): void;
   onKeep(): void;
@@ -275,18 +280,17 @@ function FilesystemCard({
   task,
   busy,
   onCancel,
-  onPublish,
+  onInspect,
   onDiscard,
   onUndo,
   onKeep,
 }: FilesystemCardProps): React.JSX.Element {
   const working = task.status === 'preparing' || task.status === 'running';
   const label: Record<FilesystemTaskView['status'], string> = {
-    preparing: 'starting the secure shell…',
+    preparing: 'starting the host shell…',
     running: 'buddy is working…',
-    review: task.changes.length === 0 ? 'finished · no file changes' : 'changes ready to review',
-    publishing: 'applying reviewed changes…',
-    published: 'changes applied',
+    publishing: 'checking and applying changes…',
+    published: 'changes applied · output handed off',
     kept: 'changes kept',
     undoing: 'restoring the original…',
     undone: 'changes undone',
@@ -303,11 +307,14 @@ function FilesystemCard({
         </span>
       </div>
       {working ? (
-        <p>the folder is read-only to the helper; only requested edit paths enter staging.</p>
+        <p>this helper runs independently; verified staged edits publish automatically.</p>
       ) : null}
-      {task.summary && task.status === 'review' ? <p>{task.summary}</p> : null}
+      {task.summary && task.status === 'published' ? <p>{task.summary}</p> : null}
       {task.error ? <p className="filesystem-error">{task.error}</p> : null}
-      {task.status === 'review' && task.changes.length > 0 ? (
+      {task.status === 'failed' ? (
+        <p>your folder is unchanged. open the safe copy to inspect whatever the helper staged.</p>
+      ) : null}
+      {task.status === 'published' && task.changes.length > 0 ? (
         <div className="change-list">
           {task.changes.slice(0, 6).map((change) => (
             <div key={`${change.kind}:${change.path}`}>
@@ -326,22 +333,15 @@ function FilesystemCard({
             stop
           </button>
         ) : null}
-        {task.status === 'review' ? (
-          <>
-            <button type="button" disabled={busy} onClick={onDiscard}>
-              {task.changes.length ? 'discard' : 'done'}
-            </button>
-            {task.changes.length ? (
-              <button type="button" className="primary" disabled={busy} onClick={onPublish}>
-                apply {task.changes.length} changes
-              </button>
-            ) : null}
-          </>
-        ) : null}
         {task.status === 'failed' ? (
-          <button type="button" disabled={busy} onClick={onDiscard}>
-            discard safe copy
-          </button>
+          <>
+            <button type="button" className="primary" disabled={busy} onClick={onInspect}>
+              open safe copy
+            </button>
+            <button type="button" disabled={busy} onClick={onDiscard}>
+              discard safe copy
+            </button>
+          </>
         ) : null}
         {task.status === 'published' ? (
           <>

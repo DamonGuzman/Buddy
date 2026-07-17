@@ -4,7 +4,7 @@
  * Contract (docs/ARCHITECTURE.md §2, §6): on hotkey press, capture every
  * display via desktopCapturer, resize to <= CAPTURE_MAX_EDGE on the longest
  * edge, encode JPEG ~CAPTURE_JPEG_QUALITY, label screen0..N with the cursor's
- * display flagged active, and exclude Clicky's own windows (content
+ * display flagged active, and exclude Buddy's own windows (content
  * protection during capture). Capture happens ONLY on hotkey / explicit
  * request — never continuous.
  *
@@ -58,7 +58,7 @@ export function exemptFromCaptureProtection(win: BrowserWindow): void {
 }
 
 /**
- * Toggle content protection on every Clicky BrowserWindow so the model never
+ * Toggle content protection on every Buddy BrowserWindow so the model never
  * sees the buddy/caption/panel in screenshots. Best-effort per window (a
  * window may be destroyed mid-iteration).
  */
@@ -156,7 +156,7 @@ function captureOneDisplay(
  * Capture all displays: desktopCapturer at physical resolution, per-display
  * source matching, resize to <= CAPTURE_MAX_EDGE longest edge, JPEG encode.
  *
- * Clicky's own windows are content-protected for the duration of the actual
+ * Buddy's own windows are content-protected for the duration of the actual
  * screen grab (try/finally restores them so normal QA screenshots still see
  * them afterwards).
  */
@@ -192,7 +192,7 @@ export async function captureAllDisplays(
     thumbH = Math.max(thumbH, phys.height);
   }
 
-  // SELF-EXCLUSION: hide Clicky's windows from the grab, always restore.
+  // SELF-EXCLUSION: hide Buddy's windows from the grab, always restore.
   setBuddyWindowsContentProtection(true, logger);
   const restoreMacVisibility = hideBuddyWindowsForMacCapture(logger);
   let sources;

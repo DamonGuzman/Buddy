@@ -19,7 +19,6 @@ function summary(id: string, over: Partial<AgentSummary> = {}): AgentSummary {
     task: 'compare the options',
     status: 'done',
     summary: 'option a wins',
-    maxSteps: 12,
     steps: [],
     sources: [],
     createdAt: 1_000,
@@ -32,7 +31,13 @@ function summary(id: string, over: Partial<AgentSummary> = {}): AgentSummary {
 
 interface HostControls {
   host: AgentContinuationHost;
-  state: { closed: boolean; holding: boolean; pendingResponses: number; assistant: AssistantState };
+  state: {
+    closed: boolean;
+    holding: boolean;
+    pendingResponses: number;
+    assistant: AssistantState;
+    foregroundReady: boolean;
+  };
   injected: { text: string; stillReady: () => boolean }[];
   injectResult: () => Promise<boolean>;
   markSpoken: ReturnType<typeof vi.fn>;
@@ -45,6 +50,7 @@ function fakeHost(): HostControls {
     holding: false,
     pendingResponses: 0,
     assistant: 'idle' as AssistantState,
+    foregroundReady: true,
   };
   const injected: HostControls['injected'] = [];
   const markSpoken = vi.fn();
@@ -57,9 +63,14 @@ function fakeHost(): HostControls {
     injectResult: () => Promise.resolve(true),
     host: {
       closed: () => state.closed,
-      holding: () => state.holding,
       pendingResponses: () => state.pendingResponses,
-      assistantState: () => state.assistant,
+      foregroundReady: () =>
+        state.foregroundReady &&
+        !state.holding &&
+        state.pendingResponses === 0 &&
+        (state.assistant === 'idle' || state.assistant === 'listening'),
+      voiceStartReady: () =>
+        state.foregroundReady && !state.holding && state.pendingResponses === 0,
       setThinking: () => {
         state.assistant = 'thinking';
       },
@@ -148,21 +159,86 @@ describe('AgentContinuations queue', () => {
     expect(ctl.injected).toHaveLength(1);
   });
 
-  it('preemptVoice releases an idle in-flight voice slot so the queue can retry later', async () => {
+  it('runs immediately when an open-mic foreground is ready in listening state', async () => {
+    const ctl = fakeHost();
+    ctl.state.assistant = 'listening';
+    const queue = new AgentContinuations(ctl.host);
+    queue.deliver(summary('agent_1'));
+    await flush();
+    expect(ctl.injected).toHaveLength(1);
+    expect(ctl.markSpoken).toHaveBeenCalledWith('agent_1');
+  });
+
+  it('waits while open-mic speech is active, then drains when the foreground is ready', async () => {
+    const ctl = fakeHost();
+    ctl.state.assistant = 'listening';
+    ctl.state.foregroundReady = false;
+    const queue = new AgentContinuations(ctl.host);
+    queue.deliver(summary('agent_1'));
+    expect(ctl.injected).toHaveLength(0);
+
+    ctl.state.foregroundReady = true;
+    queue.drain();
+    await flush();
+    expect(ctl.injected).toHaveLength(1);
+  });
+
+  it('a voice start declined after its handshake releases the slot so it can retry later', async () => {
     const ctl = fakeHost();
     ctl.injectResult = () => Promise.resolve(false); // never started (stillReady false)
     const queue = new AgentContinuations(ctl.host);
     queue.deliver(summary('agent_1'));
     await flush();
     expect(ctl.markSpoken).not.toHaveBeenCalled();
-    // Still in flight: a drain is a no-op until the user's action preempts it.
     ctl.state.assistant = 'idle'; // the foreground turn settled back to idle
     queue.drain();
-    expect(ctl.injected).toHaveLength(1);
-    queue.preemptVoice();
-    queue.drain();
     await flush();
-    expect(ctl.injected).toHaveLength(2); // retried after the preempt
+    expect(ctl.injected).toHaveLength(2); // retried after the declined start
+  });
+
+  it('retries when the foreground became ready before a declined handshake resolved', async () => {
+    const ctl = fakeHost();
+    let finishHandshake: (started: boolean) => void = () => {
+      throw new Error('voice handshake did not start');
+    };
+    ctl.injectResult = () =>
+      new Promise<boolean>((resolve) => {
+        finishHandshake = resolve;
+      });
+    const queue = new AgentContinuations(ctl.host);
+    queue.deliver(summary('agent_1'));
+
+    // Model the release of a short hotkey tap before connect() settles. The
+    // idle transition already happened, so no later state change can drain.
+    ctl.state.assistant = 'idle';
+    finishHandshake(false);
+    await flush();
+    expect(ctl.injected).toHaveLength(2);
+  });
+
+  it('preemptVoice releases a still-connecting voice attempt for a human turn', async () => {
+    const ctl = fakeHost();
+    const finishHandshakes: Array<(started: boolean) => void> = [];
+    ctl.injectResult = () =>
+      new Promise<boolean>((resolve) => {
+        finishHandshakes.push(resolve);
+      });
+    const queue = new AgentContinuations(ctl.host);
+    queue.deliver(summary('agent_1'));
+    expect(ctl.injected).toHaveLength(1);
+
+    queue.preemptVoice();
+    ctl.state.assistant = 'idle';
+    queue.drain();
+    expect(ctl.injected).toHaveLength(2);
+
+    // The old handshake may resolve after the retry has started. It must not
+    // clear the newer attempt's in-flight ownership.
+    finishHandshakes[0]!(false);
+    await flush();
+    queue.drain();
+    expect(ctl.injected).toHaveLength(2);
+    finishHandshakes[1]!(false);
   });
 
   it('drops a failed voice continuation after ONE attempt (never re-queued)', async () => {

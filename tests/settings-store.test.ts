@@ -148,6 +148,44 @@ describe('SettingsStore: api key round trip', () => {
   });
 });
 
+describe('SettingsStore: Firecrawl key round trip', () => {
+  const FIRECRAWL_KEY = 'fc-test-credential-1234567890';
+
+  it('stores, decrypts, replaces, and clears Firecrawl independently', () => {
+    const store = new SettingsStore(freshPath());
+    store.set({ apiKey: VALID_KEY, firecrawlApiKey: FIRECRAWL_KEY });
+    expect(store.get().firecrawlApiKeyPresent).toBe(true);
+    expect(store.get().firecrawlApiKeyUnreadable).toBe(false);
+    expect(store.getFirecrawlApiKey()).toBe(FIRECRAWL_KEY);
+    expect(store.getApiKey()).toBe(VALID_KEY);
+
+    store.set({ firecrawlApiKey: null });
+    expect(store.get().firecrawlApiKeyPresent).toBe(false);
+    expect(store.getFirecrawlApiKey()).toBeNull();
+    expect(store.getApiKey()).toBe(VALID_KEY);
+  });
+
+  it('rejects malformed Firecrawl keys without replacing the previous one', () => {
+    const path = freshPath();
+    const store = new SettingsStore(path);
+    store.set({ firecrawlApiKey: FIRECRAWL_KEY });
+    expect(() => store.set({ firecrawlApiKey: 'not a firecrawl key' })).toThrow(
+      'full key beginning with fc-',
+    );
+    expect(store.getFirecrawlApiKey()).toBe(FIRECRAWL_KEY);
+    expect(readFileSync(path, 'utf8')).not.toContain(FIRECRAWL_KEY);
+  });
+
+  it('flags an unreadable Firecrawl blob without changing the OpenAI flag', () => {
+    const store = new SettingsStore(freshPath());
+    store.set({ apiKey: VALID_KEY, firecrawlApiKey: FIRECRAWL_KEY });
+    control.decryptFails = true;
+    expect(store.getFirecrawlApiKey()).toBeNull();
+    expect(store.get().firecrawlApiKeyUnreadable).toBe(true);
+    expect(store.get().apiKeyUnreadable).toBe(false);
+  });
+});
+
 describe('SettingsStore: DPAPI decrypt failure (M11 api_key_unreadable)', () => {
   it('flags the dead blob, persists the flag, and notifies listeners', () => {
     const path = freshPath();
@@ -278,7 +316,7 @@ describe('SettingsStore: codex sign-in fields (M17)', () => {
 });
 
 describe('SettingsStore: corrupt settings.json (M11 settings_reset)', () => {
-  it('migrates a healthy schema-v1 file to v3 without losing preferences', () => {
+  it('migrates a healthy schema-v1 file to v4 without losing preferences', () => {
     const path = freshPath();
     writeFileSync(
       path,
@@ -298,7 +336,8 @@ describe('SettingsStore: corrupt settings.json (M11 settings_reset)', () => {
     expect(store.get().preferApiKeyGrounding).toBe(false);
     expect(store.get().fullRealtimeMode).toBe(false);
     expect(store.get().computerUseEnabled).toBe(false);
-    expect(JSON.parse(readFileSync(path, 'utf8')).version).toBe(3);
+    expect(JSON.parse(readFileSync(path, 'utf8')).version).toBe(4);
+    expect(store.get().firecrawlApiKeyPresent).toBe(false);
   });
 
   it('persists the full realtime mode toggle', () => {

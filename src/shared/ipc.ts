@@ -137,8 +137,8 @@ export interface MainToWhisperEvents {
   'whisper:settings': Settings;
   /** The window was just shown — focus the composer input. */
   'whisper:shown': null;
-  /** Current staged filesystem task, or null when no retained task exists. */
-  'whisper:filesystem-state': FilesystemTaskView | null;
+  /** Every active or retained filesystem task, newest first. */
+  'whisper:filesystem-state': FilesystemTaskView[];
   /** Folder currently authorized for newly delegated helper buddies. */
   'whisper:filesystem-selection': FilesystemSelection | null;
 }
@@ -197,12 +197,12 @@ export interface InvokeChannels {
     args: [grantId: string, request: string];
     result: FilesystemTaskView;
   };
-  'filesystem:get-state': { args: []; result: FilesystemTaskView | null };
+  'filesystem:get-state': { args: []; result: FilesystemTaskView[] };
   'filesystem:get-selection': { args: []; result: FilesystemSelection | null };
   'filesystem:clear-root': { args: []; result: void };
-  /** Publish a reviewed staged change set into the selected folder. */
-  'filesystem:publish': { args: [taskId: string]; result: FilesystemTaskView };
-  /** Delete an unpublished workspace without touching the selected folder. */
+  /** Open a failed task's retained staging directory in Finder or Explorer. */
+  'filesystem:open-safe-copy': { args: [taskId: string]; result: void };
+  /** Delete a failed unpublished workspace without touching the selected folder. */
   'filesystem:discard': { args: [taskId: string]; result: FilesystemTaskView };
   /** Restore the durable before-image, after verifying no later edits would be lost. */
   'filesystem:undo': { args: [taskId: string]; result: FilesystemTaskView };
@@ -408,13 +408,13 @@ export interface WhisperApi {
   onSettings(cb: (settings: Settings) => void): Unsubscribe;
   /** The window was just shown — focus the composer input. */
   onShown(cb: () => void): Unsubscribe;
-  onFilesystemState(cb: (state: FilesystemTaskView | null) => void): Unsubscribe;
+  onFilesystemState(cb: (states: FilesystemTaskView[]) => void): Unsubscribe;
   onFilesystemSelection(cb: (selection: FilesystemSelection | null) => void): Unsubscribe;
 
   /** Bootstrap snapshots (push updates ride on the whisper:* channels). */
   getSettings(): Promise<Settings>;
   getAssistantState(): Promise<AssistantState>;
-  getFilesystemState(): Promise<FilesystemTaskView | null>;
+  getFilesystemState(): Promise<FilesystemTaskView[]>;
   getFilesystemSelection(): Promise<FilesystemSelection | null>;
 
   /** Same pipeline as the panel composer ('panel:ask-text'). */
@@ -422,7 +422,7 @@ export interface WhisperApi {
   selectFilesystemRoot(): Promise<FilesystemSelection | null>;
   clearFilesystemRoot(): Promise<void>;
   startFilesystemTask(grantId: string, request: string): Promise<FilesystemTaskView>;
-  publishFilesystemTask(taskId: string): Promise<FilesystemTaskView>;
+  openFilesystemSafeCopy(taskId: string): Promise<void>;
   discardFilesystemTask(taskId: string): Promise<FilesystemTaskView>;
   undoFilesystemTask(taskId: string): Promise<FilesystemTaskView>;
   keepFilesystemTask(taskId: string): Promise<FilesystemTaskView>;

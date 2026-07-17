@@ -86,9 +86,19 @@
 
 /* ------------------------------------------------------ filesystem workflow */
 
+.filesystem-cards {
+  display: flex;
+  max-height: 128px;
+  flex: none;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 7px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+}
 .filesystem-card {
   flex: none;
-  margin-bottom: 7px;
   border: 1px solid rgba(96, 165, 250, 0.32);
   border-radius: 11px;
   background: rgba(30, 64, 175, 0.12);

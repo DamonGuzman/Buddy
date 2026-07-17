@@ -441,7 +441,7 @@ matches its spoken label — plus the §8.3 quick-commit bug fix.
 A persistent PowerShell daemon (`src/main/grounding/snapper.ps1`, embedded at build, spawned
 lazily + warmed at startup, restarted on crash, killed on quit; JSON lines over stdio)
 resolves the top-level window under the model's mapped point with Win32 `WindowFromPoint`
-(mouse hit-test semantics — skips Clicky's own click-through overlays, sees exactly what the
+(mouse hit-test semantics — skips Buddy's own click-through overlays, sees exactly what the
 user sees; the daemon makes itself Per-Monitor-V2 DPI-aware so user32 and UIA agree on
 physical px) and enumerates nearby named UIA elements: rect-pruned ControlView DFS under the
 window, CacheRequest-batched properties, ±350px search radius (one retry at 700px), node/time
@@ -452,7 +452,7 @@ small proximity tie-break. The whole snap is timeboxed at **600ms**; on no-match
 raw model point is used unchanged — snapping is never worse than §8. The label chip keeps the
 model's words; `CLICKY_NO_SNAP=1` gives the A/B baseline; `POST /grounding/query` drives the
 snapper model-free. Two daemon lessons baked in: UIA's own `ElementFromPoint` ignores
-hit-test transparency (it kept landing on Clicky's overlay), and a DPI-unaware daemon mixes
+hit-test transparency (it kept landing on Buddy's overlay), and a DPI-unaware daemon mixes
 virtualized user32 px with physical UIA px — both broke window resolution before the final
 design. Plus one harness lesson: a machine-wide external extension pops an "added to
 Microsoft Edge" bubble over fresh kiosk profiles, overlaying scene toolbars in screenshots

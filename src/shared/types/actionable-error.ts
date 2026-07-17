@@ -24,7 +24,7 @@ export type ActionableErrorKind =
 
 /** Settings destination that can help resolve an actionable failure. */
 export type ActionableErrorTarget =
-  'permissions' | 'openai' | 'chatgpt' | 'voice' | 'microphone' | 'settings';
+  'permissions' | 'openai' | 'firecrawl' | 'chatgpt' | 'voice' | 'microphone' | 'settings';
 
 /** Latest actionable failure, retained by main and replayed after renderer reloads. */
 export interface ActionableErrorNotice {

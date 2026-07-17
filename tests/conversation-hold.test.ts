@@ -14,6 +14,7 @@ import { createRequire } from 'node:module';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ConversationDeps } from '../src/main/conversation';
 import { DEFAULT_SETTINGS } from '../src/shared/types';
+import type { AgentSummary } from '../src/shared/types';
 import type * as MockRealtime from '../tools/mock-realtime/server';
 
 const captureAllDisplaysMock = vi.hoisted(() =>
@@ -398,5 +399,50 @@ describe('Conversation: quick barge-in tap commit guard (M9)', () => {
     await conversation.toggleFullRealtime();
     expect(capture).toHaveBeenLastCalledWith('stop');
     expect(conversation.assistantState()).toBe('idle');
+  });
+
+  it('immediately hands a completed helper result to a resting open-mic Buddy', async () => {
+    const markSpoken = vi.fn();
+    const deps = fakeDeps({ capture: vi.fn(), playback: vi.fn(), sendAudio: vi.fn() }, true);
+    deps.agents = {
+      isReady: () => true,
+      list: () => [],
+      spawn: () => ({ ok: false, reason: 'filesystem_unavailable' }),
+      markSpoken,
+    };
+    const conversation = new Conversation(deps);
+    conversations.push(conversation);
+    await conversation.toggleFullRealtime();
+    expect(conversation.assistantState()).toBe('listening');
+
+    const before = server.clientEvents.length;
+    const completed: AgentSummary = {
+      id: 'agent_open_mic',
+      task: 'compare the options',
+      status: 'done',
+      createdAt: Date.now() - 1_000,
+      finishedAt: Date.now(),
+      steps: [],
+      summary: 'option a is the better fit',
+      sources: [],
+      spoken: false,
+      unseen: true,
+    };
+    conversation.deliverAgentResult(completed);
+
+    await vi.waitFor(() => {
+      const events = server.clientEvents.slice(before);
+      const injected = events.find(
+        (event) =>
+          event.type === 'conversation.item.create' &&
+          JSON.stringify(event).includes('<agent_id>agent_open_mic</agent_id>'),
+      );
+      expect(injected).toBeDefined();
+      expect(events.some((event) => event.type === 'response.create')).toBe(true);
+      expect(markSpoken).toHaveBeenCalledWith('agent_open_mic');
+    });
+    await vi.waitFor(() => expect(conversation.assistantState()).toBe('listening'), {
+      timeout: 10_000,
+    });
   });
 });

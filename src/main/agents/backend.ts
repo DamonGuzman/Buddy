@@ -9,6 +9,8 @@ import {
   parseUsedPercent,
   readSseLines,
 } from '../codex/transport';
+import { beginModelExecution, type ModelExecutionTrace } from '../model-execution-recorder';
+import { AGENT_BACKEND_IDLE_TIMEOUT_MS } from './config';
 import type {
   AgentBackend,
   AgentBackendRequest,
@@ -26,11 +28,31 @@ import type {
  */
 const AGENT_QUOTA_RE = /quota|usage.?limit|rate.?limit/i;
 
+export interface CodexAgentBackendOptions {
+  /** Maximum wait for HTTP response headers. */
+  responseStartTimeoutMs?: number;
+  /** Maximum silence between response-body chunks. */
+  streamIdleTimeoutMs?: number;
+}
+
 export class CodexAgentBackend implements AgentBackend {
+  private readonly responseStartTimeoutMs: number;
+  private readonly streamIdleTimeoutMs: number;
+
   constructor(
     private readonly provider: CodexProvider = getCodexAuthProvider(),
     private readonly fetchImpl: typeof fetch = fetch,
-  ) {}
+    options: CodexAgentBackendOptions = {},
+  ) {
+    this.responseStartTimeoutMs = positiveTimeout(
+      options.responseStartTimeoutMs ?? AGENT_BACKEND_IDLE_TIMEOUT_MS,
+      'response-start',
+    );
+    this.streamIdleTimeoutMs = positiveTimeout(
+      options.streamIdleTimeoutMs ?? AGENT_BACKEND_IDLE_TIMEOUT_MS,
+      'stream-idle',
+    );
+  }
 
   isReady(): boolean {
     return this.provider.getCodexAuth() !== null;
@@ -57,26 +79,51 @@ export class CodexAgentBackend implements AgentBackend {
         retryable: false,
       };
     }
+    const responseStartTimeout = new AbortController();
+    const timer = setTimeout(() => responseStartTimeout.abort(), this.responseStartTimeoutMs);
+    timer.unref?.();
+    let trace: ModelExecutionTrace | null = null;
     try {
+      const body = {
+        model: req.model,
+        instructions: req.instructions,
+        input: req.input,
+        tools: req.tools,
+        tool_choice: 'auto',
+        stream: true,
+        store: false,
+        reasoning: { effort: req.effort },
+        service_tier: 'priority',
+      };
+      trace = beginModelExecution({
+        transport: 'chatgpt-codex-agent',
+        model: req.model,
+        operation: 'agent.responses.create',
+        endpoint: CODEX_RESPONSES_URL,
+        context: {
+          ...req.runContext,
+          reasoningEffort: req.effort,
+          serviceTier: 'priority',
+        },
+      });
+      trace?.request(body);
       const response = await this.fetchImpl(CODEX_RESPONSES_URL, {
         method: 'POST',
         headers: buildCodexHeaders(bearer, auth.accountId),
-        signal: req.signal,
-        body: JSON.stringify({
-          model: req.model,
-          instructions: req.instructions,
-          input: req.input,
-          tools: req.tools,
-          tool_choice: 'auto',
-          stream: true,
-          store: false,
-          reasoning: { effort: req.effort },
-          service_tier: 'priority',
-        }),
+        signal: AbortSignal.any([req.signal, responseStartTimeout.signal]),
+        body: JSON.stringify(body),
+      });
+      clearTimeout(timer);
+      trace?.response({
+        httpStatus: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
       });
       if (!response.ok) {
         const detail = (await response.text()).slice(0, 500);
         const quota = isQuotaStatus(response.status);
+        trace?.fail(new Error(`http ${response.status}: ${detail}`), {
+          quotaExhausted: quota,
+        });
         return {
           ok: false,
           errorKind: quota ? 'agent_quota' : 'agent_backend_down',
@@ -84,26 +131,50 @@ export class CodexAgentBackend implements AgentBackend {
           retryable: !quota && response.status >= 500,
         };
       }
-      return await parseAgentStream(response);
+      const result = await parseAgentStream(response, this.streamIdleTimeoutMs, trace);
+      if (result.ok) trace?.complete(result);
+      else trace?.fail(new Error(result.detail), result);
+      return result;
     } catch (error) {
+      const responseStartTimedOut = responseStartTimeout.signal.aborted && !req.signal.aborted;
+      if (req.signal.aborted) trace?.cancel('agent request cancelled');
+      else trace?.fail(error, { responseStartTimedOut });
       return {
         ok: false,
         errorKind: 'agent_backend_down',
-        detail: errorMessage(error),
+        detail: responseStartTimedOut
+          ? `backend response did not start within ${this.responseStartTimeoutMs}ms`
+          : errorMessage(error),
         retryable: !req.signal.aborted,
       };
+    } finally {
+      clearTimeout(timer);
     }
   }
 }
 
-async function parseAgentStream(response: Response): Promise<AgentBackendResult> {
+async function parseAgentStream(
+  response: Response,
+  streamIdleTimeoutMs: number,
+  trace: ModelExecutionTrace | null,
+): Promise<AgentBackendResult> {
   const state = new AgentStreamState();
-  await readSseLines(response, (line) => {
-    // Malformed/unknown SSE lines are skipped; a terminal event still decides
-    // the result.
-    const event = parseSseEventLine(line);
-    if (event !== null) state.handle(event);
-  });
+  await readSseLines(
+    response,
+    (line) => {
+      // Malformed/unknown SSE lines are skipped; a terminal event still decides
+      // the result.
+      const event = parseSseEventLine(line);
+      if (event !== null) {
+        trace?.event('server', event);
+        state.handle(event);
+      }
+    },
+    {
+      shouldStop: () => state.isTerminal(),
+      idleTimeoutMs: streamIdleTimeoutMs,
+    },
+  );
   return state.result(response.headers);
 }
 
@@ -111,9 +182,12 @@ class AgentStreamState {
   private text = '';
   private failed: { detail: string; quota: boolean } | null = null;
   private readonly calls = new Map<string, AgentFunctionCall>();
-  private readonly queries = new Set<string>();
-  private readonly citations = new Set<string>();
   private usage: { inputTokens: number; outputTokens: number; totalTokens: number } | undefined;
+  private terminal = false;
+
+  isTerminal(): boolean {
+    return this.terminal;
+  }
 
   handle(event: Record<string, unknown>): void {
     const type = asString(event['type']);
@@ -123,7 +197,6 @@ class AgentStreamState {
     if (type === 'response.output_item.added' || type === 'response.output_item.done') {
       const item = asRecord(event['item']);
       if (item?.['type'] === 'function_call') this.captureCall(item);
-      this.captureSearch(item);
     }
     if (type === 'response.function_call_arguments.done') {
       const id = asString(event['item_id']);
@@ -133,14 +206,8 @@ class AgentStreamState {
       if (callId && name)
         this.calls.set(id, { callId, name, argsJson: asString(event['arguments']) });
     }
-    if (type.startsWith('response.web_search_call.'))
-      this.captureSearch(asRecord(event['item']) ?? event);
-    if (type === 'response.output_text.annotation.added') {
-      const annotation = asRecord(event['annotation']);
-      const url = asString(annotation?.['url']);
-      if (url) this.citations.add(url);
-    }
     if (type === 'response.completed') {
+      this.terminal = true;
       const usage = asRecord(asRecord(event['response'])?.['usage']);
       if (usage) {
         this.usage = {
@@ -151,6 +218,7 @@ class AgentStreamState {
       }
     }
     if (type === 'response.failed' || type === 'response.incomplete' || type === 'error') {
+      this.terminal = true;
       const error = asRecord(event['error']) ?? event;
       const detail = asString(error['message']) || type;
       this.failed = {
@@ -167,6 +235,14 @@ class AgentStreamState {
         errorKind: this.failed.quota ? 'agent_quota' : 'agent_backend_down',
         detail: this.failed.detail,
         retryable: !this.failed.quota,
+      };
+    }
+    if (!this.terminal) {
+      return {
+        ok: false,
+        errorKind: 'agent_backend_down',
+        detail: 'backend stream ended before a terminal event',
+        retryable: true,
       };
     }
     const calls = [...this.calls.values()];
@@ -190,8 +266,8 @@ class AgentStreamState {
       outputItems,
       text: this.text,
       functionCalls: calls,
-      searchQueries: [...this.queries],
-      citations: [...this.citations],
+      searchQueries: [],
+      citations: [],
       usedPercent: parseUsedPercent(headers),
       ...(this.usage ? { usage: this.usage } : {}),
     };
@@ -205,11 +281,10 @@ class AgentStreamState {
       this.calls.set(id, { callId, name, argsJson: asString(item['arguments']) });
     }
   }
+}
 
-  private captureSearch(item: Record<string, unknown> | null): void {
-    if (!item) return;
-    const action = asRecord(item['action']);
-    const query = asString(action?.['query']) || asString(item['query']);
-    if (query) this.queries.add(query);
-  }
+function positiveTimeout(value: number, label: string): number {
+  if (!Number.isFinite(value) || value <= 0)
+    throw new Error(`${label} timeout must be a positive finite number`);
+  return value;
 }

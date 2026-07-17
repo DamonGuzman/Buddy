@@ -17,7 +17,8 @@
 
 ## 0. Executive summary
 
-Research-only helpers remain read-only (web_search / web_fetch / scratchpad / read_screen). An
+Every helper profile receives the complete Firecrawl web tool set. Research-only helpers otherwise
+remain read-only (Firecrawl / scratchpad / read_screen). An
 explicitly browser-enabled handoff can additionally use a browser the buddy can _drive_. The
 implementation gives each such helper a **hidden
 `BrowserWindow`** on a persistent "buddy work profile" partition, driven entirely through
@@ -182,25 +183,27 @@ sites deliberately:
 ### 2.5 Lifecycle
 
 Window created lazily on the buddy's first browser tool call; destroyed on terminal status
-(done/failed/timed_out/cancelled) and on `manager.dispose()`. Wall-clock and step budgets need a
-browser-task tier (real web tasks take more than 12 rounds): `MAX_STEPS` 40 and wall clock 10 min
-for buddies that were granted browser tools, still bounded, still cancellable at every boundary.
+(done/failed/cancelled) and on `manager.dispose()`. Browser helpers have no whole-run wall clock or
+step ceiling: real web tasks may take arbitrarily many observe/act rounds. They remain explicitly
+cancellable at every operation boundary, and stalled individual operations still fail fast.
 
 ## 3. Browser tools for helper buddies
 
 Registered in the existing `AgentToolSpec` registry — no sub-delegation to Sol; the buddy's own
 Codex loop drives its own window. Granted per-task (a research-only buddy gets none). Every acting
-tool carries a **required `justification`** parameter (Damon's ruling: always present, evidence
-for the gate):
+tool carries a **required `justification`** parameter (product decision: always present, evidence
+for the gate) plus the shared required **`description`** parameter: a 3–12 word, non-technical
+progress line shown directly on the helper card. Missing or malformed descriptions are rejected
+before the browser action reaches the gate:
 
-| Tool                 | Args (all with `justification: string` — one sentence, why this serves the task) | Gate exposure            |
-| -------------------- | -------------------------------------------------------------------------------- | ------------------------ |
-| `browser_navigate`   | `url`                                                                            | trigger on domain change |
-| `browser_click`      | `x, y, label, button?, count?` (pixels in the last screenshot)                   | full trigger (§4.2)      |
-| `browser_type`       | `text` (into the focused field)                                                  | password-field hard deny |
-| `browser_press_keys` | `keys[]` (chords; ENTER in a form field is trigger-equivalent to submit)         | full trigger             |
-| `browser_scroll`     | `x, y, dy`                                                                       | never flagged            |
-| `browser_screenshot` | —                                                                                | never flagged            |
+| Tool                 | Other args (all also require `description` and `justification`)          | Gate exposure            |
+| -------------------- | ------------------------------------------------------------------------ | ------------------------ |
+| `browser_navigate`   | `url`                                                                    | trigger on domain change |
+| `browser_click`      | `x, y, label, button?, count?` (pixels in the last screenshot)           | full trigger (§4.2)      |
+| `browser_type`       | `text` (into the focused field)                                          | password-field hard deny |
+| `browser_press_keys` | `keys[]` (chords; ENTER in a form field is trigger-equivalent to submit) | full trigger             |
+| `browser_scroll`     | `x, y, dy`                                                               | never flagged            |
+| `browser_screenshot` | —                                                                        | never flagged            |
 
 Loop discipline copied from the operator: **one action per observation** — after every executed
 action the driver settles (~350ms), captures fresh, and the image goes back with the tool output.
@@ -300,7 +303,7 @@ Decision rule, stated in the reviewer prompt exactly:
 - **escalate** — the action matches the task but is consequential (money, mass-send, delete,
   publish) and no standing grant covers it. **Uncertainty about CONSEQUENCE escalates.**
 
-Deny mechanics (Damon's ruling: deny is final): the click does not happen; the tool output returns
+Deny mechanics (product decision: deny is final): the click does not happen; the tool output returns
 `{denied: true, reason}` so the buddy can reroute or finish honestly. `gate/strikes.ts` counts
 denials per (buddy, target signature): **3 denials on the same target → auto-escalate**; **5
 denials total in a run → halt the buddy** (`failed`, copy: _"i kept proposing actions the reviewer
@@ -460,16 +463,18 @@ are approving); everything else stays `AgentSummary`-shaped.
 2. Domain/signature normalization uses `tldts`; model labels never create grant scope.
 3. Credential and secret-shaped fields and proposed typed values are mechanically denied or
    redacted before reviewer, renderer, or journal boundaries.
-4. Browser-enabled helpers are bounded to 40 model rounds and ten minutes of active runtime;
-   local human-approval parking pauses the clock but still occupies a concurrency slot.
+4. Browser-enabled helpers have no whole-run model-round, active-runtime, or concurrency ceiling.
+   Local human-approval parking affects only that action and never blocks admission or progress of
+   other helpers.
 5. The shared persistent profile permits concurrent helpers. Per-action DOM/URL/payload
    reinspection and exact navigation capabilities prevent one helper from reusing another's
    approval; site sign-out, clear, lock, suspend, and shutdown cancel affected runs first.
 6. No persistent browser surface is created or read before the user grants the run's browser
    capability. Every subsequent observation-producing tool starts a new one-action boundary.
-7. Browser and `web_fetch` traffic resolve and validate every redirect hop, reject mixed or
-   non-global address sets, and connect the exact validated IP while preserving HTTP Host and TLS
-   identity. The browser's loopback proxy is authenticated with per-instance random credentials.
+7. Buddy browser traffic resolves and validates every redirect hop, rejects mixed or non-global
+   address sets, and connects the exact validated IP while preserving HTTP Host and TLS identity.
+   Firecrawl traffic goes only to the fixed `api.firecrawl.dev` v2 origin. The browser's loopback
+   proxy is authenticated with per-instance random credentials.
 8. Live keyboard actions require the same native focused receiver before approval and immediately
    before dispatch. Live clicks require a dense, quantized local-crop digest; unstable evidence is
    retried only within a fixed bound and then fails closed.

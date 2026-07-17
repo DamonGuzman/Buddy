@@ -6,13 +6,14 @@ export const filesystemTools: AgentToolSpec[] = [
       type: 'function',
       name: 'run_shell',
       description:
-        'Run real macOS zsh with the selected folder as cwd. This shell is mechanically READ-ONLY for the selected folder; use it for ls, rg, git status, inspection, and checks that do not write project files. Network and unrelated paths are denied.',
+        "Run ordinary host macOS zsh with the selected folder as cwd. It has the Buddy user account's filesystem permissions and is not mechanically read-only. Use it only for ls, rg, git status, inspection, and checks that do not write project files; use stage_paths and run_staged_shell for edits.",
       parameters: {
         type: 'object',
         properties: {
           script: {
             type: 'string',
-            description: 'A zsh script. Shell startup files are disabled.',
+            description:
+              'A zsh script. Shell startup files are disabled. A terminationSignal or exit 137 is a hard failure; do not retry the same command unchanged or hide it with `|| true`.',
           },
           cwd: {
             type: 'string',
@@ -26,11 +27,6 @@ export const filesystemTools: AgentToolSpec[] = [
     },
     timeoutMs: 125_000,
     stepKind: 'shell',
-    stepLabel: (args) => {
-      const script = typeof args['script'] === 'string' ? args['script'].trim() : '';
-      const firstLine = script.split('\n', 1)[0] ?? '';
-      return `ran ${firstLine.slice(0, 100) || 'a shell command'}`;
-    },
     async execute(args, ctx) {
       if (!ctx.filesystem || !ctx.brief.filesystem)
         throw new Error('filesystem access was not granted for this task');
@@ -68,10 +64,6 @@ export const filesystemTools: AgentToolSpec[] = [
     },
     timeoutMs: 125_000,
     stepKind: 'file',
-    stepLabel: (args) => {
-      const count = Array.isArray(args['paths']) ? args['paths'].length : 0;
-      return `staged ${count} path${count === 1 ? '' : 's'} for editing`;
-    },
     async execute(args, ctx) {
       if (!ctx.filesystem || !ctx.brief.filesystem)
         throw new Error('filesystem access was not granted for this task');
@@ -86,13 +78,14 @@ export const filesystemTools: AgentToolSpec[] = [
       type: 'function',
       name: 'run_staged_shell',
       description:
-        'Run writable macOS zsh inside the sparse private staging area after calling stage_paths. Only staged paths are initially present. The selected folder remains read-only and unchanged until review and Apply.',
+        'Run ordinary host macOS zsh inside the sparse private staging area after calling stage_paths. Only staged paths are initially present. Use this workflow for edits so Buddy can verify, publish, and retain Undo; the process itself is not OS-sandboxed.',
       parameters: {
         type: 'object',
         properties: {
           script: {
             type: 'string',
-            description: 'A zsh script. Shell startup files are disabled.',
+            description:
+              'A zsh script. Shell startup files are disabled. A terminationSignal or exit 137 is a hard failure; do not retry the same command unchanged or hide it with `|| true`.',
           },
           cwd: {
             type: 'string',
@@ -105,11 +98,6 @@ export const filesystemTools: AgentToolSpec[] = [
     },
     timeoutMs: 125_000,
     stepKind: 'shell',
-    stepLabel: (args) => {
-      const script = typeof args['script'] === 'string' ? args['script'].trim() : '';
-      const firstLine = script.split('\n', 1)[0] ?? '';
-      return `edited staging with ${firstLine.slice(0, 90) || 'a shell command'}`;
-    },
     async execute(args, ctx) {
       if (!ctx.filesystem || !ctx.brief.filesystem)
         throw new Error('filesystem access was not granted for this task');
@@ -130,11 +118,37 @@ export const filesystemTools: AgentToolSpec[] = [
     },
     timeoutMs: 30_000,
     stepKind: 'file',
-    stepLabel: () => 'reviewed staged file changes',
     async execute(_args, ctx) {
       if (!ctx.filesystem || !ctx.brief.filesystem)
         throw new Error('filesystem access was not granted for this task');
       return ctx.filesystem.describeChanges(ctx.brief.filesystem.taskId);
+    },
+  },
+  {
+    definition: {
+      type: 'function',
+      name: 'present_file',
+      description:
+        'Choose the single finished, non-executable regular file Buddy should open for the user after the staged transaction is verified and committed. Call this after validation and workspace_changes. If several files changed, choose the primary user-facing artifact.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description: 'Exact selected-folder-relative path of the finished file to present.',
+          },
+        },
+        required: ['path'],
+        additionalProperties: false,
+      },
+    },
+    timeoutMs: 30_000,
+    stepKind: 'file',
+    async execute(args, ctx) {
+      if (!ctx.filesystem || !ctx.brief.filesystem)
+        throw new Error('filesystem access was not granted for this task');
+      const path = typeof args['path'] === 'string' ? args['path'] : '';
+      return ctx.filesystem.presentFile(ctx.brief.filesystem.taskId, path);
     },
   },
 ];

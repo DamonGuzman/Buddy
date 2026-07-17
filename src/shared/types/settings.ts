@@ -24,6 +24,10 @@ export interface Settings {
    * re-paste; pasting a new key clears it.
    */
   apiKeyUnreadable: boolean;
+  /** Whether a Firecrawl key is stored securely. The raw key never crosses IPC. */
+  firecrawlApiKeyPresent: boolean;
+  /** The stored Firecrawl blob can no longer be decrypted by safeStorage. */
+  firecrawlApiKeyUnreadable: boolean;
   model: ModelId;
   voice: string;
   captionsEnabled: boolean;
@@ -68,6 +72,8 @@ export interface Settings {
  */
 export interface SettingsPatch {
   apiKey?: string | null;
+  /** Write-only Firecrawl key; null clears it and absent preserves it. */
+  firecrawlApiKey?: string | null;
   model?: ModelId;
   voice?: string;
   captionsEnabled?: boolean;
@@ -84,6 +90,8 @@ export interface SettingsPatch {
 export const DEFAULT_SETTINGS: Settings = {
   apiKeyPresent: false,
   apiKeyUnreadable: false,
+  firecrawlApiKeyPresent: false,
+  firecrawlApiKeyUnreadable: false,
   // M8.6: default to the full model — the live pointing eval (docs/EVAL.md §8)
   // showed mini's coordinate estimation is far less accurate (0-13% strict vs
   // full's 33-47%). mini remains selectable in settings as the faster/cheaper
@@ -141,6 +149,10 @@ export function applySettingsPatch(current: Settings, patch: SettingsPatch): Set
   if (patch.apiKey !== undefined) {
     next.apiKeyPresent = patch.apiKey !== null;
     next.apiKeyUnreadable = false;
+  }
+  if (patch.firecrawlApiKey !== undefined) {
+    next.firecrawlApiKeyPresent = patch.firecrawlApiKey !== null;
+    next.firecrawlApiKeyUnreadable = false;
   }
   return next;
 }

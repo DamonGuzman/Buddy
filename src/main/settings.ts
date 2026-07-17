@@ -14,7 +14,7 @@
 import { app, safeStorage } from 'electron';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { normalizeOpenAiApiKey } from '../shared/api-key';
+import { normalizeFirecrawlApiKey, normalizeOpenAiApiKey } from '../shared/api-key';
 import { MODEL_IDS } from '../shared/constants';
 import { DEFAULT_SETTINGS, applySettingsPatch } from '../shared/types';
 import type { BuddyRest, CodexSignInState, Settings, SettingsPatch } from '../shared/types';
@@ -31,7 +31,7 @@ const CODEX_SIGNED_OUT: CodexSignInState = {
 };
 
 /** The user-preference keys persisted verbatim (everything patchable but the key). */
-type PrefKey = Exclude<keyof SettingsPatch, 'apiKey'>;
+type PrefKey = Exclude<keyof SettingsPatch, 'apiKey' | 'firecrawlApiKey'>;
 type Prefs = Pick<Settings, PrefKey>;
 
 /** One persisted preference: its default and how to validate a stored value. */
@@ -97,14 +97,16 @@ function loadPrefs(parsed: Partial<Record<PrefKey, unknown>>): Prefs {
 
 /** On-disk shape. `apiKeyEncrypted` is a base64 safeStorage blob. */
 interface SettingsFile extends Prefs {
-  version: 3;
+  version: 4;
   apiKeyEncrypted: string | null;
+  firecrawlApiKeyEncrypted: string | null;
   /**
    * M11: the stored blob failed DPAPI decryption (windows credentials
    * changed). Persisted so the "paste it again" prompt survives restarts;
    * cleared when a new key is stored (or the key is cleared).
    */
   keyUnreadable?: boolean;
+  firecrawlKeyUnreadable?: boolean;
 }
 
 const FILE_NAME = 'settings.json';
@@ -112,6 +114,8 @@ const FILE_NAME = 'settings.json';
 /** Safe, actionable copy; deliberately never interpolates the submitted secret. */
 export const INVALID_API_KEY_MESSAGE =
   'that does not look like a complete OpenAI API key — paste the full key beginning with sk-.';
+export const INVALID_FIRECRAWL_API_KEY_MESSAGE =
+  'that does not look like a complete Firecrawl API key — paste the full key beginning with fc-.';
 
 /**
  * Reject only credentials that are unambiguously not OpenAI API keys. The
@@ -122,6 +126,12 @@ export const INVALID_API_KEY_MESSAGE =
 function requireOpenAiApiKey(value: string): string {
   const normalized = normalizeOpenAiApiKey(value);
   if (normalized === null) throw new Error(INVALID_API_KEY_MESSAGE);
+  return normalized;
+}
+
+function requireFirecrawlApiKey(value: string): string {
+  const normalized = normalizeFirecrawlApiKey(value);
+  if (normalized === null) throw new Error(INVALID_FIRECRAWL_API_KEY_MESSAGE);
   return normalized;
 }
 
@@ -168,6 +178,8 @@ export class SettingsStore {
     return {
       apiKeyPresent: this.file.apiKeyEncrypted !== null,
       apiKeyUnreadable: this.file.keyUnreadable === true,
+      firecrawlApiKeyPresent: this.file.firecrawlApiKeyEncrypted !== null,
+      firecrawlApiKeyUnreadable: this.file.firecrawlKeyUnreadable === true,
       model: this.file.model,
       voice: this.file.voice,
       captionsEnabled: this.file.captionsEnabled,
@@ -226,6 +238,14 @@ export class SettingsStore {
       next.keyUnreadable = false;
       normalizedPatch = { ...patch, apiKey };
     }
+    if (patch.firecrawlApiKey !== undefined) {
+      const trimmed = patch.firecrawlApiKey?.trim() ?? '';
+      const firecrawlApiKey = trimmed === '' ? null : requireFirecrawlApiKey(trimmed);
+      next.firecrawlApiKeyEncrypted =
+        firecrawlApiKey === null ? null : this.encrypt(firecrawlApiKey);
+      next.firecrawlKeyUnreadable = false;
+      normalizedPatch = { ...normalizedPatch, firecrawlApiKey };
+    }
     const merged = applySettingsPatch(this.get(), normalizedPatch);
     for (const key of PREF_KEYS) setPref(next, key, merged[key]);
 
@@ -239,19 +259,12 @@ export class SettingsStore {
 
   /** Decrypted API key — MAIN PROCESS ONLY. Never send over IPC. */
   getApiKey(): string | null {
-    if (this.file.apiKeyEncrypted === null) return null;
-    try {
-      const key = safeStorage.decryptString(Buffer.from(this.file.apiKeyEncrypted, 'base64'));
-      // A previously flagged blob decrypts again (rare, but heal the flag).
-      this.setKeyUnreadable(false);
-      return key;
-    } catch (err) {
-      console.error('[settings] failed to decrypt api key:', err);
-      // M11: flag the dead blob (once) so the UI stops claiming a key is
-      // present-and-working while every turn fails.
-      this.setKeyUnreadable(true);
-      return null;
-    }
+    return this.decryptCredential('openai');
+  }
+
+  /** Decrypted Firecrawl key — MAIN PROCESS ONLY. Never send over IPC. */
+  getFirecrawlApiKey(): string | null {
+    return this.decryptCredential('firecrawl');
   }
 
   /**
@@ -260,9 +273,31 @@ export class SettingsStore {
    * repeated failing or healthy decrypts) so the panel snapshot reflects it
    * immediately and across restarts.
    */
-  private setKeyUnreadable(flag: boolean): void {
-    if ((this.file.keyUnreadable === true) === flag) return;
-    const next = { ...this.file, keyUnreadable: flag };
+  private decryptCredential(kind: 'openai' | 'firecrawl'): string | null {
+    const encrypted =
+      kind === 'openai' ? this.file.apiKeyEncrypted : this.file.firecrawlApiKeyEncrypted;
+    if (encrypted === null) return null;
+    try {
+      const key = safeStorage.decryptString(Buffer.from(encrypted, 'base64'));
+      this.setCredentialUnreadable(kind, false);
+      return key;
+    } catch (err) {
+      console.error(`[settings] failed to decrypt ${kind} api key:`, err);
+      this.setCredentialUnreadable(kind, true);
+      return null;
+    }
+  }
+
+  private setCredentialUnreadable(kind: 'openai' | 'firecrawl', flag: boolean): void {
+    const current =
+      kind === 'openai'
+        ? this.file.keyUnreadable === true
+        : this.file.firecrawlKeyUnreadable === true;
+    if (current === flag) return;
+    const next =
+      kind === 'openai'
+        ? { ...this.file, keyUnreadable: flag }
+        : { ...this.file, firecrawlKeyUnreadable: flag };
     try {
       this.persist(next);
     } catch {
@@ -374,19 +409,26 @@ export class SettingsStore {
 
   private load(): SettingsFile {
     const fallback: SettingsFile = {
-      version: 3,
+      version: 4,
       apiKeyEncrypted: null,
+      firecrawlApiKeyEncrypted: null,
       keyUnreadable: false,
+      firecrawlKeyUnreadable: false,
       ...defaultPrefs(),
     };
     try {
       if (!existsSync(this.path)) return fallback;
       const parsed = JSON.parse(readFileSync(this.path, 'utf8')) as Partial<SettingsFile>;
-      this.needsMigration = parsed.version !== 3;
+      this.needsMigration = parsed.version !== 4;
       return {
-        version: 3,
+        version: 4,
         apiKeyEncrypted: typeof parsed.apiKeyEncrypted === 'string' ? parsed.apiKeyEncrypted : null,
+        firecrawlApiKeyEncrypted:
+          typeof parsed.firecrawlApiKeyEncrypted === 'string'
+            ? parsed.firecrawlApiKeyEncrypted
+            : null,
         keyUnreadable: parsed.keyUnreadable === true,
+        firecrawlKeyUnreadable: parsed.firecrawlKeyUnreadable === true,
         ...loadPrefs(parsed),
       };
     } catch (err) {

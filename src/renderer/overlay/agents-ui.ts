@@ -278,32 +278,11 @@ export interface HelperStatusView {
   cta: string | null;
 }
 
-/** 'searched "x"' -> 'searching for "x"', 'read foo.com/…' -> 'reading foo.com/…'. */
+/** Show the helper's required plain-language tool description verbatim. */
 function activityLine(agent: AgentSummary): string {
   const last = agent.steps[agent.steps.length - 1];
   if (!last) return 'figuring out where to start';
-  switch (last.kind) {
-    case 'search': {
-      const m = /^searched\s+(.*)$/.exec(last.label);
-      return m ? `searching for ${m[1]}` : 'searching the web';
-    }
-    case 'fetch': {
-      const m = /^read\s+(.*)$/.exec(last.label);
-      return m ? `reading ${m[1]}` : 'reading a page';
-    }
-    case 'think':
-      return 'thinking it over';
-    case 'note':
-      return 'writing down what i found';
-    case 'browse':
-      return 'looking through a page';
-    case 'action':
-      return 'getting an action ready';
-    case 'review':
-      return 'double-checking an action';
-    default:
-      return 'working on it';
-  }
+  return truncate(last.label.trim() || 'working on it', 150);
 }
 
 export function helperStatus(agent: AgentSummary): HelperStatusView {
@@ -337,13 +316,6 @@ export function helperStatus(agent: AgentSummary): HelperStatusView {
         kind: 'trouble',
         line: truncate(agent.error ?? 'something went wrong along the way', 150),
         cta: 'click for the details',
-      };
-    case 'timed_out':
-      return {
-        pill: 'ran long',
-        kind: 'trouble',
-        line: 'i ran out of time, but i saved what i had',
-        cta: 'click to see how far i got',
       };
     case 'cancelled':
       return {

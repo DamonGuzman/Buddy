@@ -49,7 +49,6 @@ function agent(over: Partial<AgentSummary>): AgentSummary {
     task: 'find the best 27 inch monitor under $400',
     status: 'running',
     createdAt: NOW - 30_000,
-    maxSteps: null,
     steps: [],
     spoken: false,
     unseen: false,
@@ -322,16 +321,18 @@ describe('helperTint', () => {
 describe('helperStatus (non-technical copy)', () => {
   it('running: derives the activity line from the last step', () => {
     const search = helperStatus(
-      agent({ steps: [{ kind: 'search', label: 'searched "best 27 inch monitor"', at: NOW }] }),
+      agent({ steps: [{ kind: 'search', label: 'checking affordable monitors', at: NOW }] }),
     );
     expect(search.kind).toBe('working');
-    expect(search.line).toBe('searching for "best 27 inch monitor"');
+    expect(search.line).toBe('checking affordable monitors');
     const fetch = helperStatus(
-      agent({ steps: [{ kind: 'fetch', label: 'read rtings.com/reviews', at: NOW }] }),
+      agent({ steps: [{ kind: 'fetch', label: 'reading the product reviews', at: NOW }] }),
     );
-    expect(fetch.line).toBe('reading rtings.com/reviews');
-    const think = helperStatus(agent({ steps: [{ kind: 'think', label: 'thinking', at: NOW }] }));
-    expect(think.line).toBe('thinking it over');
+    expect(fetch.line).toBe('reading the product reviews');
+    const think = helperStatus(
+      agent({ steps: [{ kind: 'think', label: 'comparing the strongest options', at: NOW }] }),
+    );
+    expect(think.line).toBe('comparing the strongest options');
     expect(helperStatus(agent({})).line).toBe('figuring out where to start');
   });
 
@@ -344,7 +345,7 @@ describe('helperStatus (non-technical copy)', () => {
     expect(s.cta).toContain('click');
   });
 
-  it('failed/timed_out read as friendly trouble, queued as waiting', () => {
+  it('failed reads as friendly trouble and queued as waiting', () => {
     expect(
       helperStatus(agent({ status: 'failed', error: 'the web search service said no' })),
     ).toMatchObject({
@@ -354,7 +355,6 @@ describe('helperStatus (non-technical copy)', () => {
     expect(helperStatus(agent({ status: 'failed' })).line).toBe(
       'something went wrong along the way',
     );
-    expect(helperStatus(agent({ status: 'timed_out' })).pill).toBe('ran long');
     expect(helperStatus(agent({ status: 'queued' })).kind).toBe('waiting');
   });
 

@@ -3,6 +3,7 @@ import { clicky } from '../clicky';
 import { ChatGptCard } from './settings/ChatGptCard';
 import { MicrophoneCard } from './settings/MicrophoneCard';
 import { OpenAiCard } from './settings/OpenAiCard';
+import { FirecrawlCard } from './settings/FirecrawlCard';
 import { VoiceCard } from './settings/VoiceCard';
 import { BuddyBrowserCard } from './settings/BuddyBrowserCard';
 import { PermissionCard } from './PermissionCard';
@@ -184,6 +185,9 @@ export function SettingsView({
           <div data-settings-section="openai" className={sectionClass('openai')}>
             <OpenAiCard settings={settings} session={session} onPatch={patch} />
           </div>
+          <div data-settings-section="firecrawl" className={sectionClass('firecrawl')}>
+            <FirecrawlCard settings={settings} onPatch={patch} />
+          </div>
           <div data-settings-section="chatgpt" className={sectionClass('chatgpt')}>
             <ChatGptCard settings={settings} onPatch={patch} />
           </div>
@@ -201,7 +205,11 @@ export function SettingsView({
           </div>
           <div className="flex items-center gap-2.5 rounded-lg border border-dashed px-3.5 py-2.5 text-xs text-muted-foreground">
             <span>🪄</span>
-            <span>agent mode is ready — say “buddy, agent…” to send off research.</span>
+            <span>
+              {settings.firecrawlApiKeyPresent && !settings.firecrawlApiKeyUnreadable
+                ? 'agent mode is ready — say “buddy, agent…” to send off research.'
+                : 'add a Firecrawl key above to give helper buddies live web research.'}
+            </span>
           </div>
         </div>
       </ScrollArea>

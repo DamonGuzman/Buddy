@@ -12,7 +12,7 @@ import type {
   Session,
   WebContents,
 } from 'electron';
-import { isPrivateAddress } from '../agents/tools/web-fetch';
+import { isPrivateAddress } from './network-address';
 import { BuddyBrowserProxy } from './browser-proxy';
 import type { BrowserProxyResolver } from './browser-proxy';
 

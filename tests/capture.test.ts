@@ -414,7 +414,7 @@ describe('captureAllDisplays', () => {
   );
 
   describe('content-protection self-exclusion', () => {
-    it('enables protection on every Clicky window before the grab, restores after', async () => {
+    it('enables protection on every Buddy window before the grab, restores after', async () => {
       setupSingle4kDisplay();
       const w1 = new FakeBrowserWindow();
       const w2 = new FakeBrowserWindow();

@@ -5,7 +5,15 @@
   "main": "out/main/index.js",
   "private": true,
   "author": "Fastyr, Inc.",
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DamonGuzman/Buddy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DamonGuzman/Buddy/issues"
+  },
+  "homepage": "https://github.com/DamonGuzman/Buddy#readme",
   "scripts": {
     "dev": "node tools/dev.mjs",
     "dev:raw": "electron-vite dev --watch",

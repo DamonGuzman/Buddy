@@ -35,6 +35,7 @@ describe('client event framing', () => {
         type: 'realtime',
         instructions: getSessionInstructions(),
         output_modalities: ['audio'],
+        reasoning: { effort: 'medium' },
         audio: {
           input: {
             format: { type: 'audio/pcm', rate: 24000 },
@@ -48,6 +49,7 @@ describe('client event framing', () => {
     };
     const back = roundTrip(evt);
     expect(back).toEqual(evt);
+    expect(back.session.reasoning).toEqual({ effort: 'medium' });
     expect(back.session.audio?.input?.turn_detection).toBeNull();
     expect(back.session.tools?.[0]?.name).toBe('point_at');
   });

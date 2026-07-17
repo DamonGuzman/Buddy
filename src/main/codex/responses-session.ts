@@ -35,6 +35,7 @@
 
 import type { ChatGptCodexAuthSource } from '../auth/auth-source';
 import type { CodexUsedPercent } from '../../shared/types';
+import { beginModelExecution, type ModelExecutionTrace } from '../model-execution-recorder';
 import {
   CODEX_RESPONSES_URL,
   buildCodexHeaders,
@@ -368,31 +369,56 @@ export class CodexResponsesSession {
     this.controller = controller;
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     const alive = (): boolean => epoch === this.cancelEpoch;
+    let trace: ModelExecutionTrace | null = null;
 
     try {
+      const body = this.buildBody(input);
+      trace = beginModelExecution({
+        transport: 'chatgpt-codex-responses',
+        model: this.model,
+        operation: 'responses.create',
+        endpoint: CODEX_RESPONSES_URL,
+        context: { serviceTier: this.serviceTier, reasoningEffort: this.effort },
+      });
+      trace?.request(body);
       const res = await this.fetchImpl(CODEX_RESPONSES_URL, {
         method: 'POST',
         headers: buildCodexHeaders(resolved.bearer, this.auth.accountId),
         signal: controller.signal,
-        body: JSON.stringify(this.buildBody(input)),
+        body: JSON.stringify(body),
       });
 
       const usedPercent = parseUsedPercent(res.headers);
       this.lastUsedPercentValue = usedPercent;
+      trace?.response({
+        httpStatus: res.status,
+        headers: Object.fromEntries(res.headers.entries()),
+      });
 
       if (!res.ok) {
         // 429 / 402 / 403 usage rejections = plan quota — FAIL CLOSED.
         const quota = isQuotaStatus(res.status);
         const e = new Error(`codex responses http ${res.status}`);
+        trace?.fail(e, { httpStatus: res.status, usedPercent, quotaExhausted: quota });
         if (alive()) cb.onError?.(e);
         return makeErrorResult({ usedPercent, quotaExhausted: quota, error: e });
       }
 
-      const result = await this.consumeStream(res, epoch, cb);
-      return { ...result, usedPercent: result.usedPercent ?? usedPercent };
+      const result = await this.consumeStream(res, epoch, cb, trace);
+      const completed = { ...result, usedPercent: result.usedPercent ?? usedPercent };
+      if (completed.aborted) {
+        trace?.cancel('request superseded or timed out', completed);
+      } else if (completed.error !== null || completed.quotaExhausted) {
+        trace?.fail(completed.error ?? new Error('codex quota exhausted'), completed);
+      } else {
+        trace?.complete(completed);
+      }
+      return completed;
     } catch (err) {
       const aborted = isAbortError(err);
       const e = asError(err);
+      if (aborted) trace?.cancel('request aborted', { timeoutMs: this.timeoutMs });
+      else trace?.fail(e);
       // An abort from cancel() is expected supersede/barge-in, not an error to
       // surface; a timeout abort is also delivered as aborted (caller decides).
       if (!aborted && alive()) cb.onError?.(e);
@@ -415,6 +441,7 @@ export class CodexResponsesSession {
     res: Response,
     epoch: number,
     cb: CodexResponsesCallbacks,
+    trace: ModelExecutionTrace | null,
   ): Promise<InternalTurnResult> {
     const state = new StreamState();
     const alive = (): boolean => epoch === this.cancelEpoch;
@@ -423,9 +450,12 @@ export class CodexResponsesSession {
       res,
       (line) => {
         const evt = parseSseEventLine(line);
-        if (evt !== null && alive()) this.dispatchEvent(evt, state, cb);
+        if (evt !== null && alive()) {
+          trace?.event('server', evt);
+          this.dispatchEvent(evt, state, cb);
+        }
       },
-      () => !alive(),
+      { shouldStop: () => !alive() },
     );
 
     // Flush any text item that streamed deltas but never got an explicit done.

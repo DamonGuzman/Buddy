@@ -39,6 +39,7 @@
 import type { AuthSource } from '../auth/auth-source';
 import type { CodexUsedPercent } from '../../shared/types';
 import type { UserContentPart } from '../codex/wire-types';
+import { beginModelExecution, type ModelExecutionTrace } from '../model-execution-recorder';
 import {
   CODEX_RESPONSES_URL,
   buildCodexHeaders,
@@ -264,37 +265,72 @@ export class RestGrounder {
     const doFetch = this.options.fetchImpl ?? fetch;
     const { instructions, ask } = buildGroundingPrompt(query, 'codex');
     return this.withTimeout(async (signal) => {
-      const res = await doFetch(CODEX_RESPONSES_URL, {
-        method: 'POST',
-        headers: buildCodexHeaders(bearer, accountId),
-        signal,
-        body: JSON.stringify({
+      let trace: ModelExecutionTrace | null = null;
+      try {
+        const body = {
           model: this.codexModel,
           instructions,
           input: [{ type: 'message', role: 'user', content: groundingContent(ask, query) }],
           stream: true,
           store: false,
           reasoning: { effort: CODEX_GROUNDING_EFFORT },
-        }),
-      });
+        };
+        trace = beginModelExecution({
+          transport: 'chatgpt-codex-grounding',
+          model: this.codexModel,
+          operation: 'grounding.responses.create',
+          endpoint: CODEX_RESPONSES_URL,
+          context: { imageW: query.imageW, imageH: query.imageH, label: query.label },
+        });
+        trace?.request(body);
+        const res = await doFetch(CODEX_RESPONSES_URL, {
+          method: 'POST',
+          headers: buildCodexHeaders(bearer, accountId),
+          signal,
+          body: JSON.stringify(body),
+        });
 
-      const usedPercent = parseUsedPercent(res.headers);
-      if (!res.ok) {
-        // 429 (and 403/402 usage rejections) = plan quota — fail closed.
-        const quota = isQuotaStatus(res.status);
-        console.debug(`[rest-ground] codex http ${res.status}${quota ? ' (quota)' : ''}`);
-        return { point: null, source: 'codex', quotaExhausted: quota, usedPercent };
+        const usedPercent = parseUsedPercent(res.headers);
+        trace?.response({
+          httpStatus: res.status,
+          headers: Object.fromEntries(res.headers.entries()),
+        });
+        if (!res.ok) {
+          // 429 (and 403/402 usage rejections) = plan quota — fail closed.
+          const quota = isQuotaStatus(res.status);
+          console.debug(`[rest-ground] codex http ${res.status}${quota ? ' (quota)' : ''}`);
+          const outcome = {
+            point: null,
+            source: 'codex' as const,
+            quotaExhausted: quota,
+            usedPercent,
+          };
+          trace?.fail(new Error(`codex grounding http ${res.status}`), outcome);
+          return outcome;
+        }
+
+        const responseBody = await res.text();
+        trace?.response({ rawBody: responseBody });
+        forEachSseEvent(responseBody, (event) => trace?.event('server', event));
+        const parsed = parseCodexStream(responseBody, query.imageW, query.imageH);
+        const outcome = {
+          point: parsed.point,
+          source: 'codex' as const,
+          quotaExhausted: parsed.quotaExhausted,
+          usedPercent,
+          ...(parsed.usage !== null ? { usage: parsed.usage } : {}),
+        };
+        if (parsed.quotaExhausted) {
+          trace?.fail(new Error('codex grounding quota exhausted'), outcome);
+        } else {
+          trace?.complete(outcome);
+        }
+        return outcome;
+      } catch (error) {
+        if (signal.aborted) trace?.cancel('grounding request timed out');
+        else trace?.fail(error);
+        throw error;
       }
-
-      const body = await res.text();
-      const parsed = parseCodexStream(body, query.imageW, query.imageH);
-      return {
-        point: parsed.point,
-        source: 'codex',
-        quotaExhausted: parsed.quotaExhausted,
-        usedPercent,
-        ...(parsed.usage !== null ? { usage: parsed.usage } : {}),
-      };
     });
   }
 
@@ -309,11 +345,9 @@ export class RestGrounder {
     const doFetch = this.options.fetchImpl ?? fetch;
     const { instructions, ask } = buildGroundingPrompt(query, 'apiKey');
     return this.withTimeout(async (signal) => {
-      const res = await doFetch(RESPONSES_URL, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        signal,
-        body: JSON.stringify({
+      let trace: ModelExecutionTrace | null = null;
+      try {
+        const body = {
           model: this.model,
           reasoning: { effort: this.effort },
           instructions,
@@ -327,14 +361,40 @@ export class RestGrounder {
             },
           },
           max_output_tokens: MAX_OUTPUT_TOKENS,
-        }),
-      });
-      if (!res.ok) {
-        console.debug(`[rest-ground] http ${res.status}`);
-        return null;
+        };
+        trace = beginModelExecution({
+          transport: 'openai-responses-grounding',
+          model: this.model,
+          operation: 'grounding.responses.create',
+          endpoint: RESPONSES_URL,
+          context: { imageW: query.imageW, imageH: query.imageH, label: query.label },
+        });
+        trace?.request(body);
+        const res = await doFetch(RESPONSES_URL, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+          signal,
+          body: JSON.stringify(body),
+        });
+        trace?.response({
+          httpStatus: res.status,
+          headers: Object.fromEntries(res.headers.entries()),
+        });
+        if (!res.ok) {
+          console.debug(`[rest-ground] http ${res.status}`);
+          trace?.fail(new Error(`OpenAI grounding http ${res.status}`));
+          return null;
+        }
+        const payload: unknown = await res.json();
+        trace?.response({ body: payload });
+        const result = parseGroundingResponse(payload, query.imageW, query.imageH);
+        trace?.complete({ result });
+        return result;
+      } catch (error) {
+        if (signal.aborted) trace?.cancel('grounding request timed out');
+        else trace?.fail(error);
+        throw error;
       }
-      const payload: unknown = await res.json();
-      return parseGroundingResponse(payload, query.imageW, query.imageH);
     });
   }
 }

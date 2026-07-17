@@ -7,7 +7,7 @@
  * tests/errors.test.ts. Consumers:
  * - conversation.failTurn (turn-start/commit failures),
  * - the conversation's session 'error' listener (mid-session server events),
- * - index.ts boot wiring (hotkey_dead, hold_too_long, renderer_dead, crash
+ * - index.ts boot wiring (hotkey_dead, renderer_dead, crash
  *   logging tooltips),
  * - settings/mic/playback reporting paths (api_key_unreadable,
  *   mic_unavailable, audio_output_failed, settings_reset).
@@ -47,11 +47,9 @@ export type ErrorKind =
   | 'response_interrupted'
   | 'response_incomplete'
   | 'server_error'
-  | 'hold_too_long'
   | 'renderer_dead'
   // M18 additions (integration-approved): agent mode (docs/AGENT-MODE.md §7).
   | 'agent_backend_down'
-  | 'agent_timed_out'
   | 'agent_tool_failed';
 
 export type ErrorSurface = 'transcript' | 'pill' | 'caption' | 'tray';
@@ -315,13 +313,6 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
     surfaces: ['transcript', 'caption', 'tray'],
     autoShowPanel: true,
   },
-  hold_too_long: {
-    copy:
-      'whoa, that was a long one — i can only listen about 30 seconds per hold. let go ' +
-      'sooner and ask in parts.',
-    surfaces: ['transcript', 'caption'],
-    autoShowPanel: false,
-  },
   settings_reset: {
     copy: 'buddy reset a damaged settings file — review settings and paste your openai api key again.',
     surfaces: ['transcript', 'caption'],
@@ -356,11 +347,6 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
   },
   agent_backend_down: {
     copy: "couldn't reach chatgpt just now — i stopped that agent; try again in a bit.",
-    surfaces: ['transcript'],
-    autoShowPanel: false,
-  },
-  agent_timed_out: {
-    copy: "that agent ran long and i had to stop it — here's what i got so far.",
     surfaces: ['transcript'],
     autoShowPanel: false,
   },

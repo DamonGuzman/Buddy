@@ -13,7 +13,6 @@ export interface FilesystemChange {
 export type FilesystemTaskStatus =
   | 'preparing'
   | 'running'
-  | 'review'
   | 'publishing'
   | 'published'
   | 'kept'

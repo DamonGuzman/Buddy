@@ -40,6 +40,7 @@ import type {
   ClientEvent,
   PointAtArgs,
   RealtimeFunctionTool,
+  SessionUpdateEvent,
   ResponseStatus,
   ResponseUsage,
   ServerEvent,
@@ -52,6 +53,7 @@ import { buildScreenshotFraming } from './framing';
 import { ResponseTracker } from './response-tracker';
 import { SendQueue } from './send-queue';
 import { redactSensitiveErrorText, withErrorCode } from '../errors';
+import { beginModelExecution, type ModelExecutionTrace } from '../model-execution-recorder';
 
 // ---------------------------------------------------------------------------
 // Public event + option surfaces
@@ -148,6 +150,8 @@ const DEFAULT_RESPONSE_WATCHDOG_MS = 30_000;
 const RESPONSE_PING_INTERVAL_MS = 15_000;
 
 const PCM_FORMAT = { type: 'audio/pcm', rate: 24000 } as const;
+/** Deliberate quality/latency tradeoff for Buddy's reasoning-capable voice model. */
+const REALTIME_REASONING_EFFORT = 'medium' as const;
 /** Async input-transcription model (captions for the user's committed audio). */
 const TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
 /** Server-VAD tuning for full realtime mode (speech threshold + windows). */
@@ -198,6 +202,10 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
   private lastTurnCapture: CaptureMeta[] | null = null;
   /** Unknown server event types we already logged (log once per type). */
   private unknownTypesLogged = new Set<string>();
+  /** Input frames collected for the next response.create execution. */
+  private pendingModelTrace: ModelExecutionTrace | null = null;
+  /** The execution currently streaming a model response. */
+  private activeModelTrace: ModelExecutionTrace | null = null;
 
   constructor(options: RealtimeSessionOptions) {
     super();
@@ -270,6 +278,8 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
    */
   clearAudio(): void {
     this.sendQueue.dropAudioAppends();
+    this.pendingModelTrace?.cancel('input audio cleared before response.create');
+    this.pendingModelTrace = null;
     if (!this.isSocketOpen()) return;
     this.send({ type: 'input_audio_buffer.clear' });
   }
@@ -366,6 +376,8 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
         ...(responseId !== null ? { response_id: responseId } : {}),
       });
     }
+    this.activeModelTrace?.cancel('realtime response cancelled', { responseId });
+    this.activeModelTrace = null;
   }
 
   /** Remove model audio the user never heard after a WebSocket VAD interruption. */
@@ -388,6 +400,8 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
   notifySystemResume(): void {
     if (this.closedByUser) return;
     this.sendQueue.dropAudioAppends();
+    this.pendingModelTrace?.cancel('system resumed before response.create');
+    this.pendingModelTrace = null;
     this.failActiveResponse('system resumed from sleep');
     this.backoffAttempt = 0;
     const ws = this.ws;
@@ -407,6 +421,10 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     this.transcripts.clear();
     this.toolArgs.clear();
     this.lastTurnCapture = null;
+    this.pendingModelTrace?.cancel('realtime session closed before response.create');
+    this.activeModelTrace?.cancel('realtime session closed during response');
+    this.pendingModelTrace = null;
+    this.activeModelTrace = null;
     const ws = this.ws;
     this.ws = null;
     if (ws) {
@@ -460,6 +478,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
         const err = new Error('no API key configured');
         this.lastConnectFailAt = Date.now();
         this.sendQueue.dropAudioAppends(); // F1 (M7): stale mic audio must not linger
+        this.cancelPendingModelTrace('realtime connection failed before response.create', err);
         this.setStatus({ state: 'error', error: err.message });
         return Promise.reject(err);
       }
@@ -471,6 +490,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
         );
         this.lastConnectFailAt = Date.now();
         this.sendQueue.dropAudioAppends();
+        this.cancelPendingModelTrace('realtime connection failed before response.create', err);
         this.setStatus({ state: 'error', error: err.message });
         return Promise.reject(err);
       }
@@ -496,6 +516,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
             // the next.
             this.lastConnectFailAt = Date.now();
             this.sendQueue.dropAudioAppends();
+            this.cancelPendingModelTrace('realtime connection failed before response.create', err);
             if (this.ws === ws) {
               this.ws = null;
               this.setStatus({ state: 'error', error: err.message });
@@ -506,6 +527,7 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
             this.resetIdleTimer();
             // F1 (sleep/resume): any server activity feeds the response watchdog.
             if (this.tracker.active) this.armResponseWatchdog();
+            (this.activeModelTrace ?? this.pendingModelTrace)?.event('server', evt);
             if (!isKnownServerEvent(evt)) {
               this.logUnknown(evt.type);
               return;
@@ -641,23 +663,31 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
   private failActiveResponse(reason: string): void {
     if (!this.tracker.active) return;
     console.warn(`[realtime] failing active response: ${reason}`);
+    this.activeModelTrace?.fail(new Error(reason));
+    this.activeModelTrace = null;
     this.tracker.fail();
     this.transcripts.clear();
     this.toolArgs.clear();
     this.emit('response-done', { responseId: '', status: 'failed' });
   }
 
+  private cancelPendingModelTrace(reason: string, error?: unknown): void {
+    this.pendingModelTrace?.cancel(reason, error === undefined ? undefined : { error });
+    this.pendingModelTrace = null;
+  }
+
   // -------------------------------------------------------------------------
   // Outbound plumbing
   // -------------------------------------------------------------------------
 
-  private buildSessionUpdate(): ClientEvent {
+  private buildSessionUpdate(): SessionUpdateEvent {
     return {
       type: 'session.update',
       session: {
         type: 'realtime',
         instructions: this.options.instructions,
         output_modalities: ['audio'],
+        reasoning: { effort: REALTIME_REASONING_EFFORT },
         audio: {
           input: {
             format: PCM_FORMAT,
@@ -703,13 +733,16 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
   }
 
   private createResponse(): void {
+    const event: ClientEvent = { type: 'response.create' };
+    this.traceClientEvent(event, this.isReady() ? 'sent' : 'queued');
     this.tracker.begin();
-    this.send({ type: 'response.create' });
+    this.send(event, false);
     this.emit('response-requested'); // F1 (M3): single source of truth
   }
 
   /** Serialize + send, queueing while not ready (flushed on session.created). */
-  private send(evt: ClientEvent): void {
+  private send(evt: ClientEvent, trace = true): void {
+    if (trace) this.traceClientEvent(evt, this.isReady() ? 'sent' : 'queued');
     if (this.isReady() && this.ws !== null) {
       this.sendNow(this.ws, evt);
       return;
@@ -833,6 +866,13 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
               `active is ${this.tracker.activeResponseId}`,
           );
         } else if (decision.kind === 'active') {
+          const completedTrace = this.activeModelTrace;
+          this.activeModelTrace = null;
+          completedTrace?.complete({
+            responseId,
+            status,
+            usage: evt.response.usage,
+          });
           this.transcripts.clear();
           this.toolArgs.clear();
           // F1 fix (M4): the deferred tool-output continue fires HERE — and
@@ -939,6 +979,54 @@ export class RealtimeSession extends EventEmitter<RealtimeSessionEvents> {
     if (next.state !== 'error') delete next.error;
     this.statusValue = next;
     this.emit('status', this.status());
+  }
+
+  /** Route an outbound Realtime frame into the execution it contributes to. */
+  private traceClientEvent(evt: ClientEvent, delivery: 'sent' | 'queued'): void {
+    if (evt.type === 'session.update' || evt.type === 'input_audio_buffer.clear') return;
+    if (evt.type === 'response.create') {
+      if (this.activeModelTrace !== null) {
+        throw new Error('cannot start a model trace while a realtime response is active');
+      }
+      const trace = this.pendingModelTrace ?? this.beginPendingModelTrace();
+      this.pendingModelTrace = null;
+      this.activeModelTrace = trace;
+      trace?.request({
+        session: this.buildSessionUpdate().session,
+        trigger: evt,
+        delivery,
+      });
+      trace?.event('client', { event: evt, delivery });
+      return;
+    }
+    if (
+      evt.type === 'input_audio_buffer.append' ||
+      evt.type === 'input_audio_buffer.commit' ||
+      evt.type === 'conversation.item.create'
+    ) {
+      const trace = this.pendingModelTrace ?? this.beginPendingModelTrace();
+      this.pendingModelTrace = trace;
+      trace?.event('client', { event: evt, delivery });
+      return;
+    }
+    this.activeModelTrace?.event('client', { event: evt, delivery });
+  }
+
+  private beginPendingModelTrace(): ModelExecutionTrace | null {
+    const endpoint = this.resolve();
+    return beginModelExecution({
+      transport: 'openai-realtime-websocket',
+      model: this.options.model,
+      operation: 'realtime.response',
+      endpoint: endpoint.url,
+      context: {
+        usingMockServer: endpoint.isMock,
+        voice: this.options.voice,
+        turnDetection: this.options.turnDetection,
+        instructions: this.options.instructions,
+        tools: this.options.tools ?? [],
+      },
+    });
   }
 }
 

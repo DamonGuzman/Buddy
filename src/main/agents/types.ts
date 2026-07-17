@@ -9,10 +9,8 @@
  * overriding AGENT-MODE.md §2.1 where they conflict):
  * - `store` MUST be false; `previous_response_id` is REJECTED. The loop keeps
  *   CLIENT-SIDE history and re-sends the full `input` list every round.
- * - The hosted `{"type":"web_search"}` tool IS supported server-side (with
- *   response.web_search_call.* SSE events and URL-citation annotation
- *   events) — there is NO client-side web_search executor. Client-side
- *   function tools: web_fetch, scratchpad_write, read_screen.
+ * - Web access is client-executed through Firecrawl v2 function tools. The
+ *   provider-owned hosted web_search tool is deliberately never registered.
  * - Streaming SSE is the operating mode; response.completed may arrive with
  *   an EMPTY output array — output items must be accumulated from
  *   response.output_item.added/done events.
@@ -30,6 +28,7 @@ import type {
   HumanApprovalDecision,
 } from './gate/action-gate';
 import type { TriggerAction } from './gate/trigger';
+import type { FirecrawlClientPort } from '../firecrawl/client';
 
 // Tuning constants (AGENT_*) live in agents/config.ts — this file is the pure
 // type contract only.
@@ -52,7 +51,7 @@ export interface AgentBrief {
 }
 
 export interface AgentFilesystemToolPort {
-  /** Real shell rooted at the picker-authorized folder; Seatbelt denies writes to that folder. */
+  /** Unsandboxed host shell starting in the picker-authorized folder. */
   runShell(
     taskId: string,
     script: string,
@@ -61,7 +60,7 @@ export interface AgentFilesystemToolPort {
   ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   /** Materialize only explicitly requested relative paths into the private staging area. */
   stagePaths(taskId: string, paths: string[]): Promise<string>;
-  /** Writable shell rooted at the sparse staging area. */
+  /** Unsandboxed host shell starting in the sparse staging area. */
   runStagedShell(
     taskId: string,
     script: string,
@@ -69,6 +68,8 @@ export interface AgentFilesystemToolPort {
     signal: AbortSignal,
   ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   describeChanges(taskId: string): Promise<string>;
+  /** Select the finished regular file Buddy should present after the transaction commits. */
+  presentFile(taskId: string, path: string): Promise<string>;
 }
 
 export type AgentBrowserAction = Exclude<TriggerAction, { kind: 'screenshot' }>;
@@ -131,9 +132,12 @@ export interface AgentFunctionCall {
   argsJson: string;
 }
 
-export type AgentToolDefinition =
-  | { type: 'web_search' } // hosted, server-side
-  | { type: 'function'; name: string; description: string; parameters: Record<string, unknown> };
+export type AgentToolDefinition = {
+  type: 'function';
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+};
 
 // --- backend (implemented by agents/backend.ts; faked by agents/mock-backend.ts) ---
 export interface AgentBackendRequest {
@@ -143,6 +147,8 @@ export interface AgentBackendRequest {
   tools: AgentToolDefinition[];
   effort: 'low' | 'medium' | 'high';
   signal: AbortSignal;
+  /** Stable correlation metadata for reconstructing one helper run across model requests. */
+  runContext?: { agentId: string; requestAttempt: number };
 }
 export type AgentBackendErrorKind = 'agent_not_signed_in' | 'agent_quota' | 'agent_backend_down';
 export type AgentBackendResult =
@@ -151,8 +157,8 @@ export type AgentBackendResult =
       outputItems: ResponseItem[]; // accumulated from output_item.done events — append to history verbatim
       text: string; // assistant message text ('' if none this round)
       functionCalls: AgentFunctionCall[];
-      searchQueries: string[]; // from response.web_search_call events (for the activity log)
-      citations: string[]; // urls from output_text.annotation.added events
+      searchQueries: string[]; // retained for mock/debug summaries; Firecrawl calls are function tools
+      citations: string[]; // retained for mock/debug summaries; live URLs enter through addSource
       usedPercent: { primary: number | null; secondary: number | null } | null;
       usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
     }
@@ -167,11 +173,11 @@ export interface AgentBackend {
 // --- tools (implemented by agents/tools/*; registry in agents/tools/index.ts) ---
 export interface AgentToolContext {
   brief: AgentBrief;
-  signal: AbortSignal; // aborts on cancel/wall-clock
+  signal: AbortSignal; // aborts on explicit cancellation or an operation-level timeout
   scratchpad: { get(): string; set(text: string): void; append(text: string): void };
   addSource(url: string): void;
-  fetchCount(): number; // web_fetch budget bookkeeping
-  noteFetch(): void;
+  /** Firecrawl v2 transport. Present for every non-filesystem helper in production. */
+  firecrawl?: FirecrawlClientPort;
   /** Present only when this task was explicitly granted browser use. */
   browser?: AgentBrowserToolPort;
   /** Present only for a picker-authorized staged filesystem task. */
@@ -194,7 +200,6 @@ export interface AgentToolSpec {
   /** Omitted for locally parked tools such as needs_user; runner cancellation still applies. */
   timeoutMs?: number;
   stepKind: AgentStep['kind']; // activity-log kind for this tool
-  stepLabel(args: Record<string, unknown>): string;
   /** Returns the function_call_output string handed back to the model. Throws/rejects → the loop wraps as {error}. */
   execute(args: Record<string, unknown>, ctx: AgentToolContext): Promise<string>;
 }
@@ -228,7 +233,8 @@ export interface AgentManagerDeps {
   /** Overrides persistencePath with a custom store (tests / future backends). */
   persistence?: AgentPersistencePort;
   now?(): number;
-  monotonicNow?(): number;
+  /** Web-data transport; omitted only by isolated tests or web-disabled runtimes. */
+  firecrawl?: FirecrawlClientPort;
   /** Absent means browser tasks fail closed and cannot be accepted. */
   browser?: AgentBrowserDeps;
   /** Absent means filesystem tasks fail closed and cannot be accepted. */
@@ -238,5 +244,5 @@ export type SpawnResult =
   | { ok: true; agentId: string }
   | {
       ok: false;
-      reason: 'at_capacity' | 'not_signed_in' | 'browser_unavailable' | 'filesystem_unavailable';
+      reason: 'not_signed_in' | 'browser_unavailable' | 'filesystem_unavailable';
     };

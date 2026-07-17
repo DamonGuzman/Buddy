@@ -401,7 +401,6 @@ function agent(over: Partial<AgentSummary>): AgentSummary {
     task: 'find the best 27 inch monitor under $400',
     status: 'running',
     createdAt: NOW0 - 30_000,
-    maxSteps: null,
     steps: [],
     spoken: false,
     unseen: false,

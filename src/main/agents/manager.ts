@@ -3,11 +3,7 @@ import { dirname } from 'node:path';
 import type { AgentStatus, AgentStep, AgentSummary } from '../../shared/types';
 import { AgentRunner } from './agent';
 import type { AgentBrief, AgentManagerDeps, AgentPersistencePort, SpawnResult } from './types';
-import {
-  AGENT_MANAGER_DISPOSE_TIMEOUT_MS,
-  AGENT_MAX_CONCURRENT,
-  PERSISTED_SUMMARY_CAP,
-} from './config';
+import { AGENT_MANAGER_DISPOSE_TIMEOUT_MS, PERSISTED_SUMMARY_CAP } from './config';
 import { cloneAgentSummary } from './summary-text';
 import { errorMessage } from '../util/guards';
 
@@ -67,14 +63,13 @@ export class AgentManager {
       throw new Error('browser and filesystem capabilities are mutually exclusive');
     if (brief.filesystem && !this.deps.filesystem)
       return { ok: false, reason: 'filesystem_unavailable' };
-    if (this.runners.size >= AGENT_MAX_CONCURRENT) return { ok: false, reason: 'at_capacity' };
     const runner = new AgentRunner({
       brief,
       backend: this.deps.backend,
       ...(brief.browserEnabled && this.deps.browser ? { browser: this.deps.browser } : {}),
       ...(brief.filesystem && this.deps.filesystem ? { filesystem: this.deps.filesystem } : {}),
+      ...(this.deps.firecrawl ? { firecrawl: this.deps.firecrawl } : {}),
       ...(this.deps.now ? { now: this.deps.now } : {}),
-      ...(this.deps.monotonicNow ? { monotonicNow: this.deps.monotonicNow } : {}),
       onUpdate: (summary) => {
         this.records.set(summary.id, cloneAgentSummary(summary));
         this.push();
@@ -272,7 +267,6 @@ const KNOWN_STATUSES: readonly string[] = [
   'waiting_approval',
   'done',
   'failed',
-  'timed_out',
   'cancelled',
 ] satisfies AgentStatus[];
 const KNOWN_STEP_KINDS: readonly string[] = [

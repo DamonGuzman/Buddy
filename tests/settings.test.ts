@@ -9,6 +9,7 @@ import type { Settings, SettingsPatch } from '../src/shared/types';
 describe('settings schema', () => {
   it('has safe defaults (no api key, full model for pointing accuracy, captions on)', () => {
     expect(DEFAULT_SETTINGS.apiKeyPresent).toBe(false);
+    expect(DEFAULT_SETTINGS.firecrawlApiKeyPresent).toBe(false);
     // M8.6: full model is the default — mini's pointing accuracy failed the
     // live eval gates by a wide margin (docs/EVAL.md §8).
     expect(DEFAULT_SETTINGS.model).toBe('gpt-realtime-2.1');
@@ -39,6 +40,8 @@ describe('settings schema', () => {
     expect(next).toEqual({
       apiKeyPresent: true,
       apiKeyUnreadable: false, // M11: a stored key always resolves an unreadable blob
+      firecrawlApiKeyPresent: false,
+      firecrawlApiKeyUnreadable: false,
       model: 'gpt-realtime-2.1',
       voice: 'cedar',
       captionsEnabled: false,
@@ -65,6 +68,18 @@ describe('settings schema', () => {
     const withKey = applySettingsPatch(DEFAULT_SETTINGS, { apiKey: 'sk-x' });
     const cleared = applySettingsPatch(withKey, { apiKey: null });
     expect(cleared.apiKeyPresent).toBe(false);
+  });
+
+  it('tracks the write-only Firecrawl key without leaking it', () => {
+    const withKey = applySettingsPatch(DEFAULT_SETTINGS, {
+      firecrawlApiKey: 'fc-secret-value',
+    });
+    expect(withKey.firecrawlApiKeyPresent).toBe(true);
+    expect(withKey.firecrawlApiKeyUnreadable).toBe(false);
+    expect(JSON.stringify(withKey)).not.toContain('fc-secret-value');
+    expect(applySettingsPatch(withKey, { firecrawlApiKey: null }).firecrawlApiKeyPresent).toBe(
+      false,
+    );
   });
 
   it('leaves untouched fields alone on partial patches', () => {
@@ -103,6 +118,7 @@ describe('settings schema', () => {
   it('drives the merge from PATCHABLE_KEYS (no dupes, never the write-only apiKey)', () => {
     expect(new Set(PATCHABLE_KEYS).size).toBe(PATCHABLE_KEYS.length);
     expect(PATCHABLE_KEYS).not.toContain('apiKey');
+    expect(PATCHABLE_KEYS).not.toContain('firecrawlApiKey');
     // main-owned codex* sign-in fields must never be renderer-patchable
     for (const key of PATCHABLE_KEYS) {
       expect(key.startsWith('codex')).toBe(false);

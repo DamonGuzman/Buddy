@@ -1,7 +1,6 @@
 # Buddy for macOS and Windows — MVP Architecture & Scope
 
 > The single source of truth for this MVP. All implementation agents read this first.
-> Product research: see `docs/RESEARCH.md` (copied from the original teardown).
 
 ## 1. Product in one paragraph
 
@@ -38,7 +37,7 @@ typed action** and is always signposted by a visible indicator.
   arc animation to targets, optional caption bubble (the spoken text), listening/thinking indicator.
 - Tray icon + small control panel window: status, live transcript, **text-input fallback** (typed
   question → same pipeline, answer as caption + voice), settings.
-- Settings: API key (encrypted via `safeStorage`), model (`gpt-realtime-2.1-mini` default /
+- Settings: OpenAI and Firecrawl API keys (encrypted separately via `safeStorage`), model (`gpt-realtime-2.1-mini` default /
   `gpt-realtime-2.1`), voice, hotkey display (fixed for MVP), captions on/off.
 - Persona system prompt: lowercase, warm, brief, "written for the ear", never ends on a dead-end —
   always plants a seed for something more ambitious to try next. Calls `point_at` whenever it
@@ -47,8 +46,10 @@ typed action** and is always signposted by a visible indicator.
 
 **Out (stub or defer):**
 
-- Agent mode ("Buddy, agent") — main-process background helpers with hosted web search, guarded
-  web fetch, persisted results, cancellation, and voice handoff/return. An explicitly granted
+- Agent mode ("Buddy, agent") — main-process background helpers with client-executed Firecrawl v2
+  search, scrape, map, crawl, batch scrape, and research tools, persisted results, cancellation,
+  and voice handoff/return. Firecrawl Agent/Extract are intentionally not registered because Buddy
+  owns the agent loop. An explicitly granted
   task may also use Buddy's dedicated persistent browser profile through the shared ActionGate;
   the user's live desktop remains a separate Settings opt-in with one-use human approval per
   action. See `docs/AGENT-COMPUTER-USE.md`.
@@ -197,7 +198,8 @@ production code path: docs/EVAL.md §10.
 
 ## 7. Realtime protocol subset (v1 GA WS API)
 
-- `session.update` (instructions, voice, tools, modalities, in/out audio format `pcm16`):
+- `session.update` (instructions, voice, tools, modalities, reasoning effort `medium`, in/out audio
+  format `pcm16`):
   `turn_detection: null` for push-to-talk, or `server_vad` with automatic audio commit/interruption
   and `create_response: false` for full realtime mode.
 - Turn: `input_audio_buffer.append`* → `input_audio_buffer.commit` +
@@ -219,7 +221,7 @@ and boot wiring in `index.ts`. Kinds cover keys (missing / rejected / DPAPI-unre
 quota), server trouble (rate limit / model access / 5xx / interrupted / incomplete), devices
 (mic via the renderer's `audio:capture-error` report + zero-chunk holds; speakers force
 captions on while playback is down), and local failures (capture-less turns also inject a
-"you cannot see the screen" context part; 30s hold watchdog; corrupt-settings reset; dead
+"you cannot see the screen" context part; corrupt-settings reset; dead
 keyboard hook; panel-renderer death → tray balloon). Unclassified errors keep
 `something went wrong: <detail>` and still reach the transcript. Actionable kinds auto-show
 the panel at most ONCE PER KIND per run (`windows/panel.ts` `showPanelOnce(reason)`; first-run
@@ -244,6 +246,25 @@ little-endian). No continuous capture is added: only the screenshots/audio alrea
 explicit Buddy session are persisted. API keys, authorization values, cookies, passwords, tokens,
 and credential-shaped strings are defensively redacted. Persistence is fail-soft and must never
 take down or stall shutdown of the tray app.
+
+## 7d. Full model-execution observability
+
+Every production model transport is journaled to
+`<userData>/model-executions/YYYY-MM-DD/<timestamp>_<recorder-id>/model-executions.jsonl`:
+OpenAI Realtime WebSocket responses, shared ChatGPT Codex Responses sessions (typed turns,
+computer use, and reviewers), background-helper Codex requests, and both REST grounding arms.
+The append-only journal records the complete text request body, model/session configuration,
+parsed SSE/WebSocket events, response metadata, usage, errors/cancellation, and terminal status.
+Helper tool executions additionally record their exact function name, raw and parsed arguments,
+result/observation, and timestamps so a helper run can be reconstructed instead of relying on the
+renderer-safe activity labels in `events.jsonl`.
+
+Authorization values, cookies, passwords, API keys, tokens, and credential-shaped strings are
+always redacted. Large base64 audio/image fields are replaced by byte length plus SHA-256 in the
+model journal. Foreground conversation screenshots and PCM are also available in the existing
+session capture/audio sidecars. The production recorder is installed before any model transport is
+constructed and is fail-closed: if the journal cannot be created or written, the corresponding
+model call does not silently proceed without observability.
 
 ## 8. QA & verification plan
 

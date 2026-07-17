@@ -140,6 +140,7 @@ describe('RealtimeSession against the mock server', () => {
       type: string;
       instructions: string;
       output_modalities: string[];
+      reasoning: { effort: string };
       audio: {
         input: { turn_detection: null; format: { type: string; rate: number } };
         output: { voice: string };
@@ -149,6 +150,7 @@ describe('RealtimeSession against the mock server', () => {
     expect(update.type).toBe('realtime');
     expect(update.instructions).toContain('buddy');
     expect(update.output_modalities).toEqual(['audio']);
+    expect(update.reasoning).toEqual({ effort: 'medium' });
     expect(update.audio.input.turn_detection).toBeNull();
     expect(update.audio.input.format).toEqual({ type: 'audio/pcm', rate: 24000 });
     expect(update.audio.output.voice).toBe('marin');
@@ -329,7 +331,7 @@ describe('RealtimeSession against the mock server', () => {
           }),
         );
         // Deliberately violate clean cancellation: stale audio arrives after
-        // the new response is active. Clicky must never forward this chunk.
+        // the new response is active. Buddy must never forward this chunk.
         socket.send(
           JSON.stringify({
             type: 'response.output_audio.delta',

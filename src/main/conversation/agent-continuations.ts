@@ -10,7 +10,7 @@
  * a turn goes through the host port (the Conversation).
  */
 
-import type { AgentSummary, AssistantState, TurnTimings } from '../../shared/types';
+import type { AgentSummary, TurnTimings } from '../../shared/types';
 import type { ChatGptCodexAuthSource } from '../auth/auth-source';
 
 export type AgentContinuationMode = 'voice' | 'text';
@@ -57,9 +57,11 @@ export function agentContinuationMessage(
 /** What the queue needs from the conversation to run a continuation. */
 export interface AgentContinuationHost {
   closed(): boolean;
-  holding(): boolean;
   pendingResponses(): number;
-  assistantState(): AssistantState;
+  /** True only when an automated foreground turn may start right now. */
+  foregroundReady(): boolean;
+  /** Voice handshake guard after this queue has moved the UI to thinking. */
+  voiceStartReady(): boolean;
   setThinking(): void;
   /** Voice: inject the reminder into the realtime session and respond. */
   injectVoiceReminder(text: string, stillReady: () => boolean): Promise<boolean>;
@@ -84,6 +86,8 @@ export class AgentContinuations {
   private readonly pending = new Map<string, PendingAgentContinuation>();
   /** At most one automated foreground turn runs at a time. */
   private inFlight: PendingAgentContinuation | null = null;
+  /** Distinguishes retries of the same queued voice completion. */
+  private voiceAttempt = 0;
 
   constructor(private readonly host: AgentContinuationHost) {}
 
@@ -124,9 +128,7 @@ export class AgentContinuations {
       this.host.closed() ||
       this.inFlight !== null ||
       this.pending.size === 0 ||
-      this.host.holding() ||
-      this.host.pendingResponses() > 0 ||
-      this.host.assistantState() !== 'idle'
+      !this.host.foregroundReady()
     ) {
       return;
     }
@@ -142,28 +144,46 @@ export class AgentContinuations {
 
     this.host.setThinking();
     const reminder = agentContinuationMessage(continuation.summary, 'voice');
+    const attempt = (this.voiceAttempt += 1);
     void this.host
       .injectVoiceReminder(
         reminder,
         () =>
-          this.inFlight?.summary.id === continuation.summary.id &&
-          !this.host.holding() &&
-          this.host.pendingResponses() === 0,
+          this.inFlight === continuation &&
+          this.voiceAttempt === attempt &&
+          this.host.voiceStartReady(),
       )
       .then((started) => {
-        if (!started) return;
+        // A human turn preempted this handshake and the same completion has
+        // already begun a newer attempt. The stale promise owns no state.
+        if (this.voiceAttempt !== attempt) return;
+        if (this.inFlight !== continuation) {
+          if (this.inFlight === null) queueMicrotask(() => this.drain());
+          return;
+        }
+        if (!started) {
+          // The result remains pending. Release this attempt and re-check
+          // readiness: the resting-state transition may already have happened
+          // while the handshake was outstanding (the short-hotkey-tap race).
+          this.inFlight = null;
+          queueMicrotask(() => this.drain());
+          return;
+        }
         this.pending.delete(continuation.summary.id);
         this.host.markSpoken(continuation.summary.id);
       })
       .catch((error: unknown) => {
+        if (this.voiceAttempt !== attempt) return;
+        if (this.inFlight !== continuation) {
+          if (this.inFlight === null) queueMicrotask(() => this.drain());
+          return;
+        }
         // One attempt only: the error->idle recovery re-runs the drain, so a
         // still-queued continuation whose turn failed (no API key, connect
         // refused) would retry — and fail — forever. Drop it; the panel/tray
         // agent card remains the delivery path (`spoken` stays false).
         this.pending.delete(continuation.summary.id);
-        if (this.inFlight?.summary.id === continuation.summary.id) {
-          this.inFlight = null;
-        }
+        this.inFlight = null;
         this.host.failTurn(error);
       });
   }

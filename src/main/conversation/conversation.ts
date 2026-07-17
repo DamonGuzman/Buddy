@@ -26,8 +26,8 @@
  * - M3/M5: pendingResponses counts ONLY from the session's
  *   'response-requested' / 'response-done' events; idle is scheduled only
  *   when the count settles at zero.
- * - C1: cancelHold() force-releases a hold as a cancel (watchdog / lock /
- *   suspend), clearing held audio, with no turn.
+ * - C1: cancelHold() force-releases a hold as a cancel (lock / suspend),
+ *   clearing held audio, with no turn.
  * - m5: voice turns get a placeholder user bubble at commit time, filled
  *   in-place when the async ASR transcript arrives.
  */
@@ -128,7 +128,7 @@ export interface ConversationDeps {
     agentId: string,
   ) => Promise<{ taskId: string; rootName: string }>;
   failAgentFilesystem?: (taskId: string, reason: string) => Promise<void>;
-  /** Disposable QA-only phone audio transport; absent in normal Clicky. */
+  /** Disposable QA-only phone audio transport; absent in normal Buddy. */
   phoneAudio?: PhoneAudioTransport;
   /** Durable local journal + turn artifacts; omitted in focused tests. */
   sessionRecorder?: RecorderPort;
@@ -303,7 +303,13 @@ export class Conversation {
         this.recorder?.record('assistant_state_changed', { previous, next });
         this.overlays.broadcast('overlay:assistant-state', next);
         this.panel.send('panel:assistant-state', next);
-        if (next === 'idle') queueMicrotask(() => this.continuations.drain());
+        // `listening` is the no-work base state while full realtime is open.
+        // A helper completion queued during the person's speech must drain as
+        // soon as that turn settles back to the open-mic base, just as it does
+        // when push-to-talk settles to `idle`.
+        if (next === 'idle' || next === 'listening') {
+          queueMicrotask(() => this.continuations.drain());
+        }
       },
       pendingResponses: () => this.pendingResponses,
       hasForegroundWork: () => this.holding || this.codexText.isRunning(),
@@ -366,9 +372,10 @@ export class Conversation {
     });
     this.continuations = new AgentContinuations({
       closed: () => this.guard.closed,
-      holding: () => this.holding,
       pendingResponses: () => this.pendingResponses,
-      assistantState: () => this.machine.current(),
+      foregroundReady: () => this.foregroundReadyForAgentContinuation(),
+      voiceStartReady: () =>
+        !this.holding && this.pendingResponses === 0 && this.pendingFullRealtimeCapture === null,
       setThinking: () => this.machine.dispatch('turn_committed'),
       injectVoiceReminder: (text, stillReady) =>
         this.session.injectUserAndRespond(text, stillReady),
@@ -739,8 +746,8 @@ export class Conversation {
   }
 
   /**
-   * F1 fix (C1): force-release the current hold as a CANCEL — max-hold
-   * watchdog, screen lock, suspend, or a mid-hold settings rebuild. Stops the
+   * F1 fix (C1): force-release the current hold as a CANCEL — screen lock,
+   * suspend, or a mid-hold settings rebuild. Stops the
    * mic, clears the held audio, produces NO turn, and returns to idle.
    */
   cancelHold(): void {
@@ -987,6 +994,21 @@ export class Conversation {
     this.continuations.deliver(summary);
   }
 
+  /**
+   * An automated helper result may use either resting foreground state:
+   * push-to-talk rests in `idle`; an open-mic conversation rests in
+   * `listening`. During actual VAD speech the pending capture is non-null, so
+   * the person still wins and the helper waits for that turn to settle.
+   */
+  private foregroundReadyForAgentContinuation(): boolean {
+    if (this.holding || this.pendingResponses > 0) return false;
+    const state = this.machine.current();
+    if (state === 'idle') return true;
+    return (
+      this.fullRealtimeActive && state === 'listening' && this.pendingFullRealtimeCapture === null
+    );
+  }
+
   private rebuildRealtimeSession(): void {
     // F1 fix (m3): a mid-turn rebuild must not leave debris.
     if (this.holding) this.cancelHold(); // graceful: mic released, no turn
@@ -1165,7 +1187,7 @@ export class Conversation {
 
   /**
    * Surface a catalog kind directly — index.ts wiring uses this for failures
-   * the conversation cannot observe itself (hotkey_dead, hold_too_long).
+   * the conversation cannot observe itself (for example, hotkey_dead).
    */
   reportError(kind: ErrorKind, params?: ErrorParams): void {
     if (this.guard.closed) return;
@@ -1324,6 +1346,9 @@ export class Conversation {
   /** Server VAD: the user started speaking — barge in and re-capture. */
   private onSpeechStarted(session: RealtimeSession, itemId: string): void {
     if (!this.fullRealtimeActive) return;
+    // If a helper result is still connecting, live speech preempts it and
+    // leaves the completion queued to run after this human turn.
+    this.continuations.preemptVoice();
     const token = this.guard.beginEpisode();
 
     // WebSocket clients own playback. Stop it immediately and truncate the

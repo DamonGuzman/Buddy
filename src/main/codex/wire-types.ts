@@ -12,7 +12,7 @@
  *  - `ResponseItem` — the deliberately loose escape hatch (moved here from
  *    `agents/types.ts`, which re-exports it): the agent loop appends items
  *    returned by the backend to history VERBATIM, including shapes we do not
- *    model (reasoning items, web_search calls, ...). Every
+ *    model (reasoning items, function calls, ...). Every
  *    `ResponseInputItem` is assignable to `ResponseItem`.
  *
  * All members are type aliases (not interfaces) so they carry the implicit

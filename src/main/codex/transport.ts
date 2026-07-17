@@ -135,42 +135,98 @@ export function forEachSseEvent(
  * decoder flush for a trailing partial line (multi-byte chunks split safely),
  * and a whole-body `res.text()` fallback when the body is not a readable
  * stream (test fakes). `shouldStop` is consulted after each chunk's lines are
- * delivered; when it returns true the reader is cancelled and reading stops
- * (any already-buffered partial line is still flushed — callers gate emission
- * themselves, matching the pre-extraction behavior).
+ * delivered; when it returns true the reader is cancelled and reading stops.
+ * `idleTimeoutMs` is reset by every received byte chunk, so long healthy
+ * streams are allowed while genuinely stalled streams fail deterministically.
  */
+export interface ReadSseLinesOptions {
+  shouldStop?: () => boolean;
+  idleTimeoutMs?: number;
+}
+
+export class SseIdleTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`backend stream was idle for ${timeoutMs}ms`);
+    this.name = 'SseIdleTimeoutError';
+  }
+}
+
 export async function readSseLines(
   res: Response,
   onLine: (line: string) => void,
-  shouldStop?: () => boolean,
+  options: ReadSseLinesOptions = {},
 ): Promise<void> {
+  const { shouldStop, idleTimeoutMs } = options;
+  if (idleTimeoutMs !== undefined && (!Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0))
+    throw new Error('SSE idle timeout must be a positive finite number');
   const body = res.body as ReadableStream<Uint8Array> | null | undefined;
   if (body !== null && body !== undefined && typeof body.getReader === 'function') {
     const reader = body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      let nl: number;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        onLine(line);
-      }
-      if (shouldStop !== undefined && shouldStop()) {
+    try {
+      for (;;) {
+        const { done, value } = await readWithIdleTimeout(reader, idleTimeoutMs);
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let nl: number;
+        let stopped = false;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl);
+          buf = buf.slice(nl + 1);
+          onLine(line);
+          if (shouldStop?.()) {
+            stopped = true;
+            break;
+          }
+        }
+        if (!stopped && !shouldStop?.()) continue;
         try {
           await reader.cancel();
         } catch {
           /* ignore */
         }
-        break;
+        return;
       }
+    } catch (error) {
+      try {
+        await reader.cancel(error);
+      } catch {
+        /* preserve the read/timeout error */
+      }
+      throw error;
     }
     buf += decoder.decode();
     if (buf.length > 0) onLine(buf);
   } else {
-    for (const line of (await res.text()).split(/\r?\n/)) onLine(line);
+    const text = await withIdleTimeout(res.text(), idleTimeoutMs);
+    for (const line of text.split(/\r?\n/)) {
+      onLine(line);
+      if (shouldStop?.()) break;
+    }
   }
+}
+
+function readWithIdleTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number | undefined,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  return withIdleTimeout(reader.read(), timeoutMs);
+}
+
+function withIdleTimeout<T>(operation: Promise<T>, timeoutMs: number | undefined): Promise<T> {
+  if (timeoutMs === undefined) return operation;
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new SseIdleTimeoutError(timeoutMs)), timeoutMs);
+    operation.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }

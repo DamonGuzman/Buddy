@@ -5,7 +5,7 @@ import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:
 import { connect as netConnect } from 'node:net';
 import type { AddressInfo, Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
-import { isPrivateAddress } from '../agents/tools/web-fetch';
+import { isPrivateAddress } from './network-address';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_HEADER_BYTES = 32 * 1024;

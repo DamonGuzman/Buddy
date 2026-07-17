@@ -102,7 +102,6 @@ describe('error catalog (describeKind)', () => {
       }
     }
     expect(describeKind('hotkey_dead').surfaces).toContain('tray');
-    expect(describeKind('hold_too_long').surfaces).toContain('caption');
     expect(describeKind('capture_failed').surfaces).toContain('caption');
     expect(describeKind('audio_output_failed').surfaces).toContain('caption');
     for (const kind of [
@@ -127,7 +126,6 @@ describe('error catalog (describeKind)', () => {
     expect(describeKind('agent_not_signed_in').surfaces).toEqual(['transcript', 'caption']);
     expect(describeKind('agent_quota').surfaces).toEqual(['transcript', 'caption']);
     expect(describeKind('agent_backend_down').surfaces).toEqual(['transcript']);
-    expect(describeKind('agent_timed_out').surfaces).toEqual(['transcript']);
     expect(describeKind('agent_tool_failed').surfaces).toEqual(['transcript']);
     // Informational — never flips the assistant to the error state.
     expect(describeKind('response_incomplete').surfaces).not.toContain('pill');

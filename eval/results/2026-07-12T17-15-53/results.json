@@ -24,7 +24,7 @@
             "height": 27
           },
           "verdict": "error",
-          "error": "Error: missing utterance wav C:\\Users\\Damon\\Projects\\heyclicky\\eval\\audio\\app-toolbar--menu-file.wav — run node eval/tts.mjs",
+          "error": "Error: missing utterance wav <repo>\\eval\\audio\\app-toolbar--menu-file.wav — run node eval/tts.mjs",
           "assistantText": null
         },
         {

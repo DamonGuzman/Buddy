@@ -15,27 +15,19 @@
  *
  * F1 fix (C1, stuck hold): keyups can be swallowed wholesale — Ctrl+Alt+Del /
  * Win+L switch to the secure desktop and the hook never sees the release —
- * which would latch the hold (and the mic) forever. Two guards:
- *  - a max-hold watchdog force-cancels after MAX_HOLD_MS;
- *  - index.ts calls forceCancel() on powerMonitor 'lock-screen'/'suspend'.
+ * which would latch the hold (and the mic) forever. index.ts calls
+ * forceCancel() on powerMonitor 'lock-screen'/'suspend'.
  * Every forced release fully resets ctrl/alt/holding so a swallowed keyup
  * can't leave a phantom modifier latched.
  */
 
 import { EventEmitter } from 'node:events';
 
-/**
- * M11: why a hold was force-cancelled. 'watchdog' = the 30s max-hold guard
- * (surfaced to the user as hold_too_long); 'forced' = lock/suspend/secure
- * desktop (silent — the user did not do anything wrong).
- */
-export type HoldCancelReason = 'watchdog' | 'forced';
-
 export interface HotkeyEvents {
   'hold-start': [];
   'hold-end': [];
-  /** Forced release: watchdog / lock / suspend. Cancel the hold, no turn. */
-  'hold-cancel': [reason: HoldCancelReason];
+  /** Forced release on lock or suspend. Cancel the hold, no turn. */
+  'hold-cancel': [];
   /**
    * M20: a press released within TAP_MAX_MS — the user tapped, they didn't
    * talk. Fires AFTER the matching 'hold-end' (the conversation's short-hold
@@ -68,12 +60,7 @@ export interface UiohookLike {
 export interface HotkeyOptions {
   /** Test seam: the global hook implementation. Default: uiohook-napi. */
   hook?: UiohookLike;
-  /** Max hold duration before the watchdog force-cancels. Default 30s. */
-  maxHoldMs?: number;
 }
-
-/** A hold longer than this is a swallowed keyup, not a question (C1). */
-export const MAX_HOLD_MS = 30_000;
 
 /**
  * M20: a release within this window is a 'tap', not a talk. Matches the
@@ -101,7 +88,6 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
   private hook: UiohookLike | null = null;
   private listenersAttached = false;
   private lastError: string | undefined;
-  private watchdog: NodeJS.Timeout | null = null;
 
   constructor(options: HotkeyOptions = {}) {
     super();
@@ -162,7 +148,6 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
   }
 
   stop(): void {
-    this.clearWatchdog();
     this.ctrlDown = false;
     this.altDown = false;
     this.holding = false;
@@ -180,13 +165,12 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
    * modifier state, so swallowed keyups (secure desktop, lock screen, sleep)
    * can never latch the hold or a phantom Ctrl/Alt. Safe to call anytime.
    */
-  forceCancel(reason: HoldCancelReason = 'forced'): void {
+  forceCancel(): void {
     this.ctrlDown = false;
     this.altDown = false;
-    this.clearWatchdog();
     if (this.holding) {
       this.holding = false;
-      this.emit('hold-cancel', reason);
+      this.emit('hold-cancel');
     }
   }
 
@@ -220,33 +204,16 @@ export class HotkeyManager extends EventEmitter<HotkeyEvents> {
       this.holding = true;
       this.holdStartedAt = Date.now();
       this.chordSeen = false;
-      this.armWatchdog();
       this.emit('hold-start');
     } else if (!shouldHold && this.holding) {
       this.holding = false;
-      this.clearWatchdog();
       const heldMs = Date.now() - this.holdStartedAt;
       this.emit('hold-end');
       // M20: tap AFTER hold-end so the conversation's short-hold cancel has
       // already run when tap consumers (whisper toggle) fire. Forced releases
-      // (watchdog/lock/suspend) go through forceCancel and never tap; chords
+      // (lock/suspend) go through forceCancel and never tap; chords
       // (Ctrl+Alt+X shortcuts) never tap either.
       if (heldMs <= TAP_MAX_MS && !this.chordSeen) this.emit('tap');
     }
-  }
-
-  private armWatchdog(): void {
-    this.clearWatchdog();
-    this.watchdog = setTimeout(() => {
-      this.watchdog = null;
-      // Nobody asks a question for 30s straight: the keyup was swallowed —
-      // OR the user genuinely held for 30s (M11: hold_too_long tells them).
-      this.forceCancel('watchdog');
-    }, this.options.maxHoldMs ?? MAX_HOLD_MS);
-  }
-
-  private clearWatchdog(): void {
-    if (this.watchdog !== null) clearTimeout(this.watchdog);
-    this.watchdog = null;
   }
 }

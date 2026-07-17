@@ -1,6 +1,6 @@
 /**
  * codex-auth (M13-core): read the ChatGPT-subscription credentials the Codex
- * CLI already stores, so Clicky can ground `point_at` through the user's
+ * CLI already stores, so Buddy can ground `point_at` through the user's
  * ChatGPT plan (gpt-5.6-sol over chatgpt.com/backend-api/codex/responses)
  * instead of a metered API key.
  *
@@ -158,7 +158,7 @@ export class CodexAuth {
     throw new Error('codex sub not signed in');
   }
 
-  /** Install tokens obtained by Clicky's own loopback PKCE flow. */
+  /** Install tokens obtained by Buddy's own loopback PKCE flow. */
   acceptOAuthTokens(accessToken: string, refreshToken: string): boolean {
     const decoded = decodeAccessToken(accessToken);
     if (decoded === null || refreshToken.length === 0) return false;

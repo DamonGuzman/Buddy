@@ -504,15 +504,6 @@ describe('conversation error catalog (M11)', () => {
     expect(c.assistantState()).toBe('idle');
   });
 
-  it('hold_too_long: transcript + caption, no auto-show', () => {
-    const { c, captions } = makeConversation(server.url);
-    c.reportError('hold_too_long');
-    const copy = describeKind('hold_too_long').message;
-    expect(sysTexts(c)).toContain(copy);
-    expect(captions.some((cap) => cap.text === copy)).toBe(true);
-    expect(showPanelCalls).not.toContain('hold_too_long');
-  });
-
   it('hotkey_dead: transcript entry + auto-show once', () => {
     const { c } = makeConversation(server.url);
     c.reportError('hotkey_dead');

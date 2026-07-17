@@ -58,12 +58,7 @@ export function buildInitialMessage(brief: AgentBrief): ResponseItem {
   return { type: 'message', role: 'user', content };
 }
 
-const TERMINAL_STATUSES: readonly AgentSummary['status'][] = [
-  'done',
-  'failed',
-  'timed_out',
-  'cancelled',
-];
+const TERMINAL_STATUSES: readonly AgentSummary['status'][] = ['done', 'failed', 'cancelled'];
 
 /** True once an agent has reached a final status (no further transitions). */
 export function isTerminal(status: AgentSummary['status']): boolean {

@@ -4,23 +4,20 @@
  * this module carries only values.
  */
 
-export const AGENT_MAX_CONCURRENT = 3;
 export const AGENT_STEP_LOG_CAP = 30;
-export const AGENT_RUN_WALL_CLOCK_MS = 4 * 60_000;
-/** Acting buddies get a larger, still-hard-bounded task tier. */
-export const AGENT_BROWSER_RUN_WALL_CLOCK_MS = 10 * 60_000;
-export const AGENT_BROWSER_MAX_STEPS = 40;
 /** Let a browser repaint/network handlers settle before the mandatory fresh observation. */
 export const AGENT_BROWSER_SETTLE_MS = 350;
 /** Browser act/capture/load boundary. Human approval waits deliberately do not use it. */
 export const AGENT_BROWSER_TOOL_TIMEOUT_MS = 45_000;
 /** Quit must not wait indefinitely for a backend/renderer that ignored abort. */
 export const AGENT_MANAGER_DISPOSE_TIMEOUT_MS = 5_000;
-export const AGENT_BACKEND_TIMEOUT_MS = 90_000; // per backend request (search rounds can be slow)
+/** Maximum silence while opening or consuming one backend response. */
+export const AGENT_BACKEND_IDLE_TIMEOUT_MS = 90_000;
 export const AGENT_TOOL_TIMEOUT_MS = 15_000;
-export const AGENT_FETCH_TIMEOUT_MS = 20_000;
-export const AGENT_FETCH_MAX_CHARS = 8_000;
-export const AGENT_FETCH_MAX_CALLS = 6; // per run
+/** Firecrawl search/scrape/map requests may render dynamic pages before returning. */
+export const AGENT_FIRECRAWL_TIMEOUT_MS = 90_000;
+/** Keep full articles useful while bounding a single function output in model history. */
+export const AGENT_FIRECRAWL_MAX_CHARS = 60_000;
 export const AGENT_DEFAULT_MODEL = 'gpt-5.6-sol'; // CLICKY_AGENT_MODEL env overrides
 export const AGENT_REASONING_EFFORT = 'medium';
 

@@ -2,12 +2,12 @@
  * Disposable phone-audio QA bridge client.
  *
  * This is deliberately isolated behind CLICKY_PHONE_AUDIO_URL. The companion
- * process in tools/phone-audio-bridge owns LAN/TLS/browser concerns; Clicky
+ * process in tools/phone-audio-bridge owns LAN/TLS/browser concerns; Buddy
  * only speaks a tiny loopback WebSocket protocol:
  *
- * - binary server -> Clicky: PCM16 24 kHz mono microphone chunks
- * - binary Clicky -> server: PCM16 24 kHz mono response chunks
- * - JSON Clicky -> server: capture/playback control
+ * - binary server -> Buddy: PCM16 24 kHz mono microphone chunks
+ * - binary Buddy -> server: PCM16 24 kHz mono response chunks
+ * - JSON Buddy -> server: capture/playback control
  *
  * Delete this file, the ConversationDeps seam, and the tools directory when
  * the native iPhone client replaces the throwaway harness.
@@ -20,7 +20,7 @@ import { Backoff, RetryTimer } from './util/backoff';
 export type PhoneCaptureCommand = 'start' | 'stop';
 export type PhonePlaybackCommand = 'stop' | 'flush';
 
-/** Every JSON control message Clicky sends to the bridge (the full wire vocabulary). */
+/** Every JSON control message Buddy sends to the bridge (the full wire vocabulary). */
 type PhoneControlMessage =
   | { type: 'capture'; command: PhoneCaptureCommand }
   | { type: 'playback'; command: PhonePlaybackCommand };

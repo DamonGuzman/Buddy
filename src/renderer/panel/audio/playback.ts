@@ -17,7 +17,7 @@
  *
  * F1 fix (battery): the AudioContext is suspended shortly after the queue
  * drains and resumed on the next enqueue — mirroring what mic capture does —
- * so an idle Clicky doesn't keep the audio render thread spinning.
+ * so an idle Buddy doesn't keep the audio render thread spinning.
  *
  * M8.5 addition (orchestrator-approved): playback tap — see ./playback-tap.ts.
  * This class forwards the worklet's 'played' blocks to the injected tap.

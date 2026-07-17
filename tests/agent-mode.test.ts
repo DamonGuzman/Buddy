@@ -1,9 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { shouldRetry } from '../src/main/agents/agent';
 import { AgentManager } from '../src/main/agents/manager';
 import { MockAgentBackend } from '../src/main/agents/mock-backend';
 import { CodexAgentBackend } from '../src/main/agents/backend';
-import { findAgentTool } from '../src/main/agents/tools';
+import { agentToolDefinitions, findAgentTool } from '../src/main/agents/tools';
 import type {
   AgentBackend,
   AgentBackendRequest,
@@ -12,11 +12,17 @@ import type {
   AgentBrowserDeps,
   AgentPersistencePort,
   AgentToolContext,
+  AgentToolDefinition,
 } from '../src/main/agents/types';
 import type { AgentSummary } from '../src/shared/types';
 import { AGENT_MANAGER_DISPOSE_TIMEOUT_MS } from '../src/main/agents/config';
+import { readActivityDescription } from '../src/main/agents/tools/activity-description';
 import { AgentTools } from '../src/main/conversation/agent-tools';
 import { TranscriptStore } from '../src/main/conversation/transcript-store';
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function brief(id: string): AgentBrief {
   return {
@@ -61,6 +67,10 @@ describe('Agent Mode runtime', () => {
         requests += 1;
         if (requests <= 15) {
           const callId = `note_${requests}`;
+          const args = {
+            description: 'saving the latest findings',
+            text: `round ${requests}`,
+          };
           return {
             ok: true,
             outputItems: [
@@ -68,7 +78,7 @@ describe('Agent Mode runtime', () => {
                 type: 'function_call',
                 call_id: callId,
                 name: 'scratchpad_write',
-                arguments: JSON.stringify({ text: `round ${requests}` }),
+                arguments: JSON.stringify(args),
               },
             ],
             text: '',
@@ -76,7 +86,7 @@ describe('Agent Mode runtime', () => {
               {
                 callId,
                 name: 'scratchpad_write',
-                argsJson: JSON.stringify({ text: `round ${requests}` }),
+                argsJson: JSON.stringify(args),
               },
             ],
             searchQueries: [],
@@ -111,11 +121,10 @@ describe('Agent Mode runtime', () => {
     expect(requests).toBe(16);
     expect(record.status).toBe('done');
     expect(record.step).toBe(16);
-    expect(record.maxSteps).toBeNull();
     expect(record.summary).toContain('finished after the old round ceiling');
   });
 
-  it('fails closed when signed out and enforces the three-agent cap', async () => {
+  it('fails closed when signed out and admits helpers without a concurrency ceiling', async () => {
     const signedOut = new AgentManager({
       backend: new MockAgentBackend(),
       isReady: () => false,
@@ -147,36 +156,141 @@ describe('Agent Mode runtime', () => {
       onAgentsChanged: () => {},
       onFinished: () => {},
     });
-    expect(manager.spawn(brief('a')).ok).toBe(true);
-    expect(manager.spawn(brief('b')).ok).toBe(true);
-    expect(manager.spawn(brief('c')).ok).toBe(true);
-    expect(manager.spawn(brief('d'))).toEqual({ ok: false, reason: 'at_capacity' });
+    for (let index = 0; index < 25; index += 1) {
+      expect(manager.spawn(brief(`parallel-${index}`))).toEqual({
+        ok: true,
+        agentId: `parallel-${index}`,
+      });
+    }
+    expect(manager.list()).toHaveLength(25);
     manager.cancelAll();
     await vi.waitFor(() =>
       expect(manager.list().every((item) => item.status === 'cancelled')).toBe(true),
     );
   });
 
-  it('blocks localhost/private web fetches before network access', async () => {
-    const tool = findAgentTool('web_fetch')!;
+  it('routes web search through Firecrawl and records returned sources', async () => {
+    const tool = findAgentTool('web_search')!;
+    const search = vi.fn(
+      async (_query: string, _options: Record<string, unknown>, _signal: AbortSignal) => ({
+        success: true,
+        data: { web: [{ url: 'https://example.com/article', markdown: 'full article' }] },
+      }),
+    );
+    const sources: string[] = [];
     const ctx: AgentToolContext = {
       brief: brief('safe'),
       signal: new AbortController().signal,
       scratchpad: { get: () => '', set: () => {}, append: () => {} },
-      addSource: () => {},
-      fetchCount: () => 0,
-      noteFetch: () => {},
+      addSource: (url) => sources.push(url),
+      firecrawl: {
+        search,
+        scrape: vi.fn(),
+        map: vi.fn(),
+        crawl: vi.fn(),
+        batchScrape: vi.fn(),
+        research: vi.fn(),
+      },
     };
-    await expect(tool.execute({ url: 'http://127.0.0.1:8199/state' }, ctx)).rejects.toThrow(
-      'private addresses are blocked',
+    await expect(tool.execute({ query: 'recent articles' }, ctx)).resolves.toContain(
+      'full article',
     );
-    await expect(tool.execute({ url: 'http://localhost/secret' }, ctx)).rejects.toThrow(
-      'local addresses are blocked',
-    );
+    expect(search).toHaveBeenCalledOnce();
+    expect(search.mock.calls[0]?.[1]).toMatchObject({
+      sources: [{ type: 'web' }, { type: 'news' }],
+      scrapeOptions: { onlyMainContent: true },
+    });
+    expect(sources).toEqual(['https://example.com/article']);
   });
 
   it('the mock backend reports itself ready (no sign-in required)', () => {
     expect(new MockAgentBackend().isReady()).toBe(true);
+  });
+
+  it('exposes every Firecrawl tool to research, browser, and filesystem agents', () => {
+    const firecrawlNames = [
+      'web_search',
+      'web_scrape',
+      'web_map',
+      'web_crawl',
+      'web_batch_scrape',
+      'web_research',
+    ];
+    for (const definitions of [
+      agentToolDefinitions(false, false),
+      agentToolDefinitions(true, false),
+      agentToolDefinitions(false, true),
+    ]) {
+      const names = definitions.map((tool) => tool.name);
+      expect(names).toEqual(expect.arrayContaining(firecrawlNames));
+    }
+    for (const name of firecrawlNames) {
+      expect(findAgentTool(name, false, true)?.definition.name).toBe(name);
+    }
+  });
+
+  it('requires a short plain-language description on every helper function tool', () => {
+    const definitions = [
+      ...agentToolDefinitions(false, false),
+      ...agentToolDefinitions(true, false),
+      ...agentToolDefinitions(false, true),
+    ].filter(
+      (tool): tool is Extract<AgentToolDefinition, { type: 'function' }> =>
+        tool.type === 'function',
+    );
+    const uniqueDefinitions = new Map(definitions.map((tool) => [tool.name, tool]));
+    expect([...uniqueDefinitions.keys()].sort()).toEqual([
+      'browser_click',
+      'browser_navigate',
+      'browser_press_keys',
+      'browser_screenshot',
+      'browser_scroll',
+      'browser_type',
+      'needs_user',
+      'present_file',
+      'read_screen',
+      'run_shell',
+      'run_staged_shell',
+      'scratchpad_write',
+      'stage_paths',
+      'web_batch_scrape',
+      'web_crawl',
+      'web_map',
+      'web_research',
+      'web_scrape',
+      'web_search',
+      'workspace_changes',
+    ]);
+    for (const tool of uniqueDefinitions.values()) {
+      const properties = tool.parameters['properties'] as Record<string, unknown>;
+      const required = tool.parameters['required'] as unknown[];
+      expect(properties['description'], tool.name).toMatchObject({
+        type: 'string',
+        minLength: 3,
+        maxLength: 120,
+      });
+      expect(required, tool.name).toContain('description');
+    }
+  });
+
+  it('normalizes readable descriptions and rejects verbose or technical progress copy', () => {
+    expect(readActivityDescription({ description: '  checking\n  the project files  ' })).toEqual({
+      ok: true,
+      description: 'checking the project files',
+    });
+    expect(readActivityDescription({ description: 'checking files' })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('3 to 12 simple words'),
+    });
+    expect(
+      readActivityDescription({ description: 'opening https://example.com for the user' }),
+    ).toMatchObject({ ok: false, error: 'description must not include a URL' });
+    expect(
+      readActivityDescription({
+        description:
+          'checking every available project file before deciding which specific part needs attention next today',
+      }),
+    ).toMatchObject({ ok: false, error: expect.stringContaining('3 to 12 simple words') });
   });
 
   it('persists terminal summaries through an injected persistence port', async () => {
@@ -464,6 +578,47 @@ describe('Agent Mode runtime', () => {
     expect(surfaceError).not.toHaveBeenCalled();
   });
 
+  it('does not reject foreground spawns when many helpers are already active', async () => {
+    const transcript = new TranscriptStore(10, () => undefined);
+    transcript.upsert({
+      id: 'user_1',
+      role: 'user',
+      text: 'update the project',
+      streaming: false,
+      timestamp: Date.now(),
+    });
+    const spawn = vi.fn(() => ({ ok: true as const, agentId: 'new-helper' }));
+    const tools = new AgentTools({
+      agents: {
+        isReady: () => true,
+        list: () =>
+          Array.from({ length: 100 }, (_, index) => ({
+            id: `existing-${index}`,
+            task: `existing task ${index}`,
+            status: 'running' as const,
+            createdAt: Date.now(),
+            steps: [],
+            spoken: false,
+            unseen: false,
+          })),
+        spawn,
+        markSpoken: () => undefined,
+      },
+      transcript,
+      turnCaptures: () => [],
+      noteOrigin: () => undefined,
+      surfaceError: () => undefined,
+      prepareFilesystem: async () => ({ taskId: 'task-new', rootName: 'project' }),
+      failFilesystem: async () => undefined,
+    });
+
+    await expect(tools.spawnAgent({ task: 'update the project' }, 'text')).resolves.toEqual({
+      ok: true,
+      agent_id: 'new-helper',
+    });
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
   it('never authorizes an agent from an older user turn while the latest request is streaming', async () => {
     const transcript = new TranscriptStore(10, () => undefined);
     transcript.upsert({
@@ -536,14 +691,9 @@ describe('shouldRetry policy', () => {
 });
 
 describe('CodexAgentBackend wire contract', () => {
-  it('uses store:false, hosted web_search, and accumulates streamed calls/citations', async () => {
+  it('uses store:false and sends Firecrawl web access only as client function tools', async () => {
     let body: Record<string, unknown> | null = null;
     const events = [
-      { type: 'response.web_search_call.searching', item: { action: { query: 'best monitor' } } },
-      {
-        type: 'response.output_text.annotation.added',
-        annotation: { url: 'https://example.com/review' },
-      },
       {
         type: 'response.output_item.added',
         item: {
@@ -585,19 +735,210 @@ describe('CodexAgentBackend wire contract', () => {
       model: 'gpt-5.6-sol',
       instructions: 'research',
       input: [],
-      tools: [{ type: 'web_search' }],
+      tools: [
+        {
+          type: 'function',
+          name: 'web_search',
+          description: 'Search through Firecrawl',
+          parameters: { type: 'object' },
+        },
+      ],
       effort: 'medium',
       signal: new AbortController().signal,
     };
     const result = await backend.request(req);
     expect(body?.['store']).toBe(false);
     expect(body?.['previous_response_id']).toBeUndefined();
-    expect(body?.['tools']).toEqual([{ type: 'web_search' }]);
+    expect(body?.['tools']).toEqual([
+      expect.objectContaining({ type: 'function', name: 'web_search' }),
+    ]);
+    expect(JSON.stringify(body?.['tools'])).not.toContain('"type":"web_search"');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.searchQueries).toEqual(['best monitor']);
-    expect(result.citations).toEqual(['https://example.com/review']);
+    expect(result.searchQueries).toEqual([]);
+    expect(result.citations).toEqual([]);
     expect(result.functionCalls[0]?.name).toBe('scratchpad_write');
     expect(result.text).toBe('working');
+  });
+
+  it('allows an active response to outlive the idle budget and stops at its terminal event', async () => {
+    const encoder = new TextEncoder();
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode('data: {"type":"response.output_text.delta","delta":"still "}\n'),
+        );
+        timers.push(
+          setTimeout(
+            () =>
+              controller.enqueue(
+                encoder.encode('data: {"type":"response.output_text.delta","delta":"working"}\n'),
+              ),
+            10,
+          ),
+          setTimeout(
+            () =>
+              controller.enqueue(
+                encoder.encode('data: {"type":"response.completed","response":{"usage":{}}}\n'),
+              ),
+            20,
+          ),
+        );
+      },
+      cancel() {
+        cancelled = true;
+        for (const timer of timers) clearTimeout(timer);
+      },
+    });
+    const backend = new CodexAgentBackend(
+      {
+        getCodexAuth: () => ({
+          accessToken: 'secret',
+          accountId: 'acct',
+          planType: 'pro',
+          expiresAt: Date.now() + 60_000,
+        }),
+        getBearer: async () => 'secret',
+      },
+      (async () =>
+        ({
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          body: stream,
+          text: async () => '',
+        }) as Response) as typeof fetch,
+      { responseStartTimeoutMs: 15, streamIdleTimeoutMs: 15 },
+    );
+
+    const result = await backend.request({
+      model: 'gpt-5.6-sol',
+      instructions: 'finish a long artifact',
+      input: [],
+      tools: [],
+      effort: 'medium',
+      signal: new AbortController().signal,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.text).toBe('still working');
+    expect(cancelled).toBe(true);
+  });
+
+  it('fails a genuinely idle response with a diagnostic reason', async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const backend = new CodexAgentBackend(
+      {
+        getCodexAuth: () => ({
+          accessToken: 'secret',
+          accountId: 'acct',
+          planType: 'pro',
+          expiresAt: Date.now() + 60_000,
+        }),
+        getBearer: async () => 'secret',
+      },
+      (async () =>
+        ({
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          body: stream,
+          text: async () => '',
+        }) as Response) as typeof fetch,
+      { responseStartTimeoutMs: 20, streamIdleTimeoutMs: 10 },
+    );
+
+    const result = await backend.request({
+      model: 'gpt-5.6-sol',
+      instructions: 'test',
+      input: [],
+      tools: [],
+      effort: 'medium',
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      errorKind: 'agent_backend_down',
+      detail: 'backend stream was idle for 10ms',
+      retryable: true,
+    });
+    expect(cancelled).toBe(true);
+  });
+
+  it('fails when response headers never arrive', async () => {
+    const backend = new CodexAgentBackend(
+      {
+        getCodexAuth: () => ({
+          accessToken: 'secret',
+          accountId: 'acct',
+          planType: 'pro',
+          expiresAt: Date.now() + 60_000,
+        }),
+        getBearer: async () => 'secret',
+      },
+      ((_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          );
+        })) as typeof fetch,
+      { responseStartTimeoutMs: 10, streamIdleTimeoutMs: 20 },
+    );
+
+    const result = await backend.request({
+      model: 'gpt-5.6-sol',
+      instructions: 'test',
+      input: [],
+      tools: [],
+      effort: 'medium',
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      detail: 'backend response did not start within 10ms',
+      retryable: true,
+    });
+  });
+
+  it('rejects a stream that ends without a terminal event', async () => {
+    const backend = new CodexAgentBackend(
+      {
+        getCodexAuth: () => ({
+          accessToken: 'secret',
+          accountId: 'acct',
+          planType: 'pro',
+          expiresAt: Date.now() + 60_000,
+        }),
+        getBearer: async () => 'secret',
+      },
+      (async () => new Response('', { status: 200 })) as typeof fetch,
+      { responseStartTimeoutMs: 20, streamIdleTimeoutMs: 20 },
+    );
+
+    const result = await backend.request({
+      model: 'gpt-5.6-sol',
+      instructions: 'test',
+      input: [],
+      tools: [],
+      effort: 'medium',
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      detail: 'backend stream ended before a terminal event',
+      retryable: true,
+    });
   });
 });

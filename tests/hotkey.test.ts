@@ -1,12 +1,12 @@
 /**
  * Hotkey FSM unit tests (F1 fixes): left-Alt-only matching (AltGr must never
- * trigger), the max-hold watchdog (C1), and forced-release state reset.
+ * trigger), unlimited holds, and forced-release state reset.
  * The uiohook dependency is injected as a fake emitter.
  */
 
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HotkeyManager, MAX_HOLD_MS, TAP_MAX_MS } from '../src/main/hotkey';
+import { HotkeyManager, TAP_MAX_MS } from '../src/main/hotkey';
 import type { UiohookLike } from '../src/main/hotkey';
 
 // uiohook keycodes.
@@ -36,9 +36,9 @@ interface Harness {
   click(button: number, ctrlKey?: boolean): void;
 }
 
-function makeHarness(maxHoldMs?: number): Harness {
+function makeHarness(): Harness {
   const hook = new FakeHook();
-  const hotkey = new HotkeyManager({ hook, ...(maxHoldMs !== undefined ? { maxHoldMs } : {}) });
+  const hotkey = new HotkeyManager({ hook });
   const events: string[] = [];
   const harness: Harness = {
     hook,
@@ -276,18 +276,14 @@ describe('tap detection (M20 whisper)', () => {
     expect(h.events).toEqual(['start', 'end']);
   });
 
-  it('forced releases (watchdog / lock) never tap', () => {
+  it('forced releases on lock/suspend never tap', () => {
     vi.useFakeTimers();
-    const h = makeHarness(1_000);
+    const h = makeHarness();
     h.down(L_CTRL);
     h.down(L_ALT);
     h.hotkey.forceCancel();
     expect(h.taps).toBe(0);
-    h.down(L_CTRL);
-    h.down(L_ALT);
-    vi.advanceTimersByTime(1_000); // watchdog
-    expect(h.taps).toBe(0);
-    expect(h.events).toEqual(['start', 'cancel', 'start', 'cancel']);
+    expect(h.events).toEqual(['start', 'cancel']);
   });
 
   it('simulate() press/release counts as a tap (debug harness parity)', () => {
@@ -341,56 +337,18 @@ describe('tap detection (M20 whisper)', () => {
   });
 });
 
-describe('hold-cancel reasons (M11 hold_too_long)', () => {
-  it('the watchdog cancel carries reason "watchdog"', () => {
-    vi.useFakeTimers();
-    const h = makeHarness(1_000);
-    const reasons: string[] = [];
-    h.hotkey.on('hold-cancel', (reason) => reasons.push(reason));
-    h.down(L_CTRL);
-    h.down(L_ALT);
-    vi.advanceTimersByTime(1_000);
-    expect(reasons).toEqual(['watchdog']);
-  });
-
-  it('an external forceCancel (lock/suspend) carries reason "forced"', () => {
-    const h = makeHarness();
-    const reasons: string[] = [];
-    h.hotkey.on('hold-cancel', (reason) => reasons.push(reason));
-    h.down(L_CTRL);
-    h.down(L_ALT);
-    h.hotkey.forceCancel();
-    expect(reasons).toEqual(['forced']);
-  });
-});
-
-describe('max-hold watchdog + forced release (F1 C1 fix)', () => {
-  it('force-cancels a hold after MAX_HOLD_MS (swallowed keyup)', () => {
+describe('unlimited holds + forced release (F1 C1 fix)', () => {
+  it('keeps recording until release regardless of hold duration', () => {
     vi.useFakeTimers();
     const h = makeHarness();
     h.down(L_CTRL);
     h.down(L_ALT);
     expect(h.events).toEqual(['start']);
-    vi.advanceTimersByTime(MAX_HOLD_MS - 1);
+    vi.advanceTimersByTime(24 * 60 * 60 * 1_000);
     expect(h.events).toEqual(['start']);
-    vi.advanceTimersByTime(1);
-    expect(h.events).toEqual(['start', 'cancel']);
-    expect(h.hotkey.status().holding).toBe(false);
-    // The (never-delivered) keyups later must not produce a spurious end.
-    h.up(L_CTRL);
-    h.up(L_ALT);
-    expect(h.events).toEqual(['start', 'cancel']);
-  });
-
-  it('a normal release before the watchdog fires never cancels', () => {
-    vi.useFakeTimers();
-    const h = makeHarness();
-    h.down(L_CTRL);
-    h.down(L_ALT);
     h.up(L_ALT);
     expect(h.events).toEqual(['start', 'end']);
-    vi.advanceTimersByTime(MAX_HOLD_MS * 2);
-    expect(h.events).toEqual(['start', 'end']); // no late cancel
+    expect(h.hotkey.status().holding).toBe(false);
   });
 
   it('forceCancel() (lock-screen/suspend) cancels and fully resets modifiers', () => {
@@ -412,18 +370,5 @@ describe('max-hold watchdog + forced release (F1 C1 fix)', () => {
     const h = makeHarness();
     h.hotkey.forceCancel();
     expect(h.events).toEqual([]);
-  });
-
-  it('holds keep working after a watchdog cancellation', () => {
-    vi.useFakeTimers();
-    const h = makeHarness(1_000);
-    h.down(L_CTRL);
-    h.down(L_ALT);
-    vi.advanceTimersByTime(1_000);
-    expect(h.events).toEqual(['start', 'cancel']);
-    h.down(L_CTRL);
-    h.down(L_ALT);
-    h.up(L_ALT);
-    expect(h.events).toEqual(['start', 'cancel', 'start', 'end']);
   });
 });

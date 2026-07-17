@@ -7,3 +7,9 @@ export function normalizeOpenAiApiKey(value: string): string | null {
   const normalized = value.trim();
   return /^sk-\S{17,}$/.test(normalized) ? normalized : null;
 }
+
+/** Normalize a complete Firecrawl project key without ever exposing it in diagnostics. */
+export function normalizeFirecrawlApiKey(value: string): string | null {
+  const normalized = value.trim();
+  return /^fc-\S{17,}$/.test(normalized) ? normalized : null;
+}

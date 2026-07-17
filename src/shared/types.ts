@@ -1,5 +1,5 @@
 /**
- * Shared domain types for Clicky — a barrel over the focused modules in
+ * Shared domain types for Buddy — a barrel over the focused modules in
  * `src/shared/types/`. Every symbol that has ever been importable from
  * './types' still is; new code may import from the submodules directly.
  *

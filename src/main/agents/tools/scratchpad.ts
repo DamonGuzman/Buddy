@@ -14,7 +14,6 @@ export const scratchpadTool: AgentToolSpec = {
   },
   timeoutMs: AGENT_TOOL_TIMEOUT_MS,
   stepKind: 'note',
-  stepLabel: () => 'updated private research notes',
   async execute(args, ctx) {
     const text = typeof args['text'] === 'string' ? args['text'].slice(0, 20_000) : '';
     if (!text) return JSON.stringify({ error: 'text is required' });

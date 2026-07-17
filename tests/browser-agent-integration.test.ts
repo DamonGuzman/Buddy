@@ -1,11 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentRunner } from '../src/main/agents/agent';
 import { AgentApprovalCoordinator } from '../src/main/agents/approvals';
-import {
-  AGENT_BROWSER_MAX_STEPS,
-  AGENT_BROWSER_RUN_WALL_CLOCK_MS,
-  AGENT_BROWSER_TOOL_TIMEOUT_MS,
-} from '../src/main/agents/config';
+import { AGENT_BROWSER_TOOL_TIMEOUT_MS } from '../src/main/agents/config';
 import { agentToolDefinitions } from '../src/main/agents/tools';
 import type {
   AgentApprovalPort,
@@ -46,16 +42,20 @@ function success(
   functionCalls: Array<{ callId: string; name: string; args: Record<string, unknown> }> = [],
   text = '',
 ): AgentBackendResult {
+  const describedCalls = functionCalls.map((call) => ({
+    ...call,
+    args: { description: 'checking the browser task', ...call.args },
+  }));
   return {
     ok: true,
-    outputItems: functionCalls.map((call) => ({
+    outputItems: describedCalls.map((call) => ({
       type: 'function_call',
       call_id: call.callId,
       name: call.name,
       arguments: JSON.stringify(call.args),
     })),
     text,
-    functionCalls: functionCalls.map((call) => ({
+    functionCalls: describedCalls.map((call) => ({
       callId: call.callId,
       name: call.name,
       argsJson: JSON.stringify(call.args),
@@ -230,6 +230,38 @@ describe('browser-enabled AgentRunner integration', () => {
     expect(toolNames(browserBackend.requests[0]!)).toContain('browser_navigate');
     expect(browserBackend.requests[0]!.instructions).toContain('exactly one browser action');
     expect(inputJson(browserBackend.requests[1]!)).toContain('justification is required');
+    expect(deps.createDriver).not.toHaveBeenCalled();
+    expect(driver.navigate).not.toHaveBeenCalled();
+  });
+
+  it('refuses to execute a helper tool call without a readable description', async () => {
+    const driver = fakeDriver();
+    const deps = browserDeps(driver);
+    const backend = scriptedBackend((_request, round) =>
+      round === 1
+        ? success([
+            {
+              callId: 'missing-description',
+              name: 'browser_navigate',
+              args: {
+                description: undefined,
+                url: 'https://example.com',
+                justification: 'Open the requested page.',
+              },
+            },
+          ])
+        : success([], 'stopped after description validation'),
+    );
+
+    const result = await new AgentRunner({
+      brief: brief(true),
+      backend,
+      browser: deps,
+      onUpdate: () => undefined,
+    }).run();
+
+    expect(result.status).toBe('done');
+    expect(inputJson(backend.requests[1]!)).toContain('description is required');
     expect(deps.createDriver).not.toHaveBeenCalled();
     expect(driver.navigate).not.toHaveBeenCalled();
   });
@@ -722,16 +754,18 @@ describe('browser-enabled AgentRunner integration', () => {
     await expect(running).resolves.toMatchObject({ status: 'done' });
   });
 
-  it('enforces the browser tier at exactly 40 backend steps', async () => {
+  it('continues browser work past the former 40-round ceiling', async () => {
     const driver = fakeDriver();
     const backend = scriptedBackend((_request, round) =>
-      success([
-        {
-          callId: `shot-${round}`,
-          name: 'browser_screenshot',
-          args: { justification: 'Inspect the current page before deciding what to do next.' },
-        },
-      ]),
+      round <= 45
+        ? success([
+            {
+              callId: `shot-${round}`,
+              name: 'browser_screenshot',
+              args: { justification: 'Inspect the current page before deciding what to do next.' },
+            },
+          ])
+        : success([], 'finished after the former browser round ceiling'),
     );
 
     const result = await new AgentRunner({
@@ -741,10 +775,10 @@ describe('browser-enabled AgentRunner integration', () => {
       onUpdate: () => undefined,
     }).run();
 
-    expect(result.status).toBe('timed_out');
-    expect(result.maxSteps).toBe(AGENT_BROWSER_MAX_STEPS);
-    expect(backend.requests).toHaveLength(40);
-    expect(driver.capture).toHaveBeenCalledTimes(40);
+    expect(result.status).toBe('done');
+    expect(result.summary).toContain('finished after the former browser round ceiling');
+    expect(backend.requests).toHaveLength(46);
+    expect(driver.capture).toHaveBeenCalledTimes(45);
     expect(driver.dispose).toHaveBeenCalledOnce();
   });
 
@@ -800,7 +834,7 @@ describe('browser-enabled AgentRunner integration', () => {
     },
   );
 
-  it('uses the ten-minute browser wall-clock tier', async () => {
+  it('does not stop browser work after the former ten-minute wall-clock ceiling', async () => {
     vi.useFakeTimers();
     let resolveRequest!: (result: AgentBackendResult) => void;
     const backend = scriptedBackend(
@@ -818,12 +852,14 @@ describe('browser-enabled AgentRunner integration', () => {
     const running = runner.run();
     await Promise.resolve();
 
-    await vi.advanceTimersByTimeAsync(AGENT_BROWSER_RUN_WALL_CLOCK_MS - 1);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(runner.summary.status).toBe('running');
-    await vi.advanceTimersByTimeAsync(1);
-    resolveRequest(success([], 'too late'));
+    resolveRequest(success([], 'finished after a long run'));
 
-    await expect(running).resolves.toMatchObject({ status: 'timed_out' });
+    await expect(running).resolves.toMatchObject({
+      status: 'done',
+      summary: 'finished after a long run',
+    });
     expect(backend.requests).toHaveLength(1);
   });
 

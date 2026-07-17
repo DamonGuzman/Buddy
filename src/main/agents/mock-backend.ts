@@ -314,6 +314,7 @@ function researchResult(hasToolOutput: boolean): AgentBackendResult {
       call_id: 'mock_note_1',
       name: 'scratchpad_write',
       arguments: JSON.stringify({
+        description: 'saving the research findings',
         text: 'mock research checked the requested topic and found a clear recommendation.',
       }),
     };
@@ -329,13 +330,35 @@ function callResult(
   name: string,
   args: Record<string, unknown>,
 ): AgentBackendResult {
+  const describedArgs = { description: mockActivityDescription(name), ...args };
   const call: FunctionCallItem = {
     type: 'function_call',
     call_id: callId,
     name,
-    arguments: JSON.stringify(args),
+    arguments: JSON.stringify(describedArgs),
   };
   return success([call]);
+}
+
+function mockActivityDescription(name: string): string {
+  switch (name) {
+    case 'browser_navigate':
+      return 'opening the requested page';
+    case 'browser_click':
+      return 'selecting the visible option';
+    case 'browser_type':
+      return 'entering the requested information';
+    case 'browser_press_keys':
+      return 'using the requested keyboard shortcut';
+    case 'browser_scroll':
+      return 'looking farther down the page';
+    case 'browser_screenshot':
+      return 'checking the current page';
+    case 'needs_user':
+      return 'asking for your help';
+    default:
+      return 'continuing the helper task';
+  }
 }
 
 function textResult(text: string): AgentBackendResult {

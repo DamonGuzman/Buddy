@@ -7,6 +7,7 @@ import type {
 export const SETTINGS_TARGET_LABEL: Record<ActionableErrorTarget, string> = {
   permissions: 'permissions',
   openai: 'openai',
+  firecrawl: 'firecrawl',
   chatgpt: 'chatgpt',
   voice: 'voice & captions',
   microphone: 'microphone',
@@ -29,6 +30,7 @@ export function visibleSettingsSection(
 /** Route a failed settings write to the card containing the attempted control. */
 export function settingsTargetForPatch(patch: SettingsPatch): ActionableErrorTarget {
   if (patch.apiKey !== undefined || patch.model !== undefined) return 'openai';
+  if (patch.firecrawlApiKey !== undefined) return 'firecrawl';
   if (patch.micDeviceId !== undefined || patch.fullRealtimeMode !== undefined) return 'microphone';
   if (patch.voice !== undefined || patch.captionsEnabled !== undefined) return 'voice';
   if (patch.preferApiKeyGrounding !== undefined || patch.computerUseEnabled !== undefined) {

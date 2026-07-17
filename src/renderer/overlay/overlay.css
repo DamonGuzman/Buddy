@@ -882,7 +882,6 @@
 
 /* trouble: a little deflated */
 .helper[data-status='failed'] .helper-svg,
-.helper[data-status='timed_out'] .helper-svg,
 .helper[data-status='cancelled'] .helper-svg {
   opacity: 0.75;
   filter: saturate(0.55) drop-shadow(0 2px 4px rgba(15, 40, 90, 0.35));
