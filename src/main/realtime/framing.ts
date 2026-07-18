@@ -41,7 +41,8 @@ export function buildScreenshotFraming(metas: CaptureMeta[], contextText: string
         `bottom-right corner (${m.imageW},${m.imageH})`,
     )
     .join('; ');
-  const first = metas[0]!;
+  const first = metas[0];
+  if (first === undefined) throw new Error('screenshot framing requires at least one capture');
   return (
     `${CONTEXT_PREFIX} ${metas.length} screenshot(s) attached. ${screens}. ` +
     `point_at coordinates must be pixel coordinates within the named screenshot. ` +

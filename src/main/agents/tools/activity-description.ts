@@ -1,5 +1,5 @@
 import { asRecord } from '../../util/guards';
-import type { AgentToolDefinition } from '../types';
+import type { HelperBuddyToolDefinition } from '../types';
 
 export const TOOL_ACTIVITY_DESCRIPTION_MIN_CHARS = 3;
 export const TOOL_ACTIVITY_DESCRIPTION_MAX_CHARS = 120;
@@ -14,7 +14,7 @@ const ACTIVITY_DESCRIPTION_SCHEMA = {
     'Required progress update for non-technical people. In 3–12 simple words, say only what you are doing now, such as "checking the project files" or "opening the account settings". Avoid tool names, code, commands, URLs, jargon, reasons, and future work.',
 };
 
-type FunctionToolDefinition = Extract<AgentToolDefinition, { type: 'function' }>;
+type FunctionToolDefinition = Extract<HelperBuddyToolDefinition, { type: 'function' }>;
 
 /**
  * Add the user-facing activity field at the registry boundary so every current

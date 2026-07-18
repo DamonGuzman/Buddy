@@ -18,9 +18,9 @@ interface ComputerUseApprovalCardProps {
   resolving: ApprovalVerdict | null;
   actingInPlace: boolean;
   error: string | null;
-  onResolve: (agentId: string, approvalId: string, verdict: ApprovalVerdict) => void;
-  onShowBrowser: (agentId: string, approvalId: string) => void;
-  onFinishInBrowser: (agentId: string, approvalId: string) => void;
+  onResolve: (helperBuddyId: string, approvalId: string, verdict: ApprovalVerdict) => void;
+  onShowBrowser: (helperBuddyId: string, approvalId: string) => void;
+  onFinishInBrowser: (helperBuddyId: string, approvalId: string) => void;
 }
 
 export function ComputerUseApprovalCard({
@@ -174,7 +174,7 @@ export function ComputerUseApprovalCard({
             onKeyDown={armKeyboard('once')}
             onClick={() =>
               consumeInteraction('once', () =>
-                onResolve(request.agentId, request.approvalId, 'once'),
+                onResolve(request.helperBuddyId, request.approvalId, 'once'),
               )
             }
           >
@@ -190,7 +190,7 @@ export function ComputerUseApprovalCard({
               onKeyDown={armKeyboard('always')}
               onClick={() =>
                 consumeInteraction('always', () =>
-                  onResolve(request.agentId, request.approvalId, 'always'),
+                  onResolve(request.helperBuddyId, request.approvalId, 'always'),
                 )
               }
             >
@@ -206,7 +206,7 @@ export function ComputerUseApprovalCard({
             onKeyDown={armKeyboard('deny')}
             onClick={() =>
               consumeInteraction('deny', () =>
-                onResolve(request.agentId, request.approvalId, 'deny'),
+                onResolve(request.helperBuddyId, request.approvalId, 'deny'),
               )
             }
           >
@@ -223,8 +223,8 @@ export function ComputerUseApprovalCard({
               onClick={() =>
                 consumeInteraction('takeover', () =>
                   actingInPlace
-                    ? onFinishInBrowser(request.agentId, request.approvalId)
-                    : onShowBrowser(request.agentId, request.approvalId),
+                    ? onFinishInBrowser(request.helperBuddyId, request.approvalId)
+                    : onShowBrowser(request.helperBuddyId, request.approvalId),
                 )
               }
             >

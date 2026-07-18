@@ -33,7 +33,7 @@ function evidence(overrides: Partial<ActionReviewEvidence> = {}): ActionReviewEv
   return {
     userRequest: 'Send the finished launch note to alice@example.com.',
     taskClaim: 'Send the launch note.',
-    agentId: 'agent-1',
+    helperBuddyId: 'helper-buddy-1',
     actionName: 'click',
     actionArgs: { x: 40, y: 30, label: 'Send' },
     justification: 'This sends the note requested by the user.',
@@ -92,7 +92,9 @@ describe('CodexActionReviewer', () => {
     });
 
     const first = await reviewer.review(evidence());
-    const second = await reviewer.review(evidence({ justification: 'a second agent claim' }));
+    const second = await reviewer.review(
+      evidence({ justification: 'a second helper buddy claim' }),
+    );
 
     expect(sessions).toBe(2);
     expect(first.verdict).toEqual({ verdict: 'approve', reason: 'recipient and content match' });
@@ -104,7 +106,7 @@ describe('CodexActionReviewer', () => {
     const context = turns[0]?.context ?? '';
     expect(context).toContain('exact_user_request');
     expect(context).toContain('Send the finished launch note to alice@example.com.');
-    expect(context).toContain('acting_agent_claims');
+    expect(context).toContain('acting_helper_buddy_claims');
     expect(context).toContain('Password');
     expect(context).not.toContain('do-not-send');
     expect(turns[0]?.images).toEqual([{ jpegBase64: 'bWFya2Vk' }]);

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
-  agentModelOverride,
+  helperBuddyModelOverride,
   bobIdleMsOverride,
   captureTestOutDir,
   debugPortOverride,
   debugTokenOverride,
   devChipFlags,
   fakeMicWavPath,
-  isAgentMockEnabled,
+  isHelperBuddyMockEnabled,
   isCaptureSelfTestEnabled,
   isCodexSubDisabled,
   isDebugEnabled,
@@ -33,7 +33,7 @@ describe("'=== 1' boolean flags", () => {
     ['CLICKY_NO_CODEX_SUB', isCodexSubDisabled],
     ['CLICKY_DEBUG', isDebugEnabled],
     ['CLICKY_IMPORT_API_KEY_FROM_ENV', shouldImportApiKeyFromEnv],
-    ['CLICKY_AGENT_MOCK', isAgentMockEnabled],
+    ['CLICKY_HELPER_BUDDY_MOCK', isHelperBuddyMockEnabled],
     ['CLICKY_SHOW_PANEL', showPanelOnLaunch],
     ['CLICKY_KEEP_PANEL_OPEN', keepPanelOpen],
     ['CLICKY_TEST_CAPTURE', isPanelCaptureTestEnabled],
@@ -56,7 +56,7 @@ describe('set-and-non-empty string flags', () => {
     ['CLICKY_FAKE_MIC', fakeMicWavPath],
     ['CLICKY_TEST_MIC', testMicLabelSubstring],
     ['CLICKY_TEST_THROW', testThrowKind],
-    ['CLICKY_AGENT_MODEL', agentModelOverride],
+    ['CLICKY_HELPER_BUDDY_MODEL', helperBuddyModelOverride],
     ['CLICKY_MOCK_URL', mockRealtimeUrl],
     ['CLICKY_DEBUG_TOKEN', debugTokenOverride],
   ];

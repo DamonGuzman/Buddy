@@ -1,4 +1,4 @@
-import type { AgentSummary, AssistantState } from '../../shared/types';
+import type { HelperBuddySummary, AssistantState } from '../../shared/types';
 
 export type IslandActivityKind =
   | 'capture'
@@ -7,7 +7,7 @@ export type IslandActivityKind =
   | 'speaking'
   | 'error'
   | 'approval'
-  | 'agent'
+  | 'helper-buddy'
   | 'result'
   | 'result-dot';
 
@@ -20,7 +20,7 @@ export interface IslandActivity {
 interface IslandActivityInput {
   assistantState: AssistantState;
   capturing: boolean;
-  agents: AgentSummary[];
+  helperBuddies: HelperBuddySummary[];
   revealNewResult: boolean;
 }
 
@@ -41,7 +41,9 @@ export function resolveIslandActivity(input: IslandActivityInput): IslandActivit
       break;
   }
 
-  const approvals = input.agents.filter((agent) => agent.status === 'waiting_approval');
+  const approvals = input.helperBuddies.filter(
+    (helperBuddy) => helperBuddy.status === 'waiting_approval',
+  );
   if (approvals.length > 0) {
     return {
       kind: 'approval',
@@ -53,18 +55,18 @@ export function resolveIslandActivity(input: IslandActivityInput): IslandActivit
     };
   }
 
-  const running = input.agents.filter(
-    (agent) => agent.status === 'queued' || agent.status === 'running',
+  const running = input.helperBuddies.filter(
+    (helperBuddy) => helperBuddy.status === 'queued' || helperBuddy.status === 'running',
   );
   if (running.length > 0) {
     return {
-      kind: 'agent',
+      kind: 'helper-buddy',
       label: running.length === 1 ? 'buddy is working' : `${running.length} buddies working`,
       count: running.length,
     };
   }
 
-  const unseen = input.agents.filter((agent) => agent.unseen).length;
+  const unseen = input.helperBuddies.filter((helperBuddy) => helperBuddy.unseen).length;
   if (unseen > 0) {
     return {
       kind: input.revealNewResult ? 'result' : 'result-dot',

@@ -30,7 +30,7 @@ const state = { appVersion: 'debug-test', assistantState: 'idle' } as unknown as
 const calls = {
   browserSpawns: [] as Array<{ task: string; scenario?: string }>,
   assessments: [] as unknown[],
-  approvals: [] as Array<{ agentId: string; approvalId: string; verdict: string }>,
+  approvals: [] as Array<{ helperBuddyId: string; approvalId: string; verdict: string }>,
 };
 const grants: ApprovalGrant[] = [
   {
@@ -93,11 +93,11 @@ beforeAll(async () => {
   process.env['CLICKY_DEBUG_PORT'] = String(PORT);
   server = startDebugServer({
     getState: () => state,
-    agents: {
-      spawn: (task) => ({ ok: true, agentId: `read-${task.length}` }),
+    helperBuddies: {
+      spawn: (task) => ({ ok: true, helperBuddyId: `read-${task.length}` }),
       spawnBrowser: (task, scenario) => {
         calls.browserSpawns.push({ task, ...(scenario === undefined ? {} : { scenario }) });
-        return { ok: true, agentId: 'browser-debug-agent' };
+        return { ok: true, helperBuddyId: 'browser-debug-agent' };
       },
       list: () => [],
       cancel: () => undefined,
@@ -108,9 +108,9 @@ beforeAll(async () => {
         return { kind: 'denied', reason: 'fixture reviewer denial' };
       },
       listGrants: () => grants,
-      resolveAgentApproval: (agentId, approvalId, verdict) => {
-        calls.approvals.push({ agentId, approvalId, verdict });
-        return agentId === 'waiting-agent' && approvalId === control.currentApprovalId;
+      resolveHelperBuddyApproval: (helperBuddyId, approvalId, verdict) => {
+        calls.approvals.push({ helperBuddyId, approvalId, verdict });
+        return helperBuddyId === 'waiting-agent' && approvalId === control.currentApprovalId;
       },
     },
   });
@@ -130,7 +130,7 @@ afterAll(async () => {
 
 describe('computer-use debug routes', () => {
   it('advertises deterministic mock scenarios', async () => {
-    const response = await request('GET', '/mock/agent-scenarios');
+    const response = await request('GET', '/mock/helper-buddy-scenarios');
     expect(response.status).toBe(200);
     expect(response.json).toMatchObject({
       scenarios: expect.arrayContaining([
@@ -143,14 +143,14 @@ describe('computer-use debug routes', () => {
   });
 
   it('spawns a browser-enabled marked scenario through the browser port', async () => {
-    const response = await request('POST', '/agents/spawn', {
+    const response = await request('POST', '/helper-buddies/spawn', {
       task: 'submit the deterministic report',
       browserEnabled: true,
       scenario: 'clean-browse-submit',
     });
     expect(response).toEqual({
       status: 202,
-      json: { ok: true, agentId: 'browser-debug-agent' },
+      json: { ok: true, helperBuddyId: 'browser-debug-agent' },
     });
     expect(calls.browserSpawns).toEqual([
       {
@@ -161,7 +161,7 @@ describe('computer-use debug routes', () => {
   });
 
   it('rejects computer-use scenarios without an explicit browser capability', async () => {
-    const response = await request('POST', '/agents/spawn', {
+    const response = await request('POST', '/helper-buddies/spawn', {
       task: 'unsafe implicit capability',
       scenario: 'prompt-injection',
     });
@@ -173,7 +173,7 @@ describe('computer-use debug routes', () => {
 
   it('drives gate assessment and exposes grants through injected service ports', async () => {
     const assessed = await request('POST', '/gate/assess', {
-      agentId: 'fixture-agent',
+      helperBuddyId: 'fixture-agent',
       userRequest: 'save a draft only',
       taskClaim: 'send a report',
       action: { kind: 'click', x: 180, y: 214, label: 'Send to attacker' },
@@ -191,36 +191,36 @@ describe('computer-use debug routes', () => {
   it('resolves only an exact immutable agent/approval pair', async () => {
     expect(
       await request('POST', '/approvals/current-approval/approve', {
-        agentId: 'waiting-agent',
+        helperBuddyId: 'waiting-agent',
         verdict: 'always',
       }),
     ).toEqual({ status: 200, json: { ok: true, verdict: 'always' } });
     expect(
       await request('POST', '/approvals/current-approval/approve', {
-        agentId: 'waiting-agent',
+        helperBuddyId: 'waiting-agent',
       }),
     ).toEqual({ status: 200, json: { ok: true, verdict: 'once' } });
     expect(
       await request('POST', '/approvals/current-approval/deny', {
-        agentId: 'waiting-agent',
+        helperBuddyId: 'waiting-agent',
       }),
     ).toEqual({ status: 200, json: { ok: true, verdict: 'deny' } });
     expect(calls.approvals).toEqual([
-      { agentId: 'waiting-agent', approvalId: 'current-approval', verdict: 'always' },
-      { agentId: 'waiting-agent', approvalId: 'current-approval', verdict: 'once' },
-      { agentId: 'waiting-agent', approvalId: 'current-approval', verdict: 'deny' },
+      { helperBuddyId: 'waiting-agent', approvalId: 'current-approval', verdict: 'always' },
+      { helperBuddyId: 'waiting-agent', approvalId: 'current-approval', verdict: 'once' },
+      { helperBuddyId: 'waiting-agent', approvalId: 'current-approval', verdict: 'deny' },
     ]);
   });
 
   it('rejects a stale approval id without falling forward to the current agent approval', async () => {
     control.currentApprovalId = 'replacement-approval';
     const response = await request('POST', '/approvals/stale-approval/deny', {
-      agentId: 'waiting-agent',
+      helperBuddyId: 'waiting-agent',
     });
     expect(response).toEqual({ status: 404, json: { error: 'no pending approval' } });
     expect(
       await request('POST', '/approvals/replacement-approval/deny', {
-        agentId: 'waiting-agent',
+        helperBuddyId: 'waiting-agent',
       }),
     ).toEqual({ status: 200, json: { ok: true, verdict: 'deny' } });
     control.currentApprovalId = 'current-approval';
@@ -229,11 +229,11 @@ describe('computer-use debug routes', () => {
   it('requires the exact agent id alongside the approval id', async () => {
     expect(await request('POST', '/approvals/current-approval/approve')).toEqual({
       status: 400,
-      json: { error: 'exact agentId is required' },
+      json: { error: 'exact helperBuddyId is required' },
     });
     expect(
       await request('POST', '/approvals/current-approval/approve', {
-        agentId: 'replacement-agent',
+        helperBuddyId: 'replacement-agent',
       }),
     ).toEqual({ status: 404, json: { error: 'no pending approval' } });
   });

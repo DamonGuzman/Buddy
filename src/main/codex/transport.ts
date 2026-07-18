@@ -2,7 +2,7 @@
  * Shared wire transport for the ChatGPT-subscription Codex Responses backend
  * (`chatgpt.com/backend-api/codex/responses`). Three consumers speak this
  * protocol — `codex/responses-session.ts` (the conversational text brain),
- * `agents/backend.ts` (the agent-mode research loop), and
+ * `agents/helper-buddy-backend.ts` (the helper-buddy research loop), and
  * `grounding/rest-grounder.ts` (the Codex grounding arm) — and their requests
  * MUST stay wire-identical: the backend gates on the exact originator /
  * User-Agent pair the Codex CLI sends.
@@ -74,7 +74,7 @@ export function parseUsedPercent(headers: Headers): CodexUsedPercent {
  * usage / rate-limit rejection. Matches on the nested `error` record's
  * code/type/message when present, else the event's own fields.
  *
- * NOTE: `agents/backend.ts` keeps its OWN, intentionally different classifier
+ * NOTE: `agents/helper-buddy-backend.ts` keeps its OWN, intentionally different classifier
  * (`/quota|usage.?limit|rate.?limit/i` over the JSON-serialized error
  * record). That matcher scans nested fields this one ignores but does NOT
  * treat "too many requests" / "insufficient..." as quota — and the agent

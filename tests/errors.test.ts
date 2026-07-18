@@ -57,9 +57,9 @@ describe('error catalog (describeKind)', () => {
         // actionable (try later / add a key), so it auto-shows once.
         'codex_plan_limit',
         // M18 (integration): the two actionable agent-mode gates — connect
-        // chatgpt in settings / plan out of agent runs — auto-show once.
-        'agent_not_signed_in',
-        'agent_quota',
+        // chatgpt in settings / plan out of helper buddy runs — auto-show once.
+        'helper_buddy_not_signed_in',
+        'helper_buddy_quota',
       ].sort(),
     );
     for (const kind of ALL_KINDS) {
@@ -123,10 +123,10 @@ describe('error catalog (describeKind)', () => {
     }
     // M18: the actionable agent gates caption (they hit while the user is
     // looking at the screen); the run-level failures stay transcript-only.
-    expect(describeKind('agent_not_signed_in').surfaces).toEqual(['transcript', 'caption']);
-    expect(describeKind('agent_quota').surfaces).toEqual(['transcript', 'caption']);
-    expect(describeKind('agent_backend_down').surfaces).toEqual(['transcript']);
-    expect(describeKind('agent_tool_failed').surfaces).toEqual(['transcript']);
+    expect(describeKind('helper_buddy_not_signed_in').surfaces).toEqual(['transcript', 'caption']);
+    expect(describeKind('helper_buddy_quota').surfaces).toEqual(['transcript', 'caption']);
+    expect(describeKind('helper_buddy_backend_down').surfaces).toEqual(['transcript']);
+    expect(describeKind('helper_buddy_tool_failed').surfaces).toEqual(['transcript']);
     // Informational — never flips the assistant to the error state.
     expect(describeKind('response_incomplete').surfaces).not.toContain('pill');
     expect(describeKind('capture_failed').surfaces).not.toContain('pill');

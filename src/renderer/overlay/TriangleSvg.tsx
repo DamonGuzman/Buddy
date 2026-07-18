@@ -1,7 +1,7 @@
 /**
  * The buddy triangle: a fat round-joined stroke (= rounded corners) with two
  * eyes. One component shared by the mascot (BuddySvg in main.tsx) and the M19
- * helper sprites (HelperSvg in AgentHelpers.tsx) so the two stay pixel-
+ * helper sprites (HelperSvg in HelperBuddies.tsx) so the two stay pixel-
  * identical siblings — only size, tint and class hooks differ.
  */
 
@@ -9,7 +9,7 @@ export interface TriangleSvgProps {
   svgClassName: string;
   /** Rendered width/height in px (the viewBox is always 40x40). */
   size: number;
-  /** Unique <defs> gradient id (helpers derive theirs from the agent id). */
+  /** Unique <defs> gradient id (helper buddies derive theirs from their id). */
   gradientId: string;
   /** Gradient top (light) / bottom (saturated) stops. */
   gradientTop: string;

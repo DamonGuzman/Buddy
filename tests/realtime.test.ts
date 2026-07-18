@@ -282,7 +282,7 @@ describe('RealtimeSession against the mock server', () => {
 
     const userTurn = session.askText('the foreground question');
     const automatedTurn = session.injectUserAndRespond(
-      '<system_reminder>a background agent completed</system_reminder>',
+      '<system_reminder>a helper buddy completed</system_reminder>',
     );
 
     await userTurn;

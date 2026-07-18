@@ -48,11 +48,11 @@ const api: OverlayApi = {
   sendBuddyMove: (rest) => ipcRenderer.send('overlay:buddy-move', rest),
   // M20 addition: main-side cursor feed (forward:true fallback).
   onCursor: (cb) => subscribe('overlay:cursor', cb),
-  // M19 additions (integration-approved): agent helpers on the overlay.
-  onAgents: (cb) => subscribe('overlay:agents', cb),
-  getAgents: () => ipcRenderer.invoke('agents:list'),
-  sendAgentClick: (id) => ipcRenderer.send('overlay:agent-click', { id }),
-  sendAgentCancel: (id) => ipcRenderer.send('overlay:agent-cancel', { id }),
+  // M19 additions: helper buddies on the overlay.
+  onHelperBuddies: (cb) => subscribe('overlay:helper-buddies', cb),
+  getHelperBuddies: () => ipcRenderer.invoke('helper-buddies:list'),
+  sendHelperBuddyClick: (id) => ipcRenderer.send('overlay:helper-buddy-click', { id }),
+  sendHelperBuddyCancel: (id) => ipcRenderer.send('overlay:helper-buddy-cancel', { id }),
 };
 
 contextBridge.exposeInMainWorld('clicky', api);

@@ -791,11 +791,11 @@
   bottom: 12px;
 }
 
-/* ------------------------------------------------------ M19 agent helpers */
+/* ------------------------------------------------------ M19 helper buddies */
 
 /* 0-size anchor at the buddy's REST spot (never rides the flight transform —
    the helpers hold the fort while the buddy flies, just faded out). */
-.agent-cluster {
+.helper-buddy-cluster {
   position: fixed;
   left: 0;
   top: 0;
@@ -806,12 +806,12 @@
   font-family: var(--font);
   pointer-events: none;
 }
-.agent-cluster[data-visible] {
+.helper-buddy-cluster[data-visible] {
   opacity: 1;
 }
 /* Real hit targets only while the dwell flip has lifted click-through. */
-.agent-cluster[data-interactive] .helper,
-.agent-cluster[data-interactive] .agent-card {
+.helper-buddy-cluster[data-interactive] .helper,
+.helper-buddy-cluster[data-interactive] .helper-buddy-card {
   cursor: pointer;
 }
 
@@ -845,7 +845,7 @@
 
 /* working: gentle bob, phase-shifted per slot (inline animation-delay). Gated
    on [data-visible] — a faded-out cluster must not burn compositor time. */
-.agent-cluster[data-visible] .helper[data-status='running'][data-arrived] .helper-bob {
+.helper-buddy-cluster[data-visible] .helper[data-status='running'][data-arrived] .helper-bob {
   animation: helper-bob 2.8s ease-in-out infinite;
 }
 @keyframes helper-bob {
@@ -864,7 +864,7 @@
 }
 
 /* finished: one happy hop when the status lands (class flip restarts it) */
-.agent-cluster[data-visible] .helper[data-status='done'][data-arrived] .helper-bob {
+.helper-buddy-cluster[data-visible] .helper[data-status='done'][data-arrived] .helper-bob {
   animation: helper-hop 0.65s cubic-bezier(0.34, 1.56, 0.64, 1) 1;
 }
 @keyframes helper-hop {
@@ -895,7 +895,7 @@
   transition: transform 0.6s cubic-bezier(0.55, 0, 0.8, 0.6);
   pointer-events: none;
 }
-.agent-cluster[data-visible] .helper[data-departing][data-arrived] .helper-bob,
+.helper-buddy-cluster[data-visible] .helper[data-departing][data-arrived] .helper-bob,
 .helper[data-departing] .helper-bob {
   animation: none;
   transform: scale(0.15);
@@ -930,7 +930,7 @@
   box-shadow: 0 0 6px rgba(255, 214, 102, 0.9);
   opacity: 0;
 }
-.agent-cluster[data-visible] .helper-burst i {
+.helper-buddy-cluster[data-visible] .helper-burst i {
   animation: helper-spark 0.85s cubic-bezier(0.2, 0.7, 0.4, 1) forwards;
 }
 .helper-burst i:nth-child(1) {
@@ -1013,8 +1013,23 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .helper-badge[data-kind='approval'] {
-    animation: none;
+  .helper-buddy-cluster,
+  .helper,
+  .helper-bob,
+  .helper-svg,
+  .helper-more-chip,
+  .helper-buddy-card,
+  .helper-buddy-card-stop {
+    transition-duration: 1ms;
+    transition-delay: 0ms;
+  }
+  .helper-bob,
+  .helper-burst i,
+  .helper-badge,
+  .helper-more-chip,
+  .helper-buddy-card,
+  .helper-buddy-card-dots span {
+    animation: none !important;
   }
 }
 
@@ -1040,8 +1055,8 @@
   transform: scale(1.2);
 }
 
-/* the agent card: caption-bubble visual language, a touch richer */
-.agent-card {
+/* the helper buddy card: caption-bubble visual language, a touch richer */
+.helper-buddy-card {
   position: absolute;
   background: var(--ink);
   color: var(--text);
@@ -1058,26 +1073,26 @@
   max-height: 232px;
   overflow: hidden;
 }
-.agent-card-head {
+.helper-buddy-card-head {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-bottom: 5px;
 }
-.agent-card-dot {
+.helper-buddy-card-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   flex: none;
   box-shadow: 0 0 6px rgba(255, 255, 255, 0.15);
 }
-.agent-card-name {
+.helper-buddy-card-name {
   flex: 1;
   font-size: 10.5px;
   letter-spacing: 0.6px;
   color: rgba(243, 244, 246, 0.5);
 }
-.agent-card-pill {
+.helper-buddy-card-pill {
   flex: none;
   font-size: 10.5px;
   font-weight: 600;
@@ -1085,57 +1100,57 @@
   border-radius: 999px;
   border: 1px solid transparent;
 }
-.agent-card-pill[data-kind='working'] {
+.helper-buddy-card-pill[data-kind='working'] {
   color: #a5d0ff;
   background: rgba(76, 141, 255, 0.16);
   border-color: rgba(76, 141, 255, 0.35);
 }
-.agent-card-pill[data-kind='waiting'] {
+.helper-buddy-card-pill[data-kind='waiting'] {
   color: rgba(243, 244, 246, 0.65);
   background: rgba(148, 163, 184, 0.14);
   border-color: rgba(148, 163, 184, 0.3);
 }
-.agent-card-pill[data-kind='done'] {
+.helper-buddy-card-pill[data-kind='done'] {
   color: #9ff0bb;
   background: rgba(34, 197, 94, 0.15);
   border-color: rgba(34, 197, 94, 0.35);
 }
-.agent-card-pill[data-kind='trouble'] {
+.helper-buddy-card-pill[data-kind='trouble'] {
   color: #ffd48f;
   background: rgba(245, 158, 11, 0.14);
   border-color: rgba(245, 158, 11, 0.35);
 }
-.agent-card-pill[data-kind='approval'] {
+.helper-buddy-card-pill[data-kind='approval'] {
   color: #ffd48f;
   background: rgba(245, 158, 11, 0.18);
   border-color: rgba(245, 158, 11, 0.45);
 }
-.agent-card-task {
+.helper-buddy-card-task {
   font-size: 13px;
   font-weight: 600;
   color: #ffffff;
   margin-bottom: 5px;
 }
-.agent-card-line {
+.helper-buddy-card-line {
   color: rgba(243, 244, 246, 0.85);
 }
-.agent-card-meta {
+.helper-buddy-card-meta {
   margin-top: 5px;
   font-size: 11.5px;
   color: rgba(243, 244, 246, 0.55);
 }
-.agent-card-actions {
+.helper-buddy-card-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-top: 7px;
 }
-.agent-card-cta {
+.helper-buddy-card-cta {
   flex: 1;
   font-size: 11px;
   color: rgba(243, 244, 246, 0.45);
 }
-.agent-card-stop {
+.helper-buddy-card-stop {
   flex: none;
   font-size: 11px;
   font-weight: 600;
@@ -1147,41 +1162,41 @@
     color 0.15s ease,
     border-color 0.15s ease;
 }
-.agent-card-stop:hover {
+.helper-buddy-card-stop:hover {
   color: #fda4af;
   border-color: rgba(244, 63, 94, 0.5);
 }
 
 /* M22: click-to-expand full status. Taller + scrollable; height stays under
-   the merged-region cap (REGION_CAP math in agents-ui.ts). */
-.agent-card[data-expanded] {
+   the merged-region cap (REGION_CAP math in helper-buddies-ui.ts). */
+.helper-buddy-card[data-expanded] {
   max-height: 340px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
-.agent-card::-webkit-scrollbar {
+.helper-buddy-card::-webkit-scrollbar {
   width: 8px;
 }
-.agent-card::-webkit-scrollbar-thumb {
+.helper-buddy-card::-webkit-scrollbar-thumb {
   background: rgba(148, 163, 184, 0.35);
   border-radius: 999px;
 }
-.agent-card::-webkit-scrollbar-track {
+.helper-buddy-card::-webkit-scrollbar-track {
   background: transparent;
 }
-.agent-card-section {
+.helper-buddy-card-section {
   margin-top: 8px;
   font-size: 10.5px;
   letter-spacing: 0.6px;
   color: rgba(243, 244, 246, 0.5);
 }
-.agent-step {
+.helper-buddy-step {
   display: flex;
   align-items: baseline;
   gap: 8px;
   margin-top: 3px;
 }
-.agent-step-label {
+.helper-buddy-step-label {
   flex: 1;
   min-width: 0;
   color: rgba(243, 244, 246, 0.82);
@@ -1189,56 +1204,56 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.agent-step-time {
+.helper-buddy-step-time {
   flex: none;
   font-size: 10.5px;
   color: rgba(243, 244, 246, 0.45);
 }
-.agent-card-findings {
+.helper-buddy-card-findings {
   margin-top: 3px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: rgba(243, 244, 246, 0.85);
 }
-.agent-card-hosts {
+.helper-buddy-card-hosts {
   margin-top: 3px;
   overflow-wrap: anywhere;
   color: rgba(243, 244, 246, 0.7);
 }
 
 /* working ellipsis inside the card line (reuses the think-dot rhythm) */
-.agent-card-dots {
+.helper-buddy-card-dots {
   display: inline-flex;
   gap: 3px;
   margin-right: 7px;
   vertical-align: 1px;
 }
-.agent-card-dots span {
+.helper-buddy-card-dots span {
   width: 4px;
   height: 4px;
   border-radius: 50%;
   background: #cfe3ff;
   animation: think-dot 1.25s ease-in-out infinite;
 }
-.agent-card-dots span:nth-child(2) {
+.helper-buddy-card-dots span:nth-child(2) {
   animation-delay: 0.16s;
 }
-.agent-card-dots span:nth-child(3) {
+.helper-buddy-card-dots span:nth-child(3) {
   animation-delay: 0.32s;
 }
 
 /* one row on the "+N" overflow card */
-.agent-row {
+.helper-buddy-row {
   display: flex;
   align-items: center;
   gap: 7px;
   padding: 4.5px 0;
   border-top: 1px solid rgba(148, 163, 184, 0.12);
 }
-.agent-row:first-of-type {
+.helper-buddy-row:first-of-type {
   border-top: none;
 }
-.agent-row-task {
+.helper-buddy-row-task {
   flex: 1;
   min-width: 0;
   white-space: nowrap;

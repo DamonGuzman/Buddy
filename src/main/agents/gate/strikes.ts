@@ -26,17 +26,17 @@ const DEFAULT_THRESHOLDS: DenialStrikeThresholds = {
   sameTargetEscalate: 3,
   totalHalt: 5,
 };
-const MAX_AGENT_ID_LENGTH = 200;
+const MAX_HELPER_BUDDY_ID_LENGTH = 200;
 const MAX_TARGET_KEY_LENGTH = 1_000;
 
-interface AgentStrikes {
+interface HelperBuddyStrikes {
   total: number;
   targets: Map<string, number>;
 }
 
 /** Run-local denial accounting. One instance may safely serve multiple buddies. */
 export class DenialStrikeCounter {
-  private readonly agents = new Map<string, AgentStrikes>();
+  private readonly helperBuddies = new Map<string, HelperBuddyStrikes>();
   private readonly thresholds: DenialStrikeThresholds;
 
   constructor(thresholds: Partial<DenialStrikeThresholds> = {}) {
@@ -45,20 +45,21 @@ export class DenialStrikeCounter {
     assertPositiveInteger(this.thresholds.totalHalt, 'totalHalt');
   }
 
-  recordDenial(agentId: string, target: ActionSignature | string): DenialStrikeResult {
-    const id = agentId.trim();
-    if (!id) throw new Error('agent id is required');
-    if (id.length > MAX_AGENT_ID_LENGTH) throw new Error('agent id exceeds the size limit');
+  recordDenial(helperBuddyId: string, target: ActionSignature | string): DenialStrikeResult {
+    const id = helperBuddyId.trim();
+    if (!id) throw new Error('helper buddy id is required');
+    if (id.length > MAX_HELPER_BUDDY_ID_LENGTH)
+      throw new Error('helper buddy id exceeds the size limit');
     const key = typeof target === 'string' ? target.trim() : signatureKey(target);
     if (!key) throw new Error('denial target signature is required');
     if (key.length > MAX_TARGET_KEY_LENGTH)
       throw new Error('denial target signature exceeds the size limit');
 
-    const state = this.agents.get(id) ?? { total: 0, targets: new Map<string, number>() };
+    const state = this.helperBuddies.get(id) ?? { total: 0, targets: new Map<string, number>() };
     state.total += 1;
     const targetCount = (state.targets.get(key) ?? 0) + 1;
     state.targets.set(key, targetCount);
-    this.agents.set(id, state);
+    this.helperBuddies.set(id, state);
 
     const decision: DenialDecision =
       state.total >= this.thresholds.totalHalt
@@ -69,18 +70,18 @@ export class DenialStrikeCounter {
     return { decision, targetCount, totalCount: state.total };
   }
 
-  snapshot(agentId: string): DenialStrikeSnapshot {
-    const state = this.agents.get(agentId.trim());
+  snapshot(helperBuddyId: string): DenialStrikeSnapshot {
+    const state = this.helperBuddies.get(helperBuddyId.trim());
     if (!state) return { totalCount: 0, targets: {} };
     return { totalCount: state.total, targets: Object.fromEntries(state.targets) };
   }
 
-  resetAgent(agentId: string): void {
-    this.agents.delete(agentId.trim());
+  resetHelperBuddy(helperBuddyId: string): void {
+    this.helperBuddies.delete(helperBuddyId.trim());
   }
 
   clear(): void {
-    this.agents.clear();
+    this.helperBuddies.clear();
   }
 }
 

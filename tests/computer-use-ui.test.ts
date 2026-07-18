@@ -28,7 +28,7 @@ function grant(patch: Partial<ApprovalGrant>): ApprovalGrant {
 
 function approvalRequest(patch: Partial<ApprovalRequest> = {}): ApprovalRequest {
   return {
-    agentId: 'buddy',
+    helperBuddyId: 'helper-buddy',
     approvalId: 'approval',
     kind: 'browser-action',
     userRequest: 'submit the requested issue',
@@ -53,8 +53,10 @@ describe('computer-use approval presentation', () => {
     latch.arm(first, 'once');
 
     expect(latch.consume(replacement, 'once')).toBe(false);
-    expect(isExactApproval(replacement, first.agentId, first.approvalId)).toBe(false);
-    expect(isExactApproval(replacement, replacement.agentId, replacement.approvalId)).toBe(true);
+    expect(isExactApproval(replacement, first.helperBuddyId, first.approvalId)).toBe(false);
+    expect(isExactApproval(replacement, replacement.helperBuddyId, replacement.approvalId)).toBe(
+      true,
+    );
   });
 
   it('consumes one explicit current interaction exactly once', () => {
@@ -88,7 +90,7 @@ describe('computer-use approval presentation', () => {
     const png =
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
     const base: ApprovalRequest = {
-      agentId: 'buddy',
+      helperBuddyId: 'helper-buddy',
       approvalId: 'preview-check',
       kind: 'browser-action',
       userRequest: 'submit the issue',
@@ -130,7 +132,7 @@ describe('computer-use approval presentation', () => {
   it('removes approvals by immutable approval id, not buddy id', () => {
     const requests: ApprovalRequest[] = [
       {
-        agentId: 'same-buddy',
+        helperBuddyId: 'same-helper-buddy',
         approvalId: 'approval-1',
         kind: 'browser-action',
         userRequest: 'file the two requested issues',
@@ -144,7 +146,7 @@ describe('computer-use approval presentation', () => {
         payloadDigest: [],
       },
       {
-        agentId: 'same-buddy',
+        helperBuddyId: 'same-helper-buddy',
         approvalId: 'approval-2',
         kind: 'browser-action',
         userRequest: 'file the two requested issues',
@@ -166,7 +168,7 @@ describe('computer-use approval presentation', () => {
 
   it('explains per-run browser access without implying a standing grant', () => {
     const request: ApprovalRequest = {
-      agentId: 'buddy',
+      helperBuddyId: 'helper-buddy',
       approvalId: 'capability',
       kind: 'browser-capability',
       userRequest: 'use the buddy browser to file my issue',
@@ -180,15 +182,16 @@ describe('computer-use approval presentation', () => {
       payloadDigest: [],
     };
     expect(approvalPresentation(request)).toEqual({
-      title: 'a helper wants to use its browser',
-      intro: 'this grants browser use for this helper run only. check the task before continuing.',
+      title: 'a helper buddy wants to use its browser',
+      intro:
+        'this grants browser use for this helper-buddy run only. check the task before continuing.',
       approveLabel: 'allow this run',
     });
   });
 
   it('fails closed when the gate does not provide a non-empty standing scope', () => {
     const base: ApprovalRequest = {
-      agentId: 'buddy',
+      helperBuddyId: 'helper-buddy',
       approvalId: 'action',
       kind: 'browser-action',
       userRequest: 'create the requested linear issue',

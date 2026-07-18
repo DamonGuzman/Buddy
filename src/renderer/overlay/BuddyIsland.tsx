@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { AgentSummary, AssistantState, OverlayDisplaySurface } from '../../shared/types';
+import type { HelperBuddySummary, AssistantState, OverlayDisplaySurface } from '../../shared/types';
 import { resolveIslandActivity } from './island-state';
 
 const RESULT_REVEAL_MS = 4500;
@@ -9,13 +9,13 @@ interface BuddyIslandProps {
   surface: OverlayDisplaySurface;
   assistantState: AssistantState;
   capturing: boolean;
-  agents: AgentSummary[];
+  helperBuddies: HelperBuddySummary[];
   visible: boolean;
 }
 
 /** A visual-only status surface; the hosting BrowserWindow remains click-through. */
 export function BuddyIsland(props: BuddyIslandProps): React.JSX.Element | null {
-  const unseenCount = props.agents.filter((agent) => agent.unseen).length;
+  const unseenCount = props.helperBuddies.filter((helperBuddy) => helperBuddy.unseen).length;
   const previousUnseen = useRef(unseenCount);
   const [revealNewResult, setRevealNewResult] = useState(false);
 
@@ -35,10 +35,10 @@ export function BuddyIsland(props: BuddyIslandProps): React.JSX.Element | null {
       resolveIslandActivity({
         assistantState: props.assistantState,
         capturing: props.capturing,
-        agents: props.agents,
+        helperBuddies: props.helperBuddies,
         revealNewResult,
       }),
-    [props.assistantState, props.capturing, props.agents, revealNewResult],
+    [props.assistantState, props.capturing, props.helperBuddies, revealNewResult],
   );
 
   if (props.surface.kind === 'off') return null;

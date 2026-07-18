@@ -29,7 +29,7 @@ const BINARY_STRING_MIN_CHARS = 1_024;
 export type ModelTransport =
   | 'openai-realtime-websocket'
   | 'chatgpt-codex-responses'
-  | 'chatgpt-codex-agent'
+  | 'chatgpt-codex-helper-buddy'
   | 'chatgpt-codex-grounding'
   | 'openai-responses-grounding';
 

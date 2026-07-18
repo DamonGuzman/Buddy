@@ -136,7 +136,7 @@ export function placementFor(pos: Vec): Placement {
 }
 
 // ---------------------------------------------------------------------------
-// M19 agent helpers: auxiliary hover geometry (helper sprites + agent card)
+// M19 helper buddies: auxiliary hover geometry (helper sprites + card)
 // ---------------------------------------------------------------------------
 
 /** Padding beyond aux targets / the card for the interactive region. */
@@ -148,8 +148,8 @@ export const AUX_PAD = 10;
 export const REGION_CAP = 398;
 
 /**
- * Hoverable geometry beyond the buddy footprint: the agent helper sprites
- * (small circles) and, while one is hovered, the open agent card (a rect).
+ * Hoverable geometry beyond the buddy footprint: the helper-buddy sprites
+ * (small circles) and, while one is hovered, the open helper card (a rect).
  * All coordinates window-local DIP, like the buddy.
  */
 export interface AuxHoverGeometry {
@@ -157,7 +157,7 @@ export interface AuxHoverGeometry {
   targets: Vec[];
   /** Hover radius around each target. */
   targetRadius: number;
-  /** Bounds of the open agent card, or null when no card is showing. */
+  /** Bounds of the open helper-buddy card, or null when no card is showing. */
   rect: Rect | null;
 }
 
@@ -282,8 +282,8 @@ export interface HintTextInput {
   captionShowing: boolean;
   /** Dwell armed: the overlay is currently interactive (click would work). */
   interactive: boolean;
-  /** M19: the cursor is on an agent helper / its card — the card IS the hint. */
-  agentHover?: boolean;
+  /** M19: the cursor is on a helper buddy or its card — the card IS the hint. */
+  helperBuddyHover?: boolean;
 }
 
 /**
@@ -291,7 +291,7 @@ export interface HintTextInput {
  * speaking must not be distracted from; an error caption is never replaced).
  */
 export function hintText(input: HintTextInput): { text: string; sub?: string } | null {
-  if (input.agentHover === true) return null;
+  if (input.helperBuddyHover === true) return null;
   if (input.captionShowing) return null;
   if (input.state !== 'idle') return null;
   const hk = input.hotkeyLabel.toLowerCase();
@@ -349,7 +349,7 @@ export class HoverMachine {
   private enabled = true;
   private cursor: Vec | null = null;
   private buddy: Vec = { x: 0, y: 0 };
-  /** M19: agent-helper geometry (sprites + open card), null when no agents. */
+  /** M19: helper-buddy geometry (sprites + open card), null when none exist. */
   private aux: AuxHoverGeometry | null = null;
   /** Aux changed since the last step: emit one region refresh if interactive. */
   private auxDirty = false;
@@ -404,7 +404,7 @@ export class HoverMachine {
   }
 
   /**
-   * M19: update the agent-helper hover geometry (sprite centers + open card
+   * M19: update the helper-buddy hover geometry (sprite centers + open card
    * rect). Hovering any of it counts as the 'hover' zone, and the interactive
    * region grows to cover it (mergedRegion). While interactive, a geometry
    * change emits one requestInteractive so main refreshes its exit-poll

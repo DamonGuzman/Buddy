@@ -9,7 +9,7 @@ import type {
   BuddyBrowserIpcController,
   BuddyBrowserWindowService,
 } from '../windows/buddy-browser';
-import { AgentApprovalCoordinator } from './approvals';
+import { HelperBuddyApprovalCoordinator } from './approvals';
 import { ActionGate, type ActionGateJournalPort, type GateDriverPort } from './gate/action-gate';
 import {
   ApprovalFollowThroughTracker,
@@ -18,10 +18,10 @@ import {
 } from './gate/grants';
 import { CodexActionReviewer, type ActionReviewer } from './gate/reviewer';
 import type {
-  AgentActionGatePort,
-  AgentApprovalPort,
-  AgentApprovalResolution,
-  AgentBrowserDeps,
+  HelperBuddyActionGatePort,
+  HelperBuddyApprovalPort,
+  HelperBuddyApprovalResolution,
+  HelperBuddyBrowserDeps,
 } from './types';
 
 const GRANTS_FILE = 'approval-grants.json';
@@ -50,8 +50,8 @@ export interface ComputerUseRuntimeOptions {
     profile: BuddyBrowserProfile,
     callbacks: {
       onEnrollmentClosed?: () => void | Promise<void>;
-      onTakeoverDone(agentId: string, approvalId: string): void | Promise<void>;
-      onTakeoverClosed(agentId: string, approvalId: string): void | Promise<void>;
+      onTakeoverDone(helperBuddyId: string, approvalId: string): void | Promise<void>;
+      onTakeoverClosed(helperBuddyId: string, approvalId: string): void | Promise<void>;
       onBackgroundError(error: Error): void;
     },
   ): BuddyBrowserWindowService | Promise<BuddyBrowserWindowService>;
@@ -68,19 +68,19 @@ interface RuntimeState {
 }
 
 interface ApprovalBinding {
-  agentId: string;
+  helperBuddyId: string;
   release: () => Promise<void>;
   releasing: Promise<void> | null;
 }
 
 export interface ComputerUseController {
   resolveApproval(
-    agentId: string,
+    helperBuddyId: string,
     approvalId: string,
     verdict: 'once' | 'always' | 'deny',
   ): Promise<void>;
-  showApprovalWindow(agentId: string, approvalId: string): Promise<void>;
-  hideApprovalWindow(agentId: string, approvalId: string): Promise<void>;
+  showApprovalWindow(helperBuddyId: string, approvalId: string): Promise<void>;
+  hideApprovalWindow(helperBuddyId: string, approvalId: string): Promise<void>;
   listApprovals(): ApprovalRequest[];
   listGrants(): Promise<ApprovalGrant[]>;
   revokeGrant(id: string): Promise<void>;
@@ -95,16 +95,16 @@ export interface ComputerUseController {
  *
  * Construction is Electron-free. The first operation awaits app readiness,
  * then creates one persistent profile, grant store, gate, and visible-window
- * service. Browser-enabled AgentManager runs receive `browser`; foreground
+ * service. Browser-enabled HelperBuddyManager runs receive `browser`; foreground
  * ComputerUseRunner receives the same `gate` and `approvals` ports.
  */
 export class ComputerUseRuntime {
-  readonly browser: AgentBrowserDeps;
-  readonly gate: AgentActionGatePort;
-  readonly approvals: AgentApprovalPort;
+  readonly browser: HelperBuddyBrowserDeps;
+  readonly gate: HelperBuddyActionGatePort;
+  readonly approvals: HelperBuddyApprovalPort;
   readonly controller: ComputerUseController;
 
-  private readonly coordinator: AgentApprovalCoordinator;
+  private readonly coordinator: HelperBuddyApprovalCoordinator;
   private readonly approvalBindings = new Map<string, ApprovalBinding>();
   private readonly drivers = new Map<string, ComputerDriver>();
   private state: RuntimeState | null = null;
@@ -114,7 +114,7 @@ export class ComputerUseRuntime {
   private lifecycleEpoch = 0;
 
   constructor(private readonly options: ComputerUseRuntimeOptions) {
-    this.coordinator = new AgentApprovalCoordinator({
+    this.coordinator = new HelperBuddyApprovalCoordinator({
       onChanged: (requests) => options.onApprovalsChanged(requests),
     });
 
@@ -122,14 +122,16 @@ export class ComputerUseRuntime {
       execute: (input, dispatch) => this.withState((state) => state.gate.execute(input, dispatch)),
       resolveEscalation: (approvalId, verdict) =>
         this.withState((state) => state.gate.resolveEscalation(approvalId, verdict)),
-      cancelAgent: (agentId) => this.state?.gate.cancelAgent(agentId),
+      cancelHelperBuddy: (helperBuddyId) => this.state?.gate.cancelHelperBuddy(helperBuddyId),
     };
 
     this.approvals = {
       request: (request, signal) => this.requestApproval(request, signal),
-      cancelAgent: (agentId) => {
-        this.coordinator.cancelAgent(agentId);
-        void this.releaseAgentApprovals(agentId).catch((error: unknown) => this.report(error));
+      cancelHelperBuddy: (helperBuddyId) => {
+        this.coordinator.cancelHelperBuddy(helperBuddyId);
+        void this.releaseHelperBuddyApprovals(helperBuddyId).catch((error: unknown) =>
+          this.report(error),
+        );
       },
       get: (approvalId) => this.coordinator.get(approvalId),
       resolve: (approvalId, verdict) => {
@@ -145,20 +147,20 @@ export class ComputerUseRuntime {
     };
 
     this.browser = {
-      createDriver: (agentId) => this.createDriver(agentId),
+      createDriver: (helperBuddyId) => this.createDriver(helperBuddyId),
       gate: this.gate,
       approvals: this.approvals,
     };
 
     this.controller = {
-      resolveApproval: (agentId, approvalId, verdict) =>
+      resolveApproval: (helperBuddyId, approvalId, verdict) =>
         this.withState((state) =>
-          this.resolveThroughController(state, agentId, approvalId, verdict),
+          this.resolveThroughController(state, helperBuddyId, approvalId, verdict),
         ),
-      showApprovalWindow: (agentId, approvalId) =>
-        this.withState((state) => state.ipc.showApprovalWindow(agentId, approvalId)),
-      hideApprovalWindow: (agentId, approvalId) =>
-        this.withState((state) => state.ipc.hideApprovalWindow(agentId, approvalId)),
+      showApprovalWindow: (helperBuddyId, approvalId) =>
+        this.withState((state) => state.ipc.showApprovalWindow(helperBuddyId, approvalId)),
+      hideApprovalWindow: (helperBuddyId, approvalId) =>
+        this.withState((state) => state.ipc.hideApprovalWindow(helperBuddyId, approvalId)),
       listApprovals: () => this.coordinator.list(),
       listGrants: () => this.withState((state) => state.ipc.listGrants()),
       revokeGrant: (id) => this.withState((state) => state.ipc.revokeGrant(id)),
@@ -170,20 +172,20 @@ export class ComputerUseRuntime {
   }
 
   /** Cancel one run's queue, gate capability, follow-through, and browser surface. */
-  async cancelAgent(agentId: string): Promise<void> {
-    this.coordinator.cancelAgent(agentId);
+  async cancelHelperBuddy(helperBuddyId: string): Promise<void> {
+    this.coordinator.cancelHelperBuddy(helperBuddyId);
     const state = this.state;
-    state?.gate.cancelAgent(agentId);
-    state?.followThrough.deactivate(agentId);
-    const driver = this.drivers.get(agentId);
+    state?.gate.cancelHelperBuddy(helperBuddyId);
+    state?.followThrough.deactivate(helperBuddyId);
+    const driver = this.drivers.get(helperBuddyId);
     const releases = [...this.approvalBindings.entries()]
-      .filter(([, binding]) => binding.agentId === agentId)
+      .filter(([, binding]) => binding.helperBuddyId === helperBuddyId)
       .map(([approvalId, binding]) => this.releaseApproval(approvalId, binding));
     await Promise.all([...(driver ? [driver.dispose()] : []), ...releases]);
   }
 
   async cancelAll(): Promise<void> {
-    await this.cancelAllBrowserAgents();
+    await this.cancelAllBrowserHelpers();
     this.coordinator.cancelAll();
     this.state?.followThrough.clear();
   }
@@ -193,11 +195,13 @@ export class ComputerUseRuntime {
     if (this.disposed) return;
     const epoch = (this.lifecycleEpoch += 1);
     this.suspended = true;
-    const agentIds = new Set([
+    const helperBuddyIds = new Set([
       ...this.drivers.keys(),
-      ...this.coordinator.list().map((request) => request.agentId),
+      ...this.coordinator.list().map((request) => request.helperBuddyId),
     ]);
-    await Promise.all([...agentIds].map((agentId) => this.cancelAgent(agentId)));
+    await Promise.all(
+      [...helperBuddyIds].map((helperBuddyId) => this.cancelHelperBuddy(helperBuddyId)),
+    );
     if (this.disposed || epoch !== this.lifecycleEpoch || !this.suspended) return;
     this.coordinator.cancelAll();
     await this.releaseAllApprovals();
@@ -249,11 +253,11 @@ export class ComputerUseRuntime {
     }
   }
 
-  private async createDriver(agentId: string): Promise<ComputerDriver & GateDriverPort> {
-    assertId(agentId, 'agent');
+  private async createDriver(helperBuddyId: string): Promise<ComputerDriver & GateDriverPort> {
+    assertId(helperBuddyId, 'helper buddy');
     if (this.suspended) throw new Error('computer-use runtime is suspended');
-    if (this.drivers.has(agentId)) {
-      throw new Error(`computer-use driver already exists for agent: ${agentId}`);
+    if (this.drivers.has(helperBuddyId)) {
+      throw new Error(`computer-use driver already exists for helper buddy: ${helperBuddyId}`);
     }
     const state = await this.ensureState();
     if (this.suspended) throw new Error('computer-use runtime is suspended');
@@ -262,7 +266,7 @@ export class ComputerUseRuntime {
       : await defaultOffscreenDriver(state.profile);
     let registered: OffscreenBrowserDriver;
     try {
-      registered = state.windows.registerOffscreenDriver(agentId, raw);
+      registered = state.windows.registerOffscreenDriver(helperBuddyId, raw);
     } catch (error) {
       await raw.dispose();
       throw error;
@@ -273,26 +277,26 @@ export class ComputerUseRuntime {
         if (property === 'dispose') {
           return async (): Promise<void> => {
             await target.dispose();
-            if (driverRegistry.get(agentId) === managed) driverRegistry.delete(agentId);
+            if (driverRegistry.get(helperBuddyId) === managed) driverRegistry.delete(helperBuddyId);
           };
         }
         const value: unknown = Reflect.get(target, property, target);
         return typeof value === 'function' ? value.bind(target) : value;
       },
     }) as OffscreenBrowserDriver;
-    this.drivers.set(agentId, managed);
+    this.drivers.set(helperBuddyId, managed);
     return managed;
   }
 
   private async requestApproval(
     request: ApprovalRequest,
     signal: AbortSignal,
-  ): Promise<AgentApprovalResolution> {
+  ): Promise<HelperBuddyApprovalResolution> {
     const state = await this.ensureState();
     let binding: ApprovalBinding | null = null;
     if (request.allowTakeover) {
-      const release = state.windows.bindApproval(request.agentId, request.approvalId);
-      binding = { agentId: request.agentId, release, releasing: null };
+      const release = state.windows.bindApproval(request.helperBuddyId, request.approvalId);
+      binding = { helperBuddyId: request.helperBuddyId, release, releasing: null };
       this.approvalBindings.set(request.approvalId, binding);
     }
     try {
@@ -304,9 +308,9 @@ export class ComputerUseRuntime {
   }
 
   private wrapResolution(
-    resolution: AgentApprovalResolution,
+    resolution: HelperBuddyApprovalResolution,
     request: ApprovalRequest,
-  ): AgentApprovalResolution {
+  ): HelperBuddyApprovalResolution {
     return {
       verdict: resolution.verdict,
       acknowledge: () => resolution.acknowledge(),
@@ -316,18 +320,18 @@ export class ComputerUseRuntime {
   }
 
   private async replaceApprovalResolution(
-    resolution: AgentApprovalResolution,
+    resolution: HelperBuddyApprovalResolution,
     current: ApprovalRequest,
     next: ApprovalRequest,
-  ): Promise<AgentApprovalResolution> {
-    if (next.agentId !== current.agentId) {
-      throw new Error('replacement approval must belong to the same agent');
+  ): Promise<HelperBuddyApprovalResolution> {
+    if (next.helperBuddyId !== current.helperBuddyId) {
+      throw new Error('replacement approval must belong to the same helper buddy');
     }
     const state = await this.ensureState();
     let binding: ApprovalBinding | null = null;
     if (next.allowTakeover) {
-      const release = state.windows.bindApproval(next.agentId, next.approvalId);
-      binding = { agentId: next.agentId, release, releasing: null };
+      const release = state.windows.bindApproval(next.helperBuddyId, next.approvalId);
+      binding = { helperBuddyId: next.helperBuddyId, release, releasing: null };
       this.approvalBindings.set(next.approvalId, binding);
     }
     try {
@@ -340,11 +344,11 @@ export class ComputerUseRuntime {
   }
 
   private async deliverApproval(
-    agentId: string,
+    helperBuddyId: string,
     approvalId: string,
     verdict: 'once' | 'always' | 'deny',
   ): Promise<void> {
-    const request = this.requireApproval(agentId, approvalId);
+    const request = this.requireApproval(helperBuddyId, approvalId);
     if (verdict === 'always' && !request.allowAlways) {
       throw new Error('approval does not allow a standing grant');
     }
@@ -367,34 +371,34 @@ export class ComputerUseRuntime {
 
   private async resolveThroughController(
     state: RuntimeState,
-    agentId: string,
+    helperBuddyId: string,
     approvalId: string,
     verdict: 'once' | 'always' | 'deny',
   ): Promise<void> {
     assertApprovalVerdict(verdict);
-    const request = this.requireApproval(agentId, approvalId);
+    const request = this.requireApproval(helperBuddyId, approvalId);
     if (!request.allowTakeover) {
-      await this.deliverApproval(agentId, approvalId, verdict);
+      await this.deliverApproval(helperBuddyId, approvalId, verdict);
       return;
     }
-    await state.ipc.resolveApproval(agentId, approvalId, verdict);
+    await state.ipc.resolveApproval(helperBuddyId, approvalId, verdict);
     const binding = this.approvalBindings.get(approvalId);
     if (binding) await this.releaseApproval(approvalId, binding);
   }
 
-  private async handleTakeoverDone(agentId: string, approvalId: string): Promise<void> {
-    const request = this.requireApproval(agentId, approvalId);
+  private async handleTakeoverDone(helperBuddyId: string, approvalId: string): Promise<void> {
+    const request = this.requireApproval(helperBuddyId, approvalId);
     await this.options.onTakeoverWindowHidden?.(request);
     await this.coordinator.resolve(approvalId, 'handled');
     const binding = this.approvalBindings.get(approvalId);
     if (binding) await this.releaseApproval(approvalId, binding);
   }
 
-  private requireApproval(agentId: string, approvalId: string): ApprovalRequest {
-    assertId(agentId, 'agent');
+  private requireApproval(helperBuddyId: string, approvalId: string): ApprovalRequest {
+    assertId(helperBuddyId, 'helper buddy');
     assertId(approvalId, 'approval');
     const request = this.coordinator.get(approvalId);
-    if (!request || request.agentId !== agentId) {
+    if (!request || request.helperBuddyId !== helperBuddyId) {
       throw new Error(`stale or mismatched computer-use approval: ${approvalId}`);
     }
     return request;
@@ -413,24 +417,24 @@ export class ComputerUseRuntime {
   private async signOutSite(state: RuntimeState, domain: string): Promise<void> {
     // Conservatively stop every browser run. Shared cookies mean another page
     // can hold or rewrite credentials for the domain being cleared.
-    await this.cancelAllBrowserAgents();
+    await this.cancelAllBrowserHelpers();
     await state.ipc.signOutSite(domain);
   }
 
   private async clearAll(state: RuntimeState): Promise<void> {
-    await this.cancelAllBrowserAgents();
+    await this.cancelAllBrowserHelpers();
     this.coordinator.cancelAll();
     await state.ipc.clearAll();
     state.followThrough.clear();
     state.grants.clear();
   }
 
-  private async cancelAllBrowserAgents(): Promise<void> {
+  private async cancelAllBrowserHelpers(): Promise<void> {
     const ids = new Set([
       ...this.drivers.keys(),
-      ...this.coordinator.list().map((request) => request.agentId),
+      ...this.coordinator.list().map((request) => request.helperBuddyId),
     ]);
-    await Promise.all([...ids].map((agentId) => this.cancelAgent(agentId)));
+    await Promise.all([...ids].map((helperBuddyId) => this.cancelHelperBuddy(helperBuddyId)));
   }
 
   private async releaseAllApprovals(): Promise<void> {
@@ -441,10 +445,10 @@ export class ComputerUseRuntime {
     );
   }
 
-  private async releaseAgentApprovals(agentId: string): Promise<void> {
+  private async releaseHelperBuddyApprovals(helperBuddyId: string): Promise<void> {
     await Promise.all(
       [...this.approvalBindings.entries()]
-        .filter(([, binding]) => binding.agentId === agentId)
+        .filter(([, binding]) => binding.helperBuddyId === helperBuddyId)
         .map(([approvalId, binding]) => this.releaseApproval(approvalId, binding)),
     );
   }
@@ -511,10 +515,10 @@ export class ComputerUseRuntime {
         ...(this.options.onEnrollmentClosed
           ? { onEnrollmentClosed: this.options.onEnrollmentClosed }
           : {}),
-        onTakeoverDone: (agentId: string, approvalId: string) =>
-          this.handleTakeoverDone(agentId, approvalId),
-        onTakeoverClosed: (agentId: string, approvalId: string) =>
-          this.handleTakeoverDone(agentId, approvalId).catch((error: unknown) => {
+        onTakeoverDone: (helperBuddyId: string, approvalId: string) =>
+          this.handleTakeoverDone(helperBuddyId, approvalId),
+        onTakeoverClosed: (helperBuddyId: string, approvalId: string) =>
+          this.handleTakeoverDone(helperBuddyId, approvalId).catch((error: unknown) => {
             this.report(error);
           }),
         onBackgroundError: (error: Error) => this.report(error),
@@ -523,8 +527,8 @@ export class ComputerUseRuntime {
         ? await this.options.createWindowService(profile, callbacks)
         : await defaultWindowService(profile, callbacks);
       const operations: ApprovalOperations = {
-        resolve: (agentId, approvalId, verdict) =>
-          this.deliverApproval(agentId, approvalId, verdict),
+        resolve: (helperBuddyId, approvalId, verdict) =>
+          this.deliverApproval(helperBuddyId, approvalId, verdict),
         listApprovals: () => this.coordinator.list(),
         listGrants: () => grants.list(),
         revokeGrant: (id) => {
@@ -584,8 +588,8 @@ async function defaultWindowService(
   profile: BuddyBrowserProfile,
   callbacks: {
     onEnrollmentClosed?: () => void | Promise<void>;
-    onTakeoverDone(agentId: string, approvalId: string): void | Promise<void>;
-    onTakeoverClosed(agentId: string, approvalId: string): void | Promise<void>;
+    onTakeoverDone(helperBuddyId: string, approvalId: string): void | Promise<void>;
+    onTakeoverClosed(helperBuddyId: string, approvalId: string): void | Promise<void>;
     onBackgroundError(error: Error): void;
   },
 ): Promise<BuddyBrowserWindowService> {

@@ -260,7 +260,6 @@ no pointing degradation.
 | ear-not-eye (no lists/URLs/markdown) | 33/33                                   | PASS                                                                                                                                                                                                                                                            |
 | plants-a-seed                        | 33/33 (even the refusals planted seeds) | PASS (≥60%)                                                                                                                                                                                                                                                     |
 | all-lowercase (raw transcript)       | 13/33 (39%)                             | **FAIL as raw text** — but every user-visible surface (overlay caption, panel) enforces lowercase via CSS `text-transform`, and spoken audio carries no case. Classified: uncontrollable ASR-style casing in the audio transcript, already mitigated by design. |
-| "clicky, agent" stub                 | friendly coming-soon line, lowercase    | PASS                                                                                                                                                                                                                                                            |
 
 Verbatim examples:
 
@@ -271,8 +270,8 @@ Verbatim examples:
 > create account. and once you're in, we can try adding a profile picture or explore
 > settings together."
 
-> "haha, i'd love to be an agent for you. background agents are coming soon, but for now,
-> i can still walk you through it together."
+> "on it — i'll keep digging in the background and ping you when it's done. want to keep
+> browsing while i work?"
 
 ### 7.6 Cost + usage (measured via new `TurnTimings.usage` wiring)
 

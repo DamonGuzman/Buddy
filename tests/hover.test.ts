@@ -463,7 +463,7 @@ describe('M19 HoverMachine: aux hover (helper sprites + card)', () => {
     expect(m.isInteractive).toBe(false);
   });
 
-  it('suppresses the hint while hovering an agent helper', () => {
+  it('suppresses the hint while hovering a helper buddy', () => {
     expect(
       hintText({
         state: 'idle',
@@ -472,7 +472,7 @@ describe('M19 HoverMachine: aux hover (helper sprites + card)', () => {
         now: 1_000_000,
         captionShowing: false,
         interactive: false,
-        agentHover: true,
+        helperBuddyHover: true,
       }),
     ).toBeNull();
   });

@@ -1,13 +1,13 @@
 /**
  * Structural ports: the exact slices of the app's concrete services the
  * conversation package touches. The real SettingsStore / OverlayManager /
- * PanelManager / SessionRecorder / AgentManager satisfy these unchanged;
+ * PanelManager / SessionRecorder / HelperBuddyManager satisfy these unchanged;
  * tests construct small honest fakes instead of `as never` casts.
  */
 
 import type { MainToOverlayEvents, MainToPanelEvents } from '../../shared/ipc';
-import type { AgentSummary, PointerCommand, Settings } from '../../shared/types';
-import type { AgentBrief, SpawnResult } from '../agents/types';
+import type { HelperBuddySummary, PointerCommand, Settings } from '../../shared/types';
+import type { HelperBuddyBrief, HelperBuddySpawnResult } from '../agents/types';
 import type { CaptureResult } from '../capture';
 import type { SessionEventMap, SessionEventType } from '../session-recorder';
 
@@ -75,10 +75,10 @@ export interface RecorderPort {
   flush(): void;
 }
 
-/** Background-agent runtime (AgentManager satisfies this). */
-export interface AgentsPort {
+/** Helper-buddy runtime (HelperBuddyManager satisfies this). */
+export interface HelperBuddiesPort {
   isReady(): boolean;
-  list(): AgentSummary[];
-  spawn(brief: AgentBrief): SpawnResult;
+  list(): HelperBuddySummary[];
+  spawn(brief: HelperBuddyBrief): HelperBuddySpawnResult;
   markSpoken(id: string): void;
 }

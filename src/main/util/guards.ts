@@ -1,16 +1,16 @@
 /**
  * Canonical narrowing guards for untrusted JSON — wire events, HTTP bodies,
  * tool-call arguments. One owner for the per-file helpers hand-rolled across
- * main: agents/backend.ts (`recordOf`/`stringOf`/`numberOf`/`messageOf`),
+ * main: agents/helper-buddy-backend.ts (`recordOf`/`stringOf`/`numberOf`/`messageOf`),
  * codex/responses-session.ts (`str`/`asError`), computer/operator.ts
  * (`finiteNumber`), debug-server.ts (`asRecord`).
  *
  * Adoption notes for later waves (semantic deltas to be aware of):
- * - `asRecord` REJECTS arrays (matches debug-server.ts). agents/backend.ts's
+ * - `asRecord` REJECTS arrays (matches debug-server.ts). agents/helper-buddy-backend.ts's
  *   `recordOf` accepted any non-null object, arrays included; for the
  *   Responses wire events it parses, an array is never a valid record, but
  *   verify that before swapping it in.
- * - agents/backend.ts's `numberOf` falls back to 0, not null:
+ * - agents/helper-buddy-backend.ts's `numberOf` falls back to 0, not null:
  *   `numberOf(v)` === `asFiniteNumber(v) ?? 0`.
  * - codex/responses-session.ts's `asError` returns the original Error (stack
  *   preserved) — it is NOT `new Error(errorMessage(err))`; keep it local.

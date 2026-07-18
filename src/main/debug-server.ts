@@ -11,7 +11,7 @@
  *   deps.ts              dependency seams + the RouteHandler contract
  *   routes-overlay.ts    M2   POST /overlay/*
  *   routes-pipeline.ts   M6   /hotkey/*, /ask, /transcript, /playback
- *   routes-agents.ts          /agents*
+ *   routes-helper-buddies.ts          /helper-buddies*
  *   routes-audio-eval.ts M8.5 /timings, /audio/*, /eval/ground-truth
  *   routes-grounding.ts  M9   POST /grounding/query
  *   routes-hover.ts      M15  GET /hover/state
@@ -28,11 +28,11 @@ import type { Server } from 'node:http';
 import { DEBUG_HOST, DEBUG_PORT } from '../shared/constants';
 import type { ApprovalGrant } from '../shared/types';
 import {
-  isMockAgentScenario,
-  markMockAgentTask,
-  MOCK_AGENT_SCENARIOS,
-  type MockAgentScenario,
-} from './agents/mock-backend';
+  isMockHelperBuddyScenario,
+  markMockHelperBuddyTask,
+  MOCK_HELPER_BUDDY_SCENARIOS,
+  type MockHelperBuddyScenario,
+} from './agents/mock-helper-buddy-backend';
 import { debugPortOverride, isDebugEnabled } from './env';
 import {
   checkDebugToken,
@@ -42,8 +42,8 @@ import {
   resolveToken,
 } from './debug/debug-auth';
 import { asRecord, isNonBlankString, readJsonBody, sendJson } from './debug/debug-http';
-import type { AgentDebugDeps, DebugServerDeps, RouteHandler } from './debug/deps';
-import { AGENT_ROUTES } from './debug/routes-agents';
+import type { HelperBuddyDebugDeps, DebugServerDeps, RouteHandler } from './debug/deps';
+import { HELPER_BUDDY_ROUTES } from './debug/routes-helper-buddies';
 import { AUDIO_EVAL_ROUTES } from './debug/routes-audio-eval';
 import { GROUNDING_ROUTES } from './debug/routes-grounding';
 import { HOVER_ROUTES } from './debug/routes-hover';
@@ -52,23 +52,23 @@ import { PIPELINE_ROUTES } from './debug/routes-pipeline';
 
 export { isDebugEnabled } from './env';
 export type {
-  AgentDebugDeps,
+  HelperBuddyDebugDeps,
   AudioEvalDebugDeps,
   DebugServerDeps,
   GroundingDebugDeps,
   PipelineDebugDeps,
 } from './debug/deps';
 
-export interface BrowserAgentDebugDeps extends AgentDebugDeps {
-  /** Spawn through the production AgentManager with browserEnabled=true. */
+export interface BrowserHelperBuddyDebugDeps extends HelperBuddyDebugDeps {
+  /** Spawn through the production HelperBuddyManager with browserEnabled=true. */
   spawnBrowser?: (
     task: string,
-    scenario?: MockAgentScenario,
-  ) => { ok: true; agentId: string } | { ok: false; reason: string };
+    scenario?: MockHelperBuddyScenario,
+  ) => { ok: true; helperBuddyId: string } | { ok: false; reason: string };
 }
 
 export interface GateDebugAssessmentInput {
-  agentId?: string;
+  helperBuddyId?: string;
   userRequest: string;
   taskClaim?: string;
   action: Record<string, unknown>;
@@ -82,15 +82,15 @@ export interface GateDebugAssessmentInput {
 export interface ComputerUseDebugDeps {
   assessGate(input: GateDebugAssessmentInput): Promise<unknown>;
   listGrants(): ApprovalGrant[] | Promise<ApprovalGrant[]>;
-  resolveAgentApproval(
-    agentId: string,
+  resolveHelperBuddyApproval(
+    helperBuddyId: string,
     approvalId: string,
     verdict: 'once' | 'always' | 'deny',
   ): boolean | Promise<boolean>;
 }
 
-export type ComputerUseDebugServerDeps = Omit<DebugServerDeps, 'agents'> & {
-  agents?: BrowserAgentDebugDeps;
+export type ComputerUseDebugServerDeps = Omit<DebugServerDeps, 'helperBuddies'> & {
+  helperBuddies?: BrowserHelperBuddyDebugDeps;
   computerUse?: ComputerUseDebugDeps;
 };
 
@@ -104,11 +104,10 @@ const ROUTES: Record<string, RouteHandler> = {
   },
   ...OVERLAY_ROUTES,
   ...PIPELINE_ROUTES,
-  ...AGENT_ROUTES,
-  // Overrides the legacy task-only route with the browser-capability-aware
-  // contract while keeping the read-only request backward compatible.
-  'POST /agents/spawn': async (deps, req, res) => {
-    if (!deps.agents) return sendJson(res, 503, { error: 'agent runtime not wired' });
+  ...HELPER_BUDDY_ROUTES,
+  // Overrides the task-only route with an explicit browser-capability contract.
+  'POST /helper-buddies/spawn': async (deps, req, res) => {
+    if (!deps.helperBuddies) return sendJson(res, 503, { error: 'helper buddy runtime not wired' });
     const body = asRecord(await readJsonBody(req));
     const task = body?.['task'];
     const browserEnabled = body?.['browserEnabled'] ?? false;
@@ -119,33 +118,36 @@ const ROUTES: Record<string, RouteHandler> = {
       });
     if (typeof browserEnabled !== 'boolean')
       return sendJson(res, 400, { error: 'browserEnabled must be a boolean' });
-    if (scenario !== undefined && !isMockAgentScenario(scenario))
+    if (scenario !== undefined && !isMockHelperBuddyScenario(scenario))
       return sendJson(res, 400, {
         error: 'unknown mock scenario',
-        scenarios: MOCK_AGENT_SCENARIOS,
+        scenarios: MOCK_HELPER_BUDDY_SCENARIOS,
       });
     if (scenario !== undefined && scenario !== 'research' && browserEnabled !== true)
       return sendJson(res, 400, {
         error: 'computer-use mock scenarios require browserEnabled:true',
       });
-
-    const agentDeps = deps.agents as BrowserAgentDebugDeps;
+    const helperBuddyDeps = deps.helperBuddies as BrowserHelperBuddyDebugDeps;
     const result = browserEnabled
-      ? agentDeps.spawnBrowser
-        ? agentDeps.spawnBrowser(
-            scenario === undefined ? task.trim() : markMockAgentTask(scenario, task),
+      ? helperBuddyDeps.spawnBrowser
+        ? helperBuddyDeps.spawnBrowser(
+            scenario === undefined ? task.trim() : markMockHelperBuddyTask(scenario, task),
             scenario,
           )
         : { ok: false as const, reason: 'browser debug spawn is not wired' }
-      : agentDeps.spawn(
+      : await helperBuddyDeps.spawn(
           scenario === undefined || scenario === 'research'
             ? task.trim()
-            : markMockAgentTask(scenario, task),
+            : markMockHelperBuddyTask(scenario, task),
         );
-    sendJson(res, result.ok ? 202 : browserEnabled && !agentDeps.spawnBrowser ? 503 : 409, result);
+    sendJson(
+      res,
+      result.ok ? 202 : browserEnabled && !helperBuddyDeps.spawnBrowser ? 503 : 409,
+      result,
+    );
   },
-  'GET /mock/agent-scenarios': (_deps, _req, res) => {
-    sendJson(res, 200, { scenarios: MOCK_AGENT_SCENARIOS });
+  'GET /mock/helper-buddy-scenarios': (_deps, _req, res) => {
+    sendJson(res, 200, { scenarios: MOCK_HELPER_BUDDY_SCENARIOS });
   },
   'POST /gate/assess': async (deps, req, res) => {
     const computerUse = (deps as ComputerUseDebugServerDeps).computerUse;
@@ -156,17 +158,19 @@ const ROUTES: Record<string, RouteHandler> = {
       !body ||
       !isNonBlankString(body['userRequest']) ||
       actionRecord === null ||
-      (body['agentId'] !== undefined && !isNonBlankString(body['agentId'])) ||
+      (body['helperBuddyId'] !== undefined && !isNonBlankString(body['helperBuddyId'])) ||
       (body['taskClaim'] !== undefined && typeof body['taskClaim'] !== 'string')
     )
       return sendJson(res, 400, {
         error:
-          'expected {userRequest: string, action: object, agentId?: string, taskClaim?: string}',
+          'expected {userRequest: string, action: object, helperBuddyId?: string, taskClaim?: string}',
       });
     const input: GateDebugAssessmentInput = {
       userRequest: body['userRequest'].trim(),
       action: actionRecord,
-      ...(typeof body['agentId'] === 'string' ? { agentId: body['agentId'].trim() } : {}),
+      ...(typeof body['helperBuddyId'] === 'string'
+        ? { helperBuddyId: body['helperBuddyId'].trim() }
+        : {}),
       ...(typeof body['taskClaim'] === 'string' ? { taskClaim: body['taskClaim'] } : {}),
     };
     sendJson(res, 200, await computerUse.assessGate(input));
@@ -202,7 +206,7 @@ export function startDebugServer(deps: ComputerUseDebugServerDeps): Server | nul
 
   const token = resolveToken(app.getPath('userData'));
   // M8.5: CLICKY_DEBUG_PORT overrides the default port so parallel QA
-  // instances (other agents' dev apps hold 8199) can coexist.
+  // instances (other Buddy dev apps may hold 8199) can coexist.
   const port = debugPortOverride() ?? DEBUG_PORT;
 
   const server = createServer((req, res) => {
@@ -272,8 +276,9 @@ async function resolveDebugApproval(
   }
   if (!approvalId) return sendJson(res, 400, { error: 'approval id is required' });
   const body = asRecord(await readJsonBody(req));
-  const agentId = typeof body?.['agentId'] === 'string' ? body['agentId'].trim() : '';
-  if (!agentId) return sendJson(res, 400, { error: 'exact agentId is required' });
+  const helperBuddyId =
+    typeof body?.['helperBuddyId'] === 'string' ? body['helperBuddyId'].trim() : '';
+  if (!helperBuddyId) return sendJson(res, 400, { error: 'exact helperBuddyId is required' });
   let verdict: 'once' | 'always' | 'deny' = 'deny';
   if (action === 'approve') {
     const requested = body?.['verdict'] ?? 'once';
@@ -281,7 +286,11 @@ async function resolveDebugApproval(
       return sendJson(res, 400, { error: "approve verdict must be 'once' or 'always'" });
     verdict = requested;
   }
-  const resolved = await deps.computerUse.resolveAgentApproval(agentId, approvalId, verdict);
+  const resolved = await deps.computerUse.resolveHelperBuddyApproval(
+    helperBuddyId,
+    approvalId,
+    verdict,
+  );
   sendJson(
     res,
     resolved ? 200 : 404,

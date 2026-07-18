@@ -11,10 +11,10 @@
  * Parse-style inventory (kept EXACTLY as each current call site reads it —
  * do not unify without an explicit behavior-change task):
  * - `=== '1'` booleans: NO_SNAP, NO_REST_GROUND, NO_CODEX_SUB, DEBUG,
- *   IMPORT_API_KEY_FROM_ENV, AGENT_MOCK, SHOW_PANEL, KEEP_PANEL_OPEN,
+ *   IMPORT_API_KEY_FROM_ENV, HELPER_BUDDY_MOCK, SHOW_PANEL, KEEP_PANEL_OPEN,
  *   TEST_CAPTURE, CAPTURE_TEST.
  * - set-and-non-empty strings (unset OR '' → null): USER_DATA, FAKE_MIC,
- *   TEST_MIC, TEST_THROW, AGENT_MODEL, MOCK_URL, DEBUG_TOKEN.
+ *   TEST_MIC, TEST_THROW, HELPER_BUDDY_MODEL, MOCK_URL, DEBUG_TOKEN.
  * - numbers via `Number(raw)` with site-specific validity checks: DEBUG_PORT
  *   (positive integer), BOB_IDLE_MS (finite, > 0).
  * - documented inconsistencies:
@@ -146,20 +146,20 @@ export function captureTestOutDir(env: Env = process.env): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Agent mode (index.ts, agents/agent.ts)
+// Helper buddies (index.ts, agents/helper-buddy.ts)
 // ---------------------------------------------------------------------------
 
-/** CLICKY_AGENT_MOCK=1: use the mock agent backend instead of Codex. */
-export function isAgentMockEnabled(env: Env = process.env): boolean {
-  return flag(env, 'CLICKY_AGENT_MOCK');
+/** CLICKY_HELPER_BUDDY_MOCK=1: use the mock helper-buddy backend instead of Codex. */
+export function isHelperBuddyMockEnabled(env: Env = process.env): boolean {
+  return flag(env, 'CLICKY_HELPER_BUDDY_MOCK');
 }
 
 /**
- * CLICKY_AGENT_MODEL: agent model override, or null (caller falls back to
- * AGENT_DEFAULT_MODEL; the site uses `|| default`, i.e. '' also falls back).
+ * CLICKY_HELPER_BUDDY_MODEL: helper-buddy model override, or null (caller falls back to
+ * HELPER_BUDDY_DEFAULT_MODEL; the site uses `|| default`, i.e. '' also falls back).
  */
-export function agentModelOverride(env: Env = process.env): string | null {
-  return nonEmpty(env, 'CLICKY_AGENT_MODEL');
+export function helperBuddyModelOverride(env: Env = process.env): string | null {
+  return nonEmpty(env, 'CLICKY_HELPER_BUDDY_MODEL');
 }
 
 // ---------------------------------------------------------------------------

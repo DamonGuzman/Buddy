@@ -6,7 +6,7 @@
  * It is the text-brain counterpart to `realtime/session.ts`: text in, text
  * out, function-calling, vision — all sub-billed through the user's ChatGPT
  * plan (works even when the metered OpenAI API key is out of credit). It is
- * deliberately app-agnostic (no screens/pointers here) so agent mode (M14) can
+ * deliberately app-agnostic (no screens/pointers here) so helper-buddy mode can
  * reuse the exact same transport and event surface.
  *
  * Event surface MIRRORS the realtime session so the orchestrator can treat

@@ -1,7 +1,7 @@
-import type { AgentToolSpec } from '../types';
-import { AGENT_TOOL_TIMEOUT_MS } from '../config';
+import type { HelperBuddyToolSpec } from '../types';
+import { HELPER_BUDDY_TOOL_TIMEOUT_MS } from '../helper-buddy-config';
 
-export const readScreenTool: AgentToolSpec = {
+export const readScreenTool: HelperBuddyToolSpec = {
   definition: {
     type: 'function',
     name: 'read_screen',
@@ -9,7 +9,7 @@ export const readScreenTool: AgentToolSpec = {
       'Re-read the screenshot included with the original handoff. It is immutable and no new capture occurs.',
     parameters: { type: 'object', properties: {} },
   },
-  timeoutMs: AGENT_TOOL_TIMEOUT_MS,
+  timeoutMs: HELPER_BUDDY_TOOL_TIMEOUT_MS,
   stepKind: 'think',
   async execute(_args, ctx) {
     if (!ctx.brief.screenshot)

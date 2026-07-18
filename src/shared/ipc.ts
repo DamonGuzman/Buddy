@@ -4,7 +4,7 @@
  * the preloads.
  *
  * Part of the frozen `src/shared/*` contract (docs/ARCHITECTURE.md §4, §5, §9).
- * Later agents: add channels here via integration-approved edits only.
+ * Later helper-buddy work adds channels here through the shared contract.
  *
  * Naming: `<area>:<event>`. Channel string literal = the key in the maps below.
  */
@@ -14,7 +14,7 @@ import type {
   ActionableErrorIdentity,
   ApprovalGrant,
   ApprovalRequest,
-  AgentSummary,
+  HelperBuddySummary,
   AssistantState,
   AudioDeviceError,
   AudioOutputDelta,
@@ -65,11 +65,11 @@ export interface MainToOverlayEvents {
   'overlay:interactive': OverlayInteractiveUpdate;
   /** Native top-of-display geometry for this overlay's display. */
   'overlay:display-surface': OverlayDisplaySurface;
-  // M19 addition: agent helpers on the overlay — the same renderer-safe list
-  // the panel gets (full-list upsert, broadcast on every agent state change;
+  // M19 addition: helper buddies on the overlay — the same renderer-safe list
+  // the panel gets (full-list upsert, broadcast on every helper-buddy state change;
   // NEVER carries screenshot bytes). Every overlay receives it; only the
   // buddy-hosting overlay renders the helper sprites.
-  'overlay:agents': AgentSummary[];
+  'overlay:helper-buddies': HelperBuddySummary[];
   // M20 addition: main-side cursor feed for the buddy-hosting overlay.
   // Electron's setIgnoreMouseEvents(true, {forward:true}) proved unreliable
   // on Windows (zero mousemove delivery on some setups), which silently
@@ -115,8 +115,8 @@ export interface MainToPanelEvents {
   'panel:actionable-error': ActionableErrorState;
   /** Complete raise-hand queue; full-list snapshots prevent lost concurrent requests. */
   'panel:approvals': ApprovalRequest[];
-  // M21: 'panel:agents' and 'panel:show-agents' retired with the control
-  // panel (the agents view is gone; overlay helper clicks summon the
+  // M21: 'panel:helper-buddies' and 'panel:show-helper-buddies' retired with the control
+  // panel (the helper-buddy view is gone; overlay helper clicks summon the
   // whisper). The remaining panel:* channels serve the settings window +
   // hidden audio host that inherited the panel's BrowserWindow.
 }
@@ -141,6 +141,12 @@ export interface MainToWhisperEvents {
   'whisper:filesystem-state': FilesystemTaskView[];
   /** Folder currently authorized for newly delegated helper buddies. */
   'whisper:filesystem-selection': FilesystemSelection | null;
+}
+
+/** Main-read, renderer-safe Markdown payload. Native filesystem paths stay in main. */
+export interface MarkdownDocumentView {
+  title: string;
+  markdown: string;
 }
 
 // ===========================================================================
@@ -169,11 +175,11 @@ export interface RendererSendEvents {
   'overlay:buddy-settings': null;
   /** Drag-reposition finished: persist this rest fraction for this overlay. */
   'overlay:buddy-move': BuddyRestFraction;
-  // M19 additions: agent helpers on the overlay.
-  /** A helper sprite / agent card was clicked -> open the panel agents view. */
-  'overlay:agent-click': { id: string };
-  /** The agent card's stop affordance was clicked -> cancel that agent. */
-  'overlay:agent-cancel': { id: string };
+  // M19 additions: helper buddies on the overlay.
+  /** A helper sprite / card was clicked -> open its full helper-buddy status. */
+  'overlay:helper-buddy-click': { id: string };
+  /** The helper buddy card's stop affordance was clicked -> cancel it. */
+  'overlay:helper-buddy-cancel': { id: string };
   // M20 addition: the whisper composer.
   /** The whisper asked to tuck away (esc / explicit close). */
   'whisper:hide': null;
@@ -238,24 +244,24 @@ export interface InvokeChannels {
   'overlay:get-hover-config': { args: []; result: OverlayHoverConfig };
   /** Overlay bootstrap: native top-of-display geometry for this display. */
   'overlay:get-display-surface': { args: []; result: OverlayDisplaySurface };
-  // M18 additions: agent mode (docs/AGENT-MODE.md §6.2).
-  /** Panel bootstrap: current agent list (push updates ride on 'panel:agents'). */
-  'agents:list': { args: []; result: AgentSummary[] };
-  /** Stop one agent (Card "stop" affordance). */
-  'agents:cancel': { args: [id: string]; result: void };
-  /** Stop every running agent (agents-header "stop all"). */
-  'agents:cancel-all': { args: []; result: void };
-  /** The user viewed this agent's Card — clear its unseen badge. */
-  'agents:mark-seen': { args: [id: string]; result: void };
+  // M18 additions: helper buddies (docs/HELPER-BUDDY-MODE.md §6.2).
+  /** Renderer bootstrap: current helper-buddy list. */
+  'helper-buddies:list': { args: []; result: HelperBuddySummary[] };
+  /** Stop one helper buddy (card "stop" affordance). */
+  'helper-buddies:cancel': { args: [id: string]; result: void };
+  /** Stop every running helper buddy. */
+  'helper-buddies:cancel-all': { args: []; result: void };
+  /** The user viewed this helper buddy's card — clear its unseen badge. */
+  'helper-buddies:mark-seen': { args: [id: string]; result: void };
   /** Resolve a buddy's pending raise-hand request. */
   'approval:resolve': {
-    args: [agentId: string, approvalId: string, verdict: 'once' | 'always' | 'deny'];
+    args: [helperBuddyId: string, approvalId: string, verdict: 'once' | 'always' | 'deny'];
     result: void;
   };
   /** Show the buddy's browser so the user can handle sign-in or a CAPTCHA. */
-  'approval:show-window': { args: [agentId: string, approvalId: string]; result: void };
+  'approval:show-window': { args: [helperBuddyId: string, approvalId: string]; result: void };
   /** Hide the user-assisted browser and let the buddy re-observe it. */
-  'approval:hide-window': { args: [agentId: string, approvalId: string]; result: void };
+  'approval:hide-window': { args: [helperBuddyId: string, approvalId: string]; result: void };
   /** Bootstrap the complete pending approval queue after renderer reload. */
   'approvals:list': { args: []; result: ApprovalRequest[] };
   /** Renderer-safe standing approval grants. */
@@ -270,6 +276,14 @@ export interface InvokeChannels {
   'buddy-browser:sign-out-site': { args: [domain: string]; result: void };
   /** Clear all cookies and storage from the shared buddy browser profile. */
   'buddy-browser:clear': { args: []; result: void };
+  /** Bootstrap the document owned by the invoking Markdown window. */
+  'markdown:get-document': { args: []; result: MarkdownDocumentView };
+  /** Confirm that React committed the rich document; main may now show the window. */
+  'markdown:ready': { args: []; result: void };
+  /** Fail a hidden document window without ever exposing raw source. */
+  'markdown:render-failed': { args: [detail: string]; result: void };
+  /** Open a renderer-selected external link after main revalidates its scheme. */
+  'markdown:open-external': { args: [url: string]; result: void };
 }
 
 // ===========================================================================
@@ -322,20 +336,20 @@ export interface OverlayApi {
   // M20 addition: main-side cursor feed (see 'overlay:cursor').
   onCursor(cb: (pos: { x: number; y: number } | null) => void): Unsubscribe;
 
-  // M19 additions: agent helpers on the overlay.
-  onAgents(cb: (agents: AgentSummary[]) => void): Unsubscribe;
-  /** Agent list bootstrap (push updates ride on 'overlay:agents'). */
-  getAgents(): Promise<AgentSummary[]>;
-  /** A helper sprite / agent card was clicked (main opens the agents view). */
-  sendAgentClick(id: string): void;
-  /** The agent card's stop affordance was clicked. */
-  sendAgentCancel(id: string): void;
+  // M19 additions: helper buddies on the overlay.
+  onHelperBuddies(cb: (helperBuddies: HelperBuddySummary[]) => void): Unsubscribe;
+  /** Helper-buddy list bootstrap (push updates ride on 'overlay:helper-buddies'). */
+  getHelperBuddies(): Promise<HelperBuddySummary[]>;
+  /** A helper sprite / card was clicked (main opens the full helper-buddy status). */
+  sendHelperBuddyClick(id: string): void;
+  /** The helper buddy card's stop affordance was clicked. */
+  sendHelperBuddyCancel(id: string): void;
 }
 
 /**
  * Exposed to the panel renderer as `window.clicky`. M21: the panel window is
  * now the hidden AUDIO HOST + the tray-opened SETTINGS surface — the chat
- * panel's transcript/composer/agents accessors retired with it.
+ * panel's transcript/composer/helper-buddy accessors retired with it.
  */
 export interface PanelApi {
   onSessionStatus(cb: (status: SessionStatus) => void): Unsubscribe;
@@ -384,14 +398,14 @@ export interface PanelApi {
 
   /** Resolve a buddy's pending raise-hand request. */
   resolveApproval(
-    agentId: string,
+    helperBuddyId: string,
     approvalId: string,
     verdict: 'once' | 'always' | 'deny',
   ): Promise<void>;
   /** Let the user act in the buddy's browser for sign-in or a CAPTCHA. */
-  showApprovalWindow(agentId: string, approvalId: string): Promise<void>;
+  showApprovalWindow(helperBuddyId: string, approvalId: string): Promise<void>;
   /** Return the user-assisted browser to the buddy and trigger re-observation. */
-  hideApprovalWindow(agentId: string, approvalId: string): Promise<void>;
+  hideApprovalWindow(helperBuddyId: string, approvalId: string): Promise<void>;
   listApprovals(): Promise<ApprovalRequest[]>;
   listGrants(): Promise<ApprovalGrant[]>;
   revokeGrant(id: string): Promise<void>;
@@ -431,4 +445,12 @@ export interface WhisperApi {
   setSettings(patch: SettingsPatch): Promise<Settings>;
   /** Tuck the whisper away (esc / close affordance). */
   hide(): void;
+}
+
+/** Exposed only to the rich Markdown document renderer. */
+export interface MarkdownApi {
+  getDocument(): Promise<MarkdownDocumentView>;
+  ready(): Promise<void>;
+  renderFailed(detail: string): Promise<void>;
+  openExternal(url: string): Promise<void>;
 }

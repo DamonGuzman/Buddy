@@ -44,9 +44,9 @@ export interface BuddyBrowserWindowServiceOptions {
   /** Root uses this to restore Settings after the enrollment window closes. */
   onEnrollmentClosed?(): void | Promise<void>;
   /** Explicit Done path. Rejection must propagate to IPC so the card remains retryable. */
-  onTakeoverDone?(agentId: string, approvalId: string): void | Promise<void>;
+  onTakeoverDone?(helperBuddyId: string, approvalId: string): void | Promise<void>;
   /** OS-close path is fire-and-forget and reports failures without lying to a renderer. */
-  onTakeoverClosed?(agentId: string, approvalId: string): void | Promise<void>;
+  onTakeoverClosed?(helperBuddyId: string, approvalId: string): void | Promise<void>;
   onBackgroundError?(error: Error): void;
 }
 
@@ -57,7 +57,7 @@ interface RegisteredSurface {
 }
 
 interface ApprovalBinding {
-  agentId: string;
+  helperBuddyId: string;
   surface: RegisteredSurface;
   takeoverShown: boolean;
 }
@@ -74,9 +74,9 @@ export class BuddyBrowserWindowService {
   private readonly profile: BuddyBrowserProfile;
   private readonly onEnrollmentClosed: (() => void | Promise<void>) | undefined;
   private readonly onTakeoverDone:
-    ((agentId: string, approvalId: string) => void | Promise<void>) | undefined;
+    ((helperBuddyId: string, approvalId: string) => void | Promise<void>) | undefined;
   private readonly onTakeoverClosed:
-    ((agentId: string, approvalId: string) => void | Promise<void>) | undefined;
+    ((helperBuddyId: string, approvalId: string) => void | Promise<void>) | undefined;
   private readonly onBackgroundError: ((error: Error) => void) | undefined;
   private readonly surfaces = new Map<string, RegisteredSurface>();
   private readonly approvals = new Map<string, ApprovalBinding>();
@@ -117,19 +117,19 @@ export class BuddyBrowserWindowService {
   }
 
   /** Register one active offscreen browser. Duplicate agent IDs fail fast. */
-  registerSurface(agentId: string, surface: BuddyBrowserSurface): () => void {
+  registerSurface(helperBuddyId: string, surface: BuddyBrowserSurface): () => void {
     this.assertAlive();
-    assertOpaqueId(agentId, 'agent');
-    if (this.surfaces.has(agentId)) {
-      throw new Error(`buddy browser surface already registered for agent: ${agentId}`);
+    assertOpaqueId(helperBuddyId, 'agent');
+    if (this.surfaces.has(helperBuddyId)) {
+      throw new Error(`buddy browser surface already registered for agent: ${helperBuddyId}`);
     }
     const record: RegisteredSurface = {
       surface,
       approvalIds: new Set(),
       visibleApprovalId: null,
     };
-    this.surfaces.set(agentId, record);
-    return () => this.unregisterSurface(agentId, record);
+    this.surfaces.set(helperBuddyId, record);
+    return () => this.unregisterSurface(helperBuddyId, record);
   }
 
   /**
@@ -137,8 +137,11 @@ export class BuddyBrowserWindowService {
    * OffscreenBrowserDriver method (bound to the real instance) and unregisters
    * the lifecycle surface only after driver disposal succeeds.
    */
-  registerOffscreenDriver(agentId: string, driver: OffscreenBrowserDriver): OffscreenBrowserDriver {
-    const unregister = this.registerSurface(agentId, surfaceForOffscreenBrowser(driver));
+  registerOffscreenDriver(
+    helperBuddyId: string,
+    driver: OffscreenBrowserDriver,
+  ): OffscreenBrowserDriver {
+    const unregister = this.registerSurface(helperBuddyId, surfaceForOffscreenBrowser(driver));
     return new Proxy(driver, {
       get(target, property) {
         if (property === 'dispose') {
@@ -154,28 +157,28 @@ export class BuddyBrowserWindowService {
   }
 
   /** Bind one concrete pending approval to the agent's current browser. */
-  bindApproval(agentId: string, approvalId: string): () => Promise<void> {
+  bindApproval(helperBuddyId: string, approvalId: string): () => Promise<void> {
     this.assertAlive();
-    assertOpaqueId(agentId, 'agent');
+    assertOpaqueId(helperBuddyId, 'agent');
     assertOpaqueId(approvalId, 'approval');
     if (this.approvals.has(approvalId)) {
       throw new Error(`buddy browser approval is already bound: ${approvalId}`);
     }
-    const surface = this.surfaces.get(agentId);
-    if (!surface) throw new Error(`no buddy browser surface for agent: ${agentId}`);
+    const surface = this.surfaces.get(helperBuddyId);
+    if (!surface) throw new Error(`no buddy browser surface for agent: ${helperBuddyId}`);
     surface.approvalIds.add(approvalId);
-    this.approvals.set(approvalId, { agentId, surface, takeoverShown: false });
-    return () => this.releaseApproval(agentId, approvalId);
+    this.approvals.set(approvalId, { helperBuddyId, surface, takeoverShown: false });
+    return () => this.releaseApproval(helperBuddyId, approvalId);
   }
 
-  async showApprovalWindow(agentId: string, approvalId: string): Promise<void> {
-    const binding = this.requireApproval(agentId, approvalId);
+  async showApprovalWindow(helperBuddyId: string, approvalId: string): Promise<void> {
+    const binding = this.requireApproval(helperBuddyId, approvalId);
     const visible = binding.surface.visibleApprovalId;
     if (visible !== null && visible !== approvalId) {
       throw new Error(`buddy browser is already visible for approval: ${visible}`);
     }
     await binding.surface.surface.showForUser(() => {
-      void this.handleUserClosedTakeover(agentId, approvalId).catch((error: unknown) => {
+      void this.handleUserClosedTakeover(helperBuddyId, approvalId).catch((error: unknown) => {
         this.onBackgroundError?.(asError(error));
       });
     });
@@ -183,8 +186,8 @@ export class BuddyBrowserWindowService {
     binding.surface.visibleApprovalId = approvalId;
   }
 
-  async hideApprovalWindow(agentId: string, approvalId: string): Promise<void> {
-    const binding = this.requireApproval(agentId, approvalId);
+  async hideApprovalWindow(helperBuddyId: string, approvalId: string): Promise<void> {
+    const binding = this.requireApproval(helperBuddyId, approvalId);
     if (!binding.takeoverShown) {
       throw new Error(`buddy browser approval was never shown: ${approvalId}`);
     }
@@ -196,12 +199,12 @@ export class BuddyBrowserWindowService {
       await binding.surface.surface.hideFromUser();
       binding.surface.visibleApprovalId = null;
     }
-    await this.onTakeoverDone?.(agentId, approvalId);
+    await this.onTakeoverDone?.(helperBuddyId, approvalId);
   }
 
   /** Release a resolved/denied approval and ensure its window is hidden. */
-  async completeApproval(agentId: string, approvalId: string): Promise<void> {
-    const binding = this.requireApproval(agentId, approvalId);
+  async completeApproval(helperBuddyId: string, approvalId: string): Promise<void> {
+    const binding = this.requireApproval(helperBuddyId, approvalId);
     if (binding.surface.visibleApprovalId === approvalId) {
       await binding.surface.surface.hideFromUser();
       binding.surface.visibleApprovalId = null;
@@ -213,8 +216,8 @@ export class BuddyBrowserWindowService {
    * Freeze the exact surface before an approval can resume its parked agent.
    * The binding intentionally remains live until the approval write succeeds.
    */
-  async freezeApproval(agentId: string, approvalId: string): Promise<void> {
-    const binding = this.requireApproval(agentId, approvalId);
+  async freezeApproval(helperBuddyId: string, approvalId: string): Promise<void> {
+    const binding = this.requireApproval(helperBuddyId, approvalId);
     if (binding.surface.visibleApprovalId === approvalId) {
       await binding.surface.surface.hideFromUser();
       binding.surface.visibleApprovalId = null;
@@ -290,29 +293,29 @@ export class BuddyBrowserWindowService {
     });
   }
 
-  private requireApproval(agentId: string, approvalId: string): ApprovalBinding {
+  private requireApproval(helperBuddyId: string, approvalId: string): ApprovalBinding {
     this.assertAlive();
-    assertOpaqueId(agentId, 'agent');
+    assertOpaqueId(helperBuddyId, 'agent');
     assertOpaqueId(approvalId, 'approval');
     const binding = this.approvals.get(approvalId);
-    if (!binding || binding.agentId !== agentId) {
+    if (!binding || binding.helperBuddyId !== helperBuddyId) {
       throw new Error(`stale or mismatched buddy browser approval: ${approvalId}`);
     }
     return binding;
   }
 
-  private async handleUserClosedTakeover(agentId: string, approvalId: string): Promise<void> {
+  private async handleUserClosedTakeover(helperBuddyId: string, approvalId: string): Promise<void> {
     const binding = this.approvals.get(approvalId);
-    if (!binding || binding.agentId !== agentId) return;
+    if (!binding || binding.helperBuddyId !== helperBuddyId) return;
     if (binding.surface.visibleApprovalId !== approvalId) return;
     await binding.surface.surface.hideFromUser();
     binding.surface.visibleApprovalId = null;
-    await (this.onTakeoverClosed ?? this.onTakeoverDone)?.(agentId, approvalId);
+    await (this.onTakeoverClosed ?? this.onTakeoverDone)?.(helperBuddyId, approvalId);
   }
 
-  private async releaseApproval(agentId: string, approvalId: string): Promise<void> {
+  private async releaseApproval(helperBuddyId: string, approvalId: string): Promise<void> {
     const binding = this.approvals.get(approvalId);
-    if (!binding || binding.agentId !== agentId) return;
+    if (!binding || binding.helperBuddyId !== helperBuddyId) return;
     if (binding.surface.visibleApprovalId === approvalId) {
       await binding.surface.surface.hideFromUser();
       binding.surface.visibleApprovalId = null;
@@ -325,11 +328,11 @@ export class BuddyBrowserWindowService {
     this.approvals.delete(approvalId);
   }
 
-  private unregisterSurface(agentId: string, expected: RegisteredSurface): void {
-    if (this.surfaces.get(agentId) !== expected) return;
+  private unregisterSurface(helperBuddyId: string, expected: RegisteredSurface): void {
+    if (this.surfaces.get(helperBuddyId) !== expected) return;
     for (const approvalId of expected.approvalIds) this.approvals.delete(approvalId);
     expected.approvalIds.clear();
-    this.surfaces.delete(agentId);
+    this.surfaces.delete(helperBuddyId);
   }
 
   private async destroyAllWindows(): Promise<void> {
@@ -360,8 +363,8 @@ export class BuddyBrowserWindowService {
       }
     });
     const results = await Promise.allSettled(
-      affected.map(async ([agentId, record]) => {
-        this.unregisterSurface(agentId, record);
+      affected.map(async ([helperBuddyId, record]) => {
+        this.unregisterSurface(helperBuddyId, record);
         await record.surface.dispose();
       }),
     );
@@ -377,7 +380,11 @@ export class BuddyBrowserWindowService {
 }
 
 export interface ApprovalOperations {
-  resolve(agentId: string, approvalId: string, verdict: ApprovalResolution): void | Promise<void>;
+  resolve(
+    helperBuddyId: string,
+    approvalId: string,
+    verdict: ApprovalResolution,
+  ): void | Promise<void>;
   listApprovals(): ApprovalRequest[] | Promise<ApprovalRequest[]>;
   listGrants(): ApprovalGrant[] | Promise<ApprovalGrant[]>;
   revokeGrant(id: string): void | Promise<void>;
@@ -391,24 +398,24 @@ export class BuddyBrowserIpcController {
   ) {}
 
   async resolveApproval(
-    agentId: string,
+    helperBuddyId: string,
     approvalId: string,
     verdict: ApprovalResolution,
   ): Promise<void> {
     assertApprovalResolution(verdict);
     // Freeze first. Resolving the coordinator resumes the parked gate, so it
     // must never happen while the user can still operate the same surface.
-    await this.windows.freezeApproval(agentId, approvalId);
-    await this.approvals.resolve(agentId, approvalId, verdict);
-    await this.windows.completeApproval(agentId, approvalId);
+    await this.windows.freezeApproval(helperBuddyId, approvalId);
+    await this.approvals.resolve(helperBuddyId, approvalId, verdict);
+    await this.windows.completeApproval(helperBuddyId, approvalId);
   }
 
-  showApprovalWindow(agentId: string, approvalId: string): Promise<void> {
-    return this.windows.showApprovalWindow(agentId, approvalId);
+  showApprovalWindow(helperBuddyId: string, approvalId: string): Promise<void> {
+    return this.windows.showApprovalWindow(helperBuddyId, approvalId);
   }
 
-  hideApprovalWindow(agentId: string, approvalId: string): Promise<void> {
-    return this.windows.hideApprovalWindow(agentId, approvalId);
+  hideApprovalWindow(helperBuddyId: string, approvalId: string): Promise<void> {
+    return this.windows.hideApprovalWindow(helperBuddyId, approvalId);
   }
 
   async listApprovals(): Promise<ApprovalRequest[]> {

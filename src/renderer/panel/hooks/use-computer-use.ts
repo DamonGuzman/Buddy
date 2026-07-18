@@ -12,9 +12,9 @@ export interface ComputerUseApprovalState {
   actingInPlace: boolean;
   error: string | null;
   grantsRevision: number;
-  resolve: (agentId: string, approvalId: string, verdict: ApprovalVerdict) => Promise<void>;
-  showBrowser: (agentId: string, approvalId: string) => Promise<void>;
-  finishInBrowser: (agentId: string, approvalId: string) => Promise<void>;
+  resolve: (helperBuddyId: string, approvalId: string, verdict: ApprovalVerdict) => Promise<void>;
+  showBrowser: (helperBuddyId: string, approvalId: string) => Promise<void>;
+  finishInBrowser: (helperBuddyId: string, approvalId: string) => Promise<void>;
 }
 
 /** Own the pending raise-hand queue delivered to the always-alive panel renderer. */
@@ -73,9 +73,9 @@ export function useComputerUseApproval(): ComputerUseApprovalState {
   }, [replaceApprovals]);
 
   const resolve = useCallback(
-    async (agentId: string, approvalId: string, verdict: ApprovalVerdict): Promise<void> => {
+    async (helperBuddyId: string, approvalId: string, verdict: ApprovalVerdict): Promise<void> => {
       const request = approvalsRef.current[0];
-      if (!isExactApproval(request, agentId, approvalId)) {
+      if (!isExactApproval(request, helperBuddyId, approvalId)) {
         setError('that approval is no longer current. review the new request before choosing.');
         return;
       }
@@ -84,7 +84,7 @@ export function useComputerUseApproval(): ComputerUseApprovalState {
       setResolving(verdict);
       setError(null);
       try {
-        await clicky.resolveApproval(request.agentId, request.approvalId, verdict);
+        await clicky.resolveApproval(request.helperBuddyId, request.approvalId, verdict);
         removeApproval(request.approvalId);
         if (verdict === 'always') setGrantsRevision((revision) => revision + 1);
       } catch {
@@ -101,35 +101,38 @@ export function useComputerUseApproval(): ComputerUseApprovalState {
     [removeApproval],
   );
 
-  const showBrowser = useCallback(async (agentId: string, approvalId: string): Promise<void> => {
-    const request = approvalsRef.current[0];
-    if (!isExactApproval(request, agentId, approvalId)) {
-      setError('that approval is no longer current. review the new request before continuing.');
-      return;
-    }
-    setError(null);
-    try {
-      await clicky.showApprovalWindow(request.agentId, request.approvalId);
-      if (approvalsRef.current[0]?.approvalId === request.approvalId) {
-        setActingInPlace(true);
-      }
-    } catch {
-      if (approvalsRef.current[0]?.approvalId === request.approvalId) {
-        setError("buddy couldn't open its browser. the action is still waiting.");
-      }
-    }
-  }, []);
-
-  const finishInBrowser = useCallback(
-    async (agentId: string, approvalId: string): Promise<void> => {
+  const showBrowser = useCallback(
+    async (helperBuddyId: string, approvalId: string): Promise<void> => {
       const request = approvalsRef.current[0];
-      if (!isExactApproval(request, agentId, approvalId)) {
+      if (!isExactApproval(request, helperBuddyId, approvalId)) {
         setError('that approval is no longer current. review the new request before continuing.');
         return;
       }
       setError(null);
       try {
-        await clicky.hideApprovalWindow(request.agentId, request.approvalId);
+        await clicky.showApprovalWindow(request.helperBuddyId, request.approvalId);
+        if (approvalsRef.current[0]?.approvalId === request.approvalId) {
+          setActingInPlace(true);
+        }
+      } catch {
+        if (approvalsRef.current[0]?.approvalId === request.approvalId) {
+          setError("buddy couldn't open its browser. the action is still waiting.");
+        }
+      }
+    },
+    [],
+  );
+
+  const finishInBrowser = useCallback(
+    async (helperBuddyId: string, approvalId: string): Promise<void> => {
+      const request = approvalsRef.current[0];
+      if (!isExactApproval(request, helperBuddyId, approvalId)) {
+        setError('that approval is no longer current. review the new request before continuing.');
+        return;
+      }
+      setError(null);
+      try {
+        await clicky.hideApprovalWindow(request.helperBuddyId, request.approvalId);
         // "done" discards this proposal and resumes from a fresh observation.
         removeApproval(request.approvalId);
       } catch {

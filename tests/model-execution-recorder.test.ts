@@ -29,9 +29,9 @@ describe('ModelExecutionRecorder', () => {
   it('persists complete request, stream, tool, and terminal records in one JSONL file', () => {
     const recorder = makeRecorder();
     const trace = recorder.begin({
-      transport: 'chatgpt-codex-agent',
+      transport: 'chatgpt-codex-helper-buddy',
       model: 'gpt-5.6-sol',
-      operation: 'agent.responses.create',
+      operation: 'helper_buddy.responses.create',
       endpoint: 'https://example.test/responses',
     });
     trace.request({
@@ -44,7 +44,7 @@ describe('ModelExecutionRecorder', () => {
       arguments: '{"script":"python build_deck.py"}',
     });
     recorder.recordToolExecution({
-      agentId: 'agent_5',
+      helperBuddyId: 'agent_5',
       tool: 'run_staged_shell',
       parsedArguments: { script: 'python build_deck.py' },
       result: { output: 'created 23 slides and 8 charts' },

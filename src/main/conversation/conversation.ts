@@ -12,7 +12,7 @@
  *   TranscriptStore (ring buffer + voice placeholder), TurnTelemetry
  *   (timings/playback stats), TurnGuard (turn tokens + playback epochs),
  *   ErrorSurfacer (M11 catalog surfacing), PointerPipeline (M9/M10 layered
- *   grounding), CodexTextTurnRunner (M18 text path), AgentContinuations
+ *   grounding), CodexTextTurnRunner (M18 text path), HelperBuddyContinuations
  *   (background-agent handoff), and the AudioTransport seam (panel vs the
  *   QA phone bridge).
  *
@@ -37,7 +37,7 @@ import { createHash } from 'node:crypto';
 import { AUDIO_SAMPLE_RATE } from '../../shared/constants';
 import type {
   ActionableErrorIdentity,
-  AgentSummary,
+  HelperBuddySummary,
   AssistantState,
   AudioDeviceError,
   CaptureMeta,
@@ -73,10 +73,10 @@ import type { ResponseDoneInfo, ToolCall } from '../realtime/session';
 import { RealtimeSession } from '../realtime/session';
 import { errorMessage } from '../util/guards';
 import type { PhoneAudioTransport } from '../phone-audio-bridge';
-import type { AgentActionGatePort, AgentApprovalPort } from '../agents/types';
+import type { HelperBuddyActionGatePort, HelperBuddyApprovalPort } from '../agents/types';
 import type { LiveDesktopEvidencePort } from '../computer/live-desktop-evidence';
-import { AgentContinuations } from './agent-continuations';
-import { AgentTools } from './agent-tools';
+import { HelperBuddyContinuations } from './helper-buddy-continuations';
+import { HelperBuddyTools } from './helper-buddy-tools';
 import { AssistantStateMachine } from './assistant-state';
 import type { AudioTransport } from './audio-transport';
 import { panelAudioTransport, phoneAudioTransport } from './audio-transport';
@@ -93,7 +93,13 @@ import {
 import { ErrorSurfacer } from './error-surfacer';
 import { PointerPipeline } from './pointer-pipeline';
 import type { RestGroundPort } from './pointer-pipeline';
-import type { AgentsPort, OverlayPort, PanelPort, RecorderPort, SettingsPort } from './ports';
+import type {
+  HelperBuddiesPort,
+  OverlayPort,
+  PanelPort,
+  RecorderPort,
+  SettingsPort,
+} from './ports';
 import {
   NO_CAPTURE_ERROR,
   parseCodexToolCall,
@@ -120,22 +126,22 @@ export interface ConversationDeps {
    * Injected in unit tests to drive the text turn deterministically.
    */
   buildCodexSession?: (auth: ChatGptCodexAuthSource) => CodexTextSession;
-  /** Background-agent runtime; omitted in focused conversation tests. */
-  agents?: AgentsPort;
+  /** Helper-buddy runtime; omitted in focused conversation tests. */
+  helperBuddies?: HelperBuddiesPort;
   /** Every foreground-delegated helper is prepared with one staged folder workspace. */
-  prepareAgentFilesystem?: (
+  prepareHelperBuddyFilesystem?: (
     task: string,
-    agentId: string,
+    helperBuddyId: string,
   ) => Promise<{ taskId: string; rootName: string }>;
-  failAgentFilesystem?: (taskId: string, reason: string) => Promise<void>;
+  failHelperBuddyFilesystem?: (taskId: string, reason: string) => Promise<void>;
   /** Disposable QA-only phone audio transport; absent in normal Buddy. */
   phoneAudio?: PhoneAudioTransport;
   /** Durable local journal + turn artifacts; omitted in focused tests. */
   sessionRecorder?: RecorderPort;
   /** Shared browser/live action gate and main-process approval parking queue. */
   computerUseSecurity?: {
-    gate: AgentActionGatePort;
-    approvals: AgentApprovalPort;
+    gate: HelperBuddyActionGatePort;
+    approvals: HelperBuddyApprovalPort;
     evidence?: LiveDesktopEvidencePort;
   };
   /** Native accessibility seam (UIA on Windows, AX on macOS). */
@@ -234,8 +240,8 @@ export class Conversation {
   // sub (text in, text out) with the SAME tool harness, when a valid sub is
   // signed in; otherwise it falls back to the realtime voice model.
   private readonly injectedBuildCodex: ((auth: ChatGptCodexAuthSource) => CodexTextSession) | null;
-  private readonly agents: AgentsPort | null;
-  private agentModeAvailableSnapshot = false;
+  private readonly helperBuddies: HelperBuddiesPort | null;
+  private helperBuddyModeAvailableSnapshot = false;
   private computerUseEnabledSnapshot = false;
 
   /** F1 (M1/m1) + M2 epochs: turn-supersede bookkeeping (see TurnGuard). */
@@ -254,8 +260,8 @@ export class Conversation {
   private readonly errors: ErrorSurfacer;
   private readonly pointer: PointerPipeline;
   private readonly codexText: CodexTextTurnRunner;
-  private readonly continuations: AgentContinuations;
-  private readonly agentTools: AgentTools;
+  private readonly continuations: HelperBuddyContinuations;
+  private readonly helperBuddyTools: HelperBuddyTools;
   private readonly computerUse: ComputerUseRunner;
 
   // Debug counters.
@@ -277,8 +283,8 @@ export class Conversation {
     // M18: hold any injected text-session factory (tests); else the default
     // builds a real CodexResponsesSession lazily on the first text turn.
     this.injectedBuildCodex = deps.buildCodexSession ?? null;
-    this.agents = deps.agents ?? null;
-    this.agentModeAvailableSnapshot = this.agents?.isReady() ?? false;
+    this.helperBuddies = deps.helperBuddies ?? null;
+    this.helperBuddyModeAvailableSnapshot = this.helperBuddies?.isReady() ?? false;
     const snapshot = this.settings.get();
     this.computerUseEnabledSnapshot = snapshot.computerUseEnabled;
     this.sessionModel = snapshot.model;
@@ -370,16 +376,16 @@ export class Conversation {
       restGroundDisabled: isRestGroundDisabled(),
       codexDisabled: this.codexDisabled,
     });
-    this.continuations = new AgentContinuations({
+    this.continuations = new HelperBuddyContinuations({
       closed: () => this.guard.closed,
       pendingResponses: () => this.pendingResponses,
-      foregroundReady: () => this.foregroundReadyForAgentContinuation(),
+      foregroundReady: () => this.foregroundReadyForHelperBuddyContinuation(),
       voiceStartReady: () =>
         !this.holding && this.pendingResponses === 0 && this.pendingFullRealtimeCapture === null,
       setThinking: () => this.machine.dispatch('turn_committed'),
       injectVoiceReminder: (text, stillReady) =>
         this.session.injectUserAndRespond(text, stillReady),
-      markSpoken: (id) => this.agents?.markSpoken(id),
+      markSpoken: (id) => this.helperBuddies?.markSpoken(id),
       failTurn: (err) => this.failTurn(err),
       resolveCodexAuth: () => {
         const auth = resolveGroundingAuth({
@@ -401,16 +407,16 @@ export class Conversation {
       runCodexTextTurn: (text, token, turn, auth) =>
         this.codexText.run(text, [], '', token, turn, auth),
     });
-    this.agentTools = new AgentTools({
-      agents: this.agents,
+    this.helperBuddyTools = new HelperBuddyTools({
+      helperBuddies: this.helperBuddies,
       transcript: this.transcriptStore,
       turnCaptures: () => this.turnCaptures,
-      noteOrigin: (agentId, mode) => this.continuations.noteOrigin(agentId, mode),
+      noteOrigin: (helperBuddyId, mode) => this.continuations.noteOrigin(helperBuddyId, mode),
       surfaceError: (kind) => this.errors.surface(describeKind(kind)),
       prepareFilesystem:
-        deps.prepareAgentFilesystem ??
+        deps.prepareHelperBuddyFilesystem ??
         (() => Promise.reject(new Error('choose a folder for helper buddies first'))),
-      failFilesystem: deps.failAgentFilesystem ?? (() => Promise.resolve()),
+      failFilesystem: deps.failHelperBuddyFilesystem ?? (() => Promise.resolve()),
     });
     this.computerUse = new ComputerUseRunner({
       settings: this.settings,
@@ -455,11 +461,11 @@ export class Conversation {
       : new CodexResponsesSession({
           auth,
           instructions: getTextInstructions(
-            this.agentModeAvailableSnapshot,
+            this.helperBuddyModeAvailableSnapshot,
             this.computerUse.available(),
           ),
           tools: getTextToolDefinitions(
-            this.agentModeAvailableSnapshot,
+            this.helperBuddyModeAvailableSnapshot,
             this.computerUse.available(),
           ) as CodexToolDef[],
         });
@@ -907,17 +913,20 @@ export class Conversation {
       captures.map((c) => c.meta),
     );
     switch (invocation.kind) {
-      case 'spawn_agent':
+      case 'spawn_helper_buddy':
         this.codexText.trackToolPromise(
-          this.agentTools.spawnAgent(invocation.args, 'text').then((output) => {
+          this.helperBuddyTools.spawnHelperBuddy(invocation.args, 'text').then((output) => {
             if (!this.guard.isStale(token) && this.codexText.currentSession() === session) {
               session.sendToolOutput(call.callId, output);
             }
           }),
         );
         return;
-      case 'check_agents':
-        session.sendToolOutput(call.callId, this.agentTools.checkAgents(invocation.args));
+      case 'check_helper_buddies':
+        session.sendToolOutput(
+          call.callId,
+          this.helperBuddyTools.checkHelperBuddies(invocation.args),
+        );
         return;
       case 'use_computer': {
         const pending = this.computerUse.run(invocation.args, captures, token).then((output) => {
@@ -971,20 +980,20 @@ export class Conversation {
   }
 
   /** Rebuild tool/persona availability when the Codex sign-in changes. */
-  onAgentAvailabilityChanged(): void {
-    const available = this.agents?.isReady() ?? false;
-    if (available === this.agentModeAvailableSnapshot) return;
-    this.agentModeAvailableSnapshot = available;
+  onHelperBuddyAvailabilityChanged(): void {
+    const available = this.helperBuddies?.isReady() ?? false;
+    if (available === this.helperBuddyModeAvailableSnapshot) return;
+    this.helperBuddyModeAvailableSnapshot = available;
     this.codexText.reset();
     this.rebuildRealtimeSession();
   }
 
-  /** AgentManager completion hook: enqueue a normal automated foreground turn. */
-  deliverAgentResult(summary: AgentSummary): void {
+  /** HelperBuddyManager completion hook: enqueue a normal automated foreground turn. */
+  deliverHelperBuddyResult(summary: HelperBuddySummary): void {
     if (summary.status === 'done') {
       this.errors.noteAgentSucceeded();
     } else if (summary.status === 'failed') {
-      for (const kind of ['agent_not_signed_in', 'agent_quota'] as const) {
+      for (const kind of ['helper_buddy_not_signed_in', 'helper_buddy_quota'] as const) {
         if (summary.error === describeKind(kind).message) {
           this.errors.surface(describeKind(kind));
           break;
@@ -1000,7 +1009,7 @@ export class Conversation {
    * `listening`. During actual VAD speech the pending capture is non-null, so
    * the person still wins and the helper waits for that turn to settle.
    */
-  private foregroundReadyForAgentContinuation(): boolean {
+  private foregroundReadyForHelperBuddyContinuation(): boolean {
     if (this.holding || this.pendingResponses > 0) return false;
     const state = this.machine.current();
     if (state === 'idle') return true;
@@ -1313,8 +1322,11 @@ export class Conversation {
     const session = new RealtimeSession({
       model: this.sessionModel,
       voice: this.sessionVoice,
-      instructions: getSessionInstructions(this.agentModeAvailableSnapshot, computerUseAvailable),
-      tools: getToolDefinitions(this.agentModeAvailableSnapshot, computerUseAvailable),
+      instructions: getSessionInstructions(
+        this.helperBuddyModeAvailableSnapshot,
+        computerUseAvailable,
+      ),
+      tools: getToolDefinitions(this.helperBuddyModeAvailableSnapshot, computerUseAvailable),
       getApiKey: () => this.getApiKeyAndInitializeFingerprint(),
       turnDetection: this.sessionFullRealtimeMode ? 'server_vad' : 'manual',
     });
@@ -1379,8 +1391,12 @@ export class Conversation {
           this.guard.isCurrent(token) &&
           this.telemetry.active() === turn
         ) {
+          const holdStart = turn.tHoldStart;
+          if (holdStart === undefined) {
+            throw new Error('full realtime capture completed without a turn start timestamp');
+          }
           turn.tCaptureDone = Date.now();
-          turn.captureMs = turn.tCaptureDone - turn.tHoldStart!;
+          turn.captureMs = turn.tCaptureDone - holdStart;
         }
         return captures;
       });
@@ -1572,19 +1588,22 @@ export class Conversation {
   private handleToolCall(call: ToolCall): void {
     const invocation = parseRealtimeToolCall(call);
     switch (invocation.kind) {
-      case 'spawn_agent':
+      case 'spawn_helper_buddy':
         {
           const origin = this.session;
           const token = this.guard.currentToken();
-          void this.agentTools.spawnAgent(invocation.args, 'voice').then((output) => {
+          void this.helperBuddyTools.spawnHelperBuddy(invocation.args, 'voice').then((output) => {
             if (this.guard.isStale(token) || this.session !== origin) return;
             origin.sendToolOutput(call.callId, output);
             origin.continueResponse();
           });
         }
         return;
-      case 'check_agents':
-        this.session.sendToolOutput(call.callId, this.agentTools.checkAgents(invocation.args));
+      case 'check_helper_buddies':
+        this.session.sendToolOutput(
+          call.callId,
+          this.helperBuddyTools.checkHelperBuddies(invocation.args),
+        );
         this.session.continueResponse();
         return;
       case 'use_computer': {

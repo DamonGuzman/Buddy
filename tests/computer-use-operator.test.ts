@@ -3,10 +3,10 @@ import type { CaptureResult } from '../src/main/capture';
 import type { ChatGptCodexAuthSource } from '../src/main/auth/auth-source';
 import type { ApprovalRequest } from '../src/shared/types';
 import type {
-  AgentActionGatePort,
-  AgentApprovalPort,
-  AgentApprovalResolution,
-  AgentApprovalVerdict,
+  HelperBuddyActionGatePort,
+  HelperBuddyApprovalPort,
+  HelperBuddyApprovalResolution,
+  HelperBuddyApprovalVerdict,
 } from '../src/main/agents/types';
 import { ActionGate, type ComputerActionOutcomeEntry } from '../src/main/agents/gate/action-gate';
 import type { WindowsInputController } from '../src/main/computer/windows-input';
@@ -53,7 +53,7 @@ function liveGate(
   ids: string[] = ['approval-1'],
   onMarkedScreenshot: (base64: string) => void = () => undefined,
   onOutcome: (entry: ComputerActionOutcomeEntry) => void = () => undefined,
-): AgentActionGatePort {
+): HelperBuddyActionGatePort {
   let index = 0;
   return new ActionGate<void>({
     reviewer: { review: vi.fn(async () => Promise.reject(new Error('live review must not run'))) },
@@ -88,10 +88,10 @@ function liveGate(
 }
 
 function approvalPort(
-  verdict: AgentApprovalVerdict,
+  verdict: HelperBuddyApprovalVerdict,
   onRequest: (request: ApprovalRequest, signal: AbortSignal) => void = () => undefined,
-): AgentApprovalPort {
-  const resolution = (): AgentApprovalResolution => ({
+): HelperBuddyApprovalPort {
+  const resolution = (): HelperBuddyApprovalResolution => ({
     verdict,
     acknowledge: vi.fn(),
     reject: vi.fn(),
@@ -105,19 +105,19 @@ function approvalPort(
       onRequest(request, signal);
       return resolution();
     }),
-    cancelAgent: vi.fn(),
+    cancelHelperBuddy: vi.fn(),
     get: vi.fn(() => null),
     resolve: vi.fn(async () => undefined),
   };
 }
 
 function operatorSafety(
-  verdict: AgentApprovalVerdict = 'once',
+  verdict: HelperBuddyApprovalVerdict = 'once',
   onRequest?: (request: ApprovalRequest, signal: AbortSignal) => void,
   evidence?: LiveDesktopEvidencePort,
 ) {
   return {
-    agentId: 'live-run-1',
+    helperBuddyId: 'live-run-1',
     userRequest: 'Click Save in the open app.',
     gate: liveGate(['approval-immutable', 'approval-stale']),
     approvals: approvalPort(verdict, onRequest),

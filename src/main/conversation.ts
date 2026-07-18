@@ -9,7 +9,7 @@ export type { ConversationDebugInfo, ConversationDeps } from './conversation/con
 export type { CodexTextSession } from './conversation/codex-text-turn';
 export { CAPTURE_FAILED_CONTEXT, MIN_COMMIT_AUDIO_MS } from './conversation/constants';
 export type {
-  AgentsPort,
+  HelperBuddiesPort,
   OverlayPort,
   PanelPort,
   RecorderPort,

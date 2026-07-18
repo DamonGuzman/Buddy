@@ -69,7 +69,7 @@ class FakeDriver implements GateDriverPort {
 
 function request(driver: GateDriverPort, action: TriggerAction): GatedActionRequest {
   return {
-    agentId: 'agent-1',
+    helperBuddyId: 'helper-buddy-1',
     origin: 'buddy-browser',
     userRequest: 'Send the launch note to alice@example.com.',
     taskClaim: 'send launch note',
@@ -341,7 +341,7 @@ describe('ActionGate mechanical enforcement', () => {
     await vi.waitFor(() => expect(driver.inspectDetailed).toHaveBeenCalledOnce());
 
     controller.abort();
-    gate.cancelAgent('agent-1');
+    gate.cancelHelperBuddy('helper-buddy-1');
     rejectInspection(new Error('late inspection failure'));
 
     await expect(resolving).rejects.toThrow(/abort/i);
@@ -637,7 +637,7 @@ describe('ActionGate mechanical enforcement', () => {
     expect(await gate.execute(request(driver, CLICK), dispatch)).toMatchObject({
       kind: 'escalated',
     });
-    gate.cancelAgent('agent-1');
+    gate.cancelHelperBuddy('helper-buddy-1');
     driver.facts = { ...BUTTON, text: 'Post' };
     expect(
       await gate.execute(request(driver, { ...CLICK, label: 'Post' }), dispatch),
@@ -787,7 +787,7 @@ describe('ActionGate mechanical enforcement', () => {
     await gate.execute(request(driver, CLICK), async () => 'first');
     await gate.resolveEscalation('assessment-1', 'always');
 
-    const nextRun = { ...request(driver, CLICK), agentId: 'agent-2' };
+    const nextRun = { ...request(driver, CLICK), helperBuddyId: 'helper-buddy-2' };
     await gate.execute(nextRun, async () => 'second');
     expect(reviewer.review).toHaveBeenCalledTimes(2);
     expect(evidence[1]?.grants).toEqual([
@@ -803,7 +803,7 @@ describe('ActionGate mechanical enforcement', () => {
     const grantId = memory.grantStore.list()[0]?.id;
     expect(grantId).toBeDefined();
     memory.grantStore.revoke(grantId!);
-    await gate.execute({ ...nextRun, agentId: 'agent-3' }, async () => 'third');
+    await gate.execute({ ...nextRun, helperBuddyId: 'helper-buddy-3' }, async () => 'third');
     expect(reviewer.review).toHaveBeenCalledTimes(3);
     expect(evidence[2]?.grants).toEqual([]);
   });
@@ -837,7 +837,7 @@ describe('ActionGate mechanical enforcement', () => {
 
   it('ends follow-through after an executed cross-domain action and on cancellation', async () => {
     const memory = createMemory();
-    memory.followThrough.activate('agent-1', 'example.com');
+    memory.followThrough.activate('helper-buddy-1', 'example.com');
     const driver = new FakeDriver();
     const { gate, evidence } = setup(
       [
@@ -857,9 +857,9 @@ describe('ActionGate mechanical enforcement', () => {
     await gate.execute(request(driver, CLICK), async () => 'clicked');
     expect(evidence[1]?.grants).toEqual([]);
 
-    memory.followThrough.activate('agent-1', 'example.com');
-    gate.cancelAgent('agent-1');
-    expect(memory.followThrough.coverageFor('agent-1', 'example.com')).toBeNull();
+    memory.followThrough.activate('helper-buddy-1', 'example.com');
+    gate.cancelHelperBuddy('helper-buddy-1');
+    expect(memory.followThrough.coverageFor('helper-buddy-1', 'example.com')).toBeNull();
   });
 
   it('never presents a standing grant for a different normalized target', async () => {
@@ -912,7 +912,7 @@ describe('ActionGate mechanical enforcement', () => {
   it('reassesses when follow-through expires during review', async () => {
     let now = 1_000;
     const memory = createMemory(() => now);
-    memory.followThrough.activate('agent-1', 'example.com');
+    memory.followThrough.activate('helper-buddy-1', 'example.com');
     const driver = new FakeDriver();
     const { gate, reviewer, evidence } = setup([], memory);
     reviewer.review

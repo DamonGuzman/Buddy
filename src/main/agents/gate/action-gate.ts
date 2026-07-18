@@ -91,7 +91,7 @@ export interface GateDriverInspection {
 }
 
 export interface GatedActionRequest {
-  agentId: string;
+  helperBuddyId: string;
   origin: 'buddy-browser' | 'live-desktop';
   /** Exact latest typed/ASR request; sole reviewer authority anchor. */
   userRequest: string;
@@ -130,7 +130,7 @@ export interface GateEscalation {
   kind: 'escalated';
   /** Immutable one-use capability held by this ActionGate instance. */
   approvalId: string;
-  agentId: string;
+  helperBuddyId: string;
   /** Exact user authority anchor used by the reviewer. */
   userRequest: string;
   actionText: string;
@@ -150,7 +150,7 @@ export interface GateEscalation {
 export interface ActionGateJournalEntry {
   type: 'action_gate_assessment';
   at: number;
-  agentId: string;
+  helperBuddyId: string;
   approvalId: string | null;
   actionKind: TriggerAction['kind'];
   domain: string | null;
@@ -176,7 +176,7 @@ export interface ActionGateJournalPort {
 export interface ComputerActionOutcomeEntry {
   type: 'computer_action_executed' | 'computer_action_failed';
   at: number;
-  agentId: string;
+  helperBuddyId: string;
   approvalId: string | null;
   actionKind: TriggerAction['kind'];
   evidenceDigest: string;
@@ -205,15 +205,15 @@ export interface ActionGateGrantStorePort {
 
 export interface ActionGateFollowThroughPort {
   coverageFor(
-    agentId: string,
+    helperBuddyId: string,
     domain: string,
   ): { domain: string; expiresAt: number; remainingActions: number } | null;
   activate(
-    agentId: string,
+    helperBuddyId: string,
     domain: string,
   ): { domain: string; expiresAt: number; remainingActions: number };
-  recordExecutedAction(agentId: string, domain: string): boolean;
-  deactivate(agentId: string): void;
+  recordExecutedAction(helperBuddyId: string, domain: string): boolean;
+  deactivate(helperBuddyId: string): void;
 }
 
 interface InspectionSnapshot {
@@ -306,7 +306,7 @@ export class ActionGate<T = unknown> {
 
     if (decision === 'deny' || decision === 'handled') {
       this.pending.delete(approvalId);
-      if (decision === 'handled') this.followThrough.deactivate(pending.request.agentId);
+      if (decision === 'handled') this.followThrough.deactivate(pending.request.helperBuddyId);
       this.record(
         journalEntry(pending.request, pending.inspection, {
           approvalId,
@@ -434,11 +434,11 @@ export class ActionGate<T = unknown> {
     return this.pending.has(approvalId);
   }
 
-  cancelAgent(agentId: string): void {
+  cancelHelperBuddy(helperBuddyId: string): void {
     for (const [id, pending] of this.pending) {
-      if (pending.request.agentId === agentId) this.pending.delete(id);
+      if (pending.request.helperBuddyId === helperBuddyId) this.pending.delete(id);
     }
-    this.followThrough.deactivate(agentId);
+    this.followThrough.deactivate(helperBuddyId);
   }
 
   private async assessAndMaybeExecute(
@@ -456,7 +456,7 @@ export class ActionGate<T = unknown> {
       const inspection = emptyInspection(request.action);
       const reason = 'buddies cannot enter credential- or secret-shaped values';
       const strike = this.strikes.recordDenial(
-        request.agentId,
+        request.helperBuddyId,
         safeActionTargetKey(request.action, inspection.facts),
       );
       this.record(
@@ -518,7 +518,7 @@ export class ActionGate<T = unknown> {
 
     if (trigger.kind === 'hard-deny') {
       const strike = this.strikes.recordDenial(
-        request.agentId,
+        request.helperBuddyId,
         safeActionTargetKey(request.action, inspection.facts),
       );
       this.record(
@@ -576,7 +576,7 @@ export class ActionGate<T = unknown> {
         : [];
     const assessment = await this.reviewer.review({
       userRequest: request.userRequest,
-      agentId: request.agentId,
+      helperBuddyId: request.helperBuddyId,
       actionName: request.action.kind,
       actionArgs: actionArgs(request.action),
       justification: justificationOf(request.action),
@@ -681,7 +681,7 @@ export class ActionGate<T = unknown> {
 
     if (assessment.verdict.verdict === 'deny') {
       const strike = this.strikes.recordDenial(
-        request.agentId,
+        request.helperBuddyId,
         actionTargetKey(request.action, inspection.facts),
       );
       if (strike.decision === 'halt') {
@@ -798,7 +798,9 @@ export class ActionGate<T = unknown> {
       (inspection.facts === null ? null : tryNormalizeDomain(inspection.facts.url));
     const standingGrants = signature === null ? [] : this.grantStore.findMatches(signature);
     const coverage =
-      signature === null ? null : this.followThrough.coverageFor(request.agentId, signature.domain);
+      signature === null
+        ? null
+        : this.followThrough.coverageFor(request.helperBuddyId, signature.domain);
     const evidence: StandingApprovalEvidence[] = [
       ...standingGrants.map((grant) => ({
         domain: grant.domain,
@@ -843,14 +845,14 @@ export class ActionGate<T = unknown> {
     }
     if (memory.executionDomain !== null) {
       try {
-        this.followThrough.recordExecutedAction(request.agentId, memory.executionDomain);
+        this.followThrough.recordExecutedAction(request.helperBuddyId, memory.executionDomain);
       } catch (error) {
         this.reportApprovalMemoryError(error);
       }
     }
     if (humanApproved && memory.signature !== null) {
       try {
-        this.followThrough.activate(request.agentId, memory.signature.domain);
+        this.followThrough.activate(request.helperBuddyId, memory.signature.domain);
       } catch (error) {
         this.reportApprovalMemoryError(error);
       }
@@ -876,7 +878,7 @@ export class ActionGate<T = unknown> {
   ): Promise<T> {
     const navigationDestination = authorizedNavigationDestination(request.action, inspection.facts);
     const base: Omit<ComputerActionOutcomeEntry, 'type' | 'at' | 'errorClass'> = {
-      agentId: request.agentId,
+      helperBuddyId: request.helperBuddyId,
       approvalId,
       actionKind: request.action.kind,
       evidenceDigest,
@@ -1042,7 +1044,7 @@ export class ActionGate<T = unknown> {
     const publicResult = Object.freeze({
       kind: 'escalated' as const,
       approvalId,
-      agentId: request.agentId,
+      helperBuddyId: request.helperBuddyId,
       userRequest: request.userRequest,
       actionText: actionText(request.action, inspection.facts),
       browserDomain:
@@ -1094,7 +1096,7 @@ export class ActionGate<T = unknown> {
 }
 
 function validateRequest(request: GatedActionRequest): void {
-  if (!request.agentId.trim()) throw new Error('agentId is required');
+  if (!request.helperBuddyId.trim()) throw new Error('helperBuddyId is required');
   if (!request.userRequest.trim()) throw new Error('userRequest is required');
   if (request.action.kind !== 'screenshot' && !request.action.justification.trim()) {
     throw new Error('every acting action requires a justification');
@@ -1320,7 +1322,7 @@ function journalEntry(
   return {
     type: 'action_gate_assessment',
     at: Date.now(),
-    agentId: request.agentId,
+    helperBuddyId: request.helperBuddyId,
     approvalId: overrides.approvalId ?? null,
     actionKind: request.action.kind,
     domain:

@@ -1,9 +1,9 @@
 /**
- * M19 agent helpers: which helper sprites are on screen, where the cluster
+ * M19 helper buddies: which helper sprites are on screen, where the cluster
  * sits, which helper the cursor is hovering (with anti-flicker grace timers),
  * and the phase-boundary sweep that retires finished helpers on time.
  *
- * The pure decisions live in agents-ui.ts (selectHelpers / helperSlotViews /
+ * The pure decisions live in helper-buddies-ui.ts (selectHelpers / helperSlotViews /
  * desiredHelperHover / helperHoverStep / nextHelperTransition); this
  * controller owns their state + timing over an injected clock and TimerBag,
  * and pushes view changes through ports (main.tsx binds them to useState
@@ -19,11 +19,11 @@ import {
   helperSlotViews,
   nextHelperTransition,
   selectHelpers,
-} from './agents-ui';
-import type { HelperSlot, HelperView } from './agents-ui';
+} from './helper-buddies-ui';
+import type { HelperSlot, HelperView } from './helper-buddies-ui';
 import { placementFor } from './hover';
 import type { AuxHoverGeometry, Vec } from './hover';
-import type { AgentSummary, Rect } from '../../shared/types';
+import type { HelperBuddySummary, Rect } from '../../shared/types';
 import type { Clock, TimerBag } from './timer-bag';
 
 /** Sweep again this soon after a hover release (an exempt departure may be overdue). */
@@ -61,7 +61,9 @@ export interface HelperHoverPorts {
 }
 
 export class HelperHoverController {
-  private agents: AgentSummary[] = [];
+  private helperBuddies: HelperBuddySummary[] = [];
+  /** A push or accepted bootstrap has initialized the list, including an empty one. */
+  private initialized = false;
   private view: HelperView = { shown: [], overflow: [] };
   /** Visible sprite/pebble slots (key + absolute center), in render order. */
   private slots: HelperSlot[] = [];
@@ -69,38 +71,45 @@ export class HelperHoverController {
   /** Key a grace timer will commit (null = pending hide); see timers 'grace'. */
   private pending: string | null = null;
   /**
-   * M22: agent whose full-status card is expanded (clicked). Pinned like the
+   * M22: helper buddy whose full-status card is expanded (clicked). Pinned like the
    * hovered helper — exempt from the linger clock so the card the user is
    * reading never vanishes, even when it was opened from the overflow card
-   * (where `hovered` is OVERFLOW_KEY, not the agent id).
+   * (where `hovered` is OVERFLOW_KEY, not the helper-buddy id).
    */
   private pinned: string | null = null;
 
   constructor(private readonly ports: HelperHoverPorts) {}
 
-  /** Agent list push from main ('overlay:agents'). */
-  setAgents(list: AgentSummary[]): void {
-    this.agents = list;
+  /** Helper-buddy list push from main ('overlay:helper-buddies'). */
+  setHelperBuddies(list: HelperBuddySummary[]): void {
+    this.initialized = true;
+    this.helperBuddies = list;
     this.recompute();
   }
 
-  /** Bootstrap for late-created overlays (display hotplug) — push wins races. */
-  bootstrap(list: AgentSummary[]): void {
-    if (this.agents.length === 0 && list.length > 0) this.setAgents(list);
+  /**
+   * Bootstrap for late-created overlays (display hotplug). A push always wins,
+   * even when that newer push is an empty list. Returns whether the snapshot
+   * was accepted so the React mirror can make the same arbitration decision.
+   */
+  bootstrap(list: HelperBuddySummary[]): boolean {
+    if (this.initialized) return false;
+    this.setHelperBuddies(list);
+    return true;
   }
 
-  /** M22: pin/unpin the expanded full-status card's agent (null = none). */
+  /** M22: pin/unpin the expanded full-status card's helper buddy (null = none). */
   setPinned(id: string | null): void {
     if (id === this.pinned) return;
     this.pinned = id;
     this.recompute();
   }
 
-  /** Re-derive visible helpers + slot geometry (agents / anchor changed). */
+  /** Re-derive visible helpers + slot geometry (helper-buddy list / anchor changed). */
   recompute(): void {
     const now = this.ports.clock();
     this.ports.onNow(now);
-    this.view = selectHelpers(this.agents, now, this.keepKey());
+    this.view = selectHelpers(this.helperBuddies, now, this.keepKey());
     this.ports.onView(this.view);
     const count = this.view.shown.length + (this.view.overflow.length > 0 ? 1 : 0);
     if (count === 0) {
@@ -219,7 +228,7 @@ export class HelperHoverController {
     const next =
       delayOverrideMs !== undefined
         ? now + delayOverrideMs
-        : nextHelperTransition(this.agents, now, this.keepKey());
+        : nextHelperTransition(this.helperBuddies, now, this.keepKey());
     if (next === null) return;
     this.ports.timers.set('sweep', Math.max(SWEEP_MIN_DELAY_MS, next - now + SWEEP_SLACK_MS), () =>
       this.recompute(),

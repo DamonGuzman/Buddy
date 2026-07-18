@@ -99,7 +99,7 @@ export function usePanelWiring({ onMicError }: PanelWiringDeps): PanelWiring {
         );
         if (state.signedIn && state.valid) {
           const expected = actionableErrorIdentity(actionableErrorRef.current, [
-            'agent_not_signed_in',
+            'helper_buddy_not_signed_in',
           ]);
           if (expected !== null) {
             void clicky.resolveActionableError(expected).catch((error: unknown) => {

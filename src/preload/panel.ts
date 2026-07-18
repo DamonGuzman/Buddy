@@ -19,7 +19,7 @@ function subscribe<C extends Extract<keyof MainToPanelEvents, string>>(
   return () => ipcRenderer.removeListener(channel, listener);
 }
 
-// M21: the chat panel's transcript/composer/agents accessors retired with
+// M21: the chat panel's transcript/composer/helper-buddy accessors retired with
 // the panel — this window is the hidden audio host + settings surface.
 const api: PanelApi = {
   onSessionStatus: (cb) => subscribe('panel:session-status', cb),
@@ -61,12 +61,12 @@ const api: PanelApi = {
   // M11 addition (orchestrator-approved): audio device failure reporting.
   reportAudioError: (payload) => ipcRenderer.send('audio:capture-error', payload),
 
-  resolveApproval: (agentId, approvalId, verdict) =>
-    ipcRenderer.invoke('approval:resolve', agentId, approvalId, verdict),
-  showApprovalWindow: (agentId, approvalId) =>
-    ipcRenderer.invoke('approval:show-window', agentId, approvalId),
-  hideApprovalWindow: (agentId, approvalId) =>
-    ipcRenderer.invoke('approval:hide-window', agentId, approvalId),
+  resolveApproval: (helperBuddyId, approvalId, verdict) =>
+    ipcRenderer.invoke('approval:resolve', helperBuddyId, approvalId, verdict),
+  showApprovalWindow: (helperBuddyId, approvalId) =>
+    ipcRenderer.invoke('approval:show-window', helperBuddyId, approvalId),
+  hideApprovalWindow: (helperBuddyId, approvalId) =>
+    ipcRenderer.invoke('approval:hide-window', helperBuddyId, approvalId),
   listApprovals: () => ipcRenderer.invoke('approvals:list'),
   listGrants: () => ipcRenderer.invoke('grants:list'),
   revokeGrant: (id) => ipcRenderer.invoke('grants:revoke', id),

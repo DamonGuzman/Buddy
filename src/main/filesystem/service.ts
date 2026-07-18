@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
-import type { AgentSummary, FilesystemSelection, FilesystemTaskView } from '../../shared/types';
-import type { AgentFilesystemToolPort } from '../agents/types';
+import type {
+  HelperBuddySummary,
+  FilesystemSelection,
+  FilesystemTaskView,
+} from '../../shared/types';
+import type { HelperBuddyFilesystemToolPort } from '../agents/types';
 import { hostFs, hostFsPromises } from './host-fs';
 import {
   applyManifest,
@@ -26,7 +30,7 @@ const MAX_STAGED_ENTRIES = 20_000;
 const MAX_STAGED_BYTES = 2 * 1024 * 1024 * 1024;
 
 interface TaskRecord {
-  version: 3;
+  version: 4;
   rootPath: string;
   taskRoot: string;
   workspacePath: string;
@@ -38,7 +42,7 @@ interface TaskRecord {
   view: FilesystemTaskView;
 }
 
-export interface FilesystemAgentCompletion {
+export interface FilesystemHelperBuddyCompletion {
   handled: boolean;
   view: FilesystemTaskView | null;
   error: string | null;
@@ -55,7 +59,7 @@ export interface FilesystemTaskServiceOptions {
  * Owns picker grants, a lazy path-scoped staging area, host shells, publication, and Undo.
  * Selecting a folder and admitting a helper never hashes or copies the complete folder.
  */
-export class FilesystemTaskService implements AgentFilesystemToolPort {
+export class FilesystemTaskService implements HelperBuddyFilesystemToolPort {
   private readonly grants = new Map<string, string>();
   private readonly runner: HostShellRunner;
   private readonly records = new Map<string, TaskRecord>();
@@ -145,7 +149,7 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
       canUndo: false,
     };
     const record: TaskRecord = {
-      version: 3,
+      version: 4,
       rootPath,
       taskRoot,
       workspacePath,
@@ -176,11 +180,18 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
     }
   }
 
-  async attachAgent(taskId: string, agentId: string): Promise<FilesystemTaskView> {
+  async attachHelperBuddy(taskId: string, helperBuddyId: string): Promise<FilesystemTaskView> {
     const record = this.requireTask(taskId);
     if (record.view.status !== 'running')
-      throw new Error('filesystem task is not ready for an agent');
-    record.view = { ...record.view, agentId };
+      throw new Error('filesystem task is not ready for a helper buddy');
+    const id = validateHelperBuddyId(helperBuddyId);
+    if (record.view.helperBuddyId !== undefined)
+      throw new Error('filesystem task already has a helper buddy');
+    const assigned = [...this.records.values()].find(
+      (candidate) => candidate !== record && candidate.view.helperBuddyId === id,
+    );
+    if (assigned) throw new Error('helper buddy is already attached to another filesystem task');
+    record.view = { ...record.view, helperBuddyId: id };
     await this.persistRecord(record);
     this.emit(record);
     return cloneView(record.view);
@@ -198,12 +209,12 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
   async cancelPending(taskId: string): Promise<void> {
     const record = this.records.get(taskId);
     if (!record) return;
-    if (record.view.agentId) return;
+    if (record.view.helperBuddyId) return;
     await this.clearRecord(record);
   }
 
-  async completeAgent(summary: AgentSummary): Promise<FilesystemAgentCompletion> {
-    const record = this.findRecordForAgent(summary.id);
+  async completeHelperBuddy(summary: HelperBuddySummary): Promise<FilesystemHelperBuddyCompletion> {
+    const record = this.findRecordForHelperBuddy(summary.id);
     if (!record) return { handled: false, view: null, error: null, presentation: null };
     if (record.view.status !== 'running') {
       const view = cloneView(record.view);
@@ -245,7 +256,7 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
           await this.clearRecord(record);
           return { handled: true, view: null, error: null, presentation };
         }
-        const view = await this.publishCompletedAgent(record, staged, changes, summary);
+        const view = await this.publishCompletedHelperBuddy(record, staged, changes, summary);
         return { handled: true, view, error: null, presentation };
       } catch (error) {
         const message = errorText(error);
@@ -418,7 +429,9 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
   }> {
     const baseline = await readManifest(record.baselinePath);
     const staged = await buildManifest(record.workspacePath);
-    staged['.'] = baseline['.']!;
+    const baselineRoot = baseline['.'];
+    if (baselineRoot === undefined) throw new Error('baseline manifest is missing its root entry');
+    staged['.'] = baselineRoot;
     let baselineChanged = false;
     for (const [key, entry] of Object.entries(staged)) {
       if (key === '.' || baseline[key]) continue;
@@ -459,16 +472,19 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
       (change) =>
         change.after?.type === 'file' && isSafePresentationFile(change.path, change.after.mode),
     );
-    if (fileOutputs.length === 1)
-      return { kind: 'file', path: resolveInside(record.rootPath, fileOutputs[0]!.path) };
+    if (fileOutputs.length === 1) {
+      const [fileOutput] = fileOutputs;
+      if (fileOutput === undefined) throw new Error('presentation output selection failed');
+      return { kind: 'file', path: resolveInside(record.rootPath, fileOutput.path) };
+    }
     return changes.length > 0 ? { kind: 'folder', path: record.rootPath } : null;
   }
 
-  private async publishCompletedAgent(
+  private async publishCompletedHelperBuddy(
     record: TaskRecord,
     staged: TreeManifest,
     changes: ReturnType<typeof diffManifests>,
-    summary: AgentSummary,
+    summary: HelperBuddySummary,
   ): Promise<FilesystemTaskView> {
     const baseline = await readManifest(record.baselinePath);
     const live = await buildSparseManifest(record.rootPath, record.stagedRoots);
@@ -484,11 +500,13 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
 
     await mkdir(record.backupPath, { recursive: true, mode: 0o700 });
     const emptyBackup = await buildManifest(record.backupPath);
+    const emptyBackupRoot = emptyBackup['.'];
+    if (emptyBackupRoot === undefined) throw new Error('backup manifest is missing its root entry');
     await applyManifest(
       record.rootPath,
       record.backupPath,
       emptyBackup,
-      { ...baseline, '.': emptyBackup['.']! },
+      { ...baseline, '.': emptyBackupRoot },
       record.view.taskId,
     );
     record.view = {
@@ -637,8 +655,8 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
     return latest;
   }
 
-  private findRecordForAgent(agentId: string): TaskRecord | undefined {
-    return [...this.records.values()].find((record) => record.view.agentId === agentId);
+  private findRecordForHelperBuddy(helperBuddyId: string): TaskRecord | undefined {
+    return [...this.records.values()].find((record) => record.view.helperBuddyId === helperBuddyId);
   }
 
   private async persistRecord(record: TaskRecord): Promise<void> {
@@ -664,14 +682,29 @@ export class FilesystemTaskService implements AgentFilesystemToolPort {
       try {
         const raw = JSON.parse(await readFile(join(taskRoot, 'task.json'), 'utf8')) as TaskRecord;
         assertTaskRecord(raw, taskId);
-        this.records.set(taskId, {
+        const record: TaskRecord = {
           ...raw,
           taskRoot,
           workspacePath: join(taskRoot, 'workspace'),
           backupPath: join(taskRoot, 'before'),
           baselinePath: join(taskRoot, 'baseline.json'),
           stagedPath: join(taskRoot, 'staged.json'),
-        });
+        };
+        try {
+          const rootPath = await this.validateSelectedRoot(raw.rootPath);
+          if (rootPath !== raw.rootPath)
+            throw new Error('the selected folder now resolves to a different path');
+          record.rootPath = rootPath;
+        } catch (error) {
+          record.view = {
+            ...record.view,
+            status: 'failed',
+            canUndo: false,
+            error: `Buddy could not re-authorize the selected folder: ${errorText(error)}. The private safe copy was retained for inspection.`,
+          };
+        }
+        this.records.set(taskId, record);
+        if (record.view.status === 'failed') await this.persistRecord(record);
       } catch {
         await rm(taskRoot, { recursive: true, force: true });
       }
@@ -717,10 +750,17 @@ function isTaskId(value: string): boolean {
 
 function assertTaskRecord(raw: TaskRecord, taskId: string): void {
   if (
-    raw.version !== 3 ||
+    raw.version !== 4 ||
     raw.view?.taskId !== taskId ||
     typeof raw.view.createdAt !== 'number' ||
     typeof raw.rootPath !== 'string' ||
+    raw.view.rootName !== basename(raw.rootPath) ||
+    raw.view.displayPath !== raw.rootPath ||
+    !(
+      raw.view.helperBuddyId === undefined ||
+      (typeof raw.view.helperBuddyId === 'string' &&
+        validateHelperBuddyId(raw.view.helperBuddyId) === raw.view.helperBuddyId)
+    ) ||
     !Array.isArray(raw.stagedRoots) ||
     !raw.stagedRoots.every(
       (value) => typeof value === 'string' && validateRelativePath(value) === value,
@@ -744,6 +784,14 @@ function validateRelativePath(value: string): string {
   if (normalized === '..' || normalized.startsWith('../'))
     throw new Error(`path escapes the selected folder: ${value}`);
   return normalized;
+}
+
+function validateHelperBuddyId(value: string): string {
+  if (typeof value !== 'string') throw new Error('helper buddy id must be a string');
+  const id = value.trim();
+  if (!id || id !== value || id.length > 200 || id.includes('\0'))
+    throw new Error('helper buddy id is invalid');
+  return id;
 }
 
 function minimalRelativeRoots(values: readonly string[]): string[] {

@@ -21,11 +21,12 @@ import { appendFileSync, existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { getCodexAuthProvider } from './auth/codex-auth';
 import { CodexOAuthLoopback } from './auth/oauth-loopback';
-import { CodexAgentBackend } from './agents/backend';
+import { CodexHelperBuddyBackend } from './agents/helper-buddy-backend';
 import { ComputerUseRuntime } from './agents/computer-use-runtime';
-import { AgentManager } from './agents/manager';
-import { MockActionReviewer, MockAgentBackend } from './agents/mock-backend';
-import type { AgentBackend, AgentBrief } from './agents/types';
+import { HelperBuddyManager } from './agents/helper-buddy-manager';
+import { HelperBuddyMemoryStore } from './agents/helper-buddy-memory-store';
+import { MockActionReviewer, MockHelperBuddyBackend } from './agents/mock-helper-buddy-backend';
+import type { HelperBuddyBackend, HelperBuddyBrief } from './agents/types';
 import { assertPublicBrowserDestination, BuddyBrowserProfile } from './computer/browser-profile';
 import { runCaptureSelfTest } from './capture-self-test';
 import { Conversation } from './conversation';
@@ -33,7 +34,7 @@ import { startDebugServer } from './debug-server';
 import {
   devChipFlags,
   fakeMicWavPath,
-  isAgentMockEnabled,
+  isHelperBuddyMockEnabled,
   isCaptureSelfTestEnabled,
   isPanelCaptureTestEnabled,
   keepPanelOpen,
@@ -69,6 +70,8 @@ import { PhoneAudioBridgeSupervisor } from './phone-audio-bridge-supervisor';
 import { resolvePhoneAudioConfiguration } from './phone-audio-config';
 import { NativeReceiverLiveDesktopEvidence } from './computer/live-desktop-evidence';
 import { FilesystemTaskService } from './filesystem/service';
+import { OutputPresenter } from './output-presenter';
+import { MarkdownWindowManager } from './windows/markdown';
 import type { MainToPanelChannel, MainToPanelEvents } from '../shared/ipc';
 import type {
   AssistantState,
@@ -131,7 +134,9 @@ interface Services {
   permissions: PermissionController;
   computerUseRuntime: ComputerUseRuntime;
   filesystem: FilesystemTaskService;
-  agents: AgentManager;
+  markdown: MarkdownWindowManager;
+  memories: HelperBuddyMemoryStore;
+  helperBuddies: HelperBuddyManager;
   conversation: Conversation;
   phoneAudio: PhoneAudioBridgeClient | null;
   phoneBridgeSupervisor: PhoneAudioBridgeSupervisor | null;
@@ -167,6 +172,7 @@ async function main(): Promise<void> {
   await services.filesystem.initialize().catch((error: unknown) => {
     console.error('[filesystem] recovery initialization failed', error);
   });
+  await services.memories.initialize();
   if (process.platform === 'win32') app.setAppUserModelId('ai.fastyr.buddy');
   if (process.platform === 'darwin') app.dock?.hide();
 
@@ -277,15 +283,23 @@ function createServices(tray: TrayRef): Services {
     onState: (states) => whisper.send('whisper:filesystem-state', states),
     onSelection: (selection) => whisper.send('whisper:filesystem-selection', selection),
   });
+  const markdown = new MarkdownWindowManager();
+  const outputPresenter = new OutputPresenter({
+    openMarkdown: (path) => markdown.open(path),
+    openNative: (path) => shell.openPath(path),
+  });
+  const memories = new HelperBuddyMemoryStore(join(app.getPath('userData'), 'memories'));
   const hotkey = new HotkeyManager();
 
   const codexAuth = getCodexAuthProvider();
-  const codexAgentBackend = new CodexAgentBackend(codexAuth);
+  const codexHelperBuddyBackend = new CodexHelperBuddyBackend(codexAuth);
   const firecrawl = new FirecrawlClient({
     getApiKey: () => settings.getFirecrawlApiKey(),
   });
-  const agentMock = isAgentMockEnabled();
-  const agentBackend: AgentBackend = agentMock ? new MockAgentBackend() : codexAgentBackend;
+  const helperBuddyMock = isHelperBuddyMockEnabled();
+  const helperBuddyBackend: HelperBuddyBackend = helperBuddyMock
+    ? new MockHelperBuddyBackend()
+    : codexHelperBuddyBackend;
   let visibleApprovalIds = new Set<string>();
   const computerUseRuntime = new ComputerUseRuntime({
     whenAppReady: () => app.whenReady(),
@@ -330,8 +344,8 @@ function createServices(tray: TrayRef): Services {
     onTakeoverWindowHidden: () => panel.show(),
     beforeLiveApprovalResolution: () => panel.prepareForLiveActionDispatch(),
     onLiveApprovalResolutionFailed: () => panel.showInactive(),
-    ...(agentMock ? { createReviewer: () => new MockActionReviewer() } : {}),
-    ...(agentMock
+    ...(helperBuddyMock ? { createReviewer: () => new MockActionReviewer() } : {}),
+    ...(helperBuddyMock
       ? {
           createProfile: () =>
             new BuddyBrowserProfile({
@@ -377,32 +391,33 @@ function createServices(tray: TrayRef): Services {
       : null;
 
   // The agent manager and the conversation reference each other (finished
-  // agents deliver INTO the conversation; the conversation spawns THROUGH
+  // Helper buddies deliver INTO the conversation; the conversation spawns THROUGH
   // the manager), and the manager must be constructed first (ConversationDeps
   // takes it). Late-bind the back-edge through this ref — it is assigned the
-  // moment the conversation exists, and agent runs are async, so no manager
+  // moment the conversation exists, and helper-buddy runs are async, so no manager
   // callback can fire before then.
   const conversationRef: { current: Conversation | null } = { current: null };
-  const agents = new AgentManager({
-    backend: agentBackend,
-    isReady: () => agentMock || codexAgentBackend.isReady(),
-    persistencePath: join(app.getPath('userData'), 'agents.json'),
+  const helperBuddies = new HelperBuddyManager({
+    backend: helperBuddyBackend,
+    memory: memories,
+    isReady: () => helperBuddyMock || codexHelperBuddyBackend.isReady(),
+    persistencePath: join(app.getPath('userData'), 'helper-buddies.json'),
     firecrawl,
     browser: computerUseRuntime.browser,
     filesystem,
     // M19: the overlays mirror the same renderer-safe list (helper sprites).
-    // M21: the panel's agents view is gone — the overlay helper sprites are
-    // the agents surface now.
-    onAgentsChanged: (list) => {
+    // M21: the panel's helper-buddies view is gone — the overlay sprites are
+    // the helper-buddy surface now.
+    onHelperBuddiesChanged: (list) => {
       sessionRecorder?.record('agents_changed', list);
-      overlays.broadcast('overlay:agents', list);
+      overlays.broadcast('overlay:helper-buddies', list);
     },
     onFinished: (summary) => {
       void filesystem
-        .completeAgent(summary)
+        .completeHelperBuddy(summary)
         .then(async (completion) => {
           if (!completion.handled) {
-            conversationRef.current?.deliverAgentResult(summary);
+            conversationRef.current?.deliverHelperBuddyResult(summary);
             return;
           }
 
@@ -415,12 +430,12 @@ function createServices(tray: TrayRef): Services {
               summary: `the helper finished, but its file handoff stopped safely: ${completion.error}`,
             };
           } else if (completion.presentation) {
-            const openError = await shell.openPath(completion.presentation.path);
+            const presentation = await outputPresenter.present(completion.presentation);
             const name = basename(completion.presentation.path);
-            if (openError) {
+            if (presentation.error) {
               delivered = {
                 ...summary,
-                summary: `${summary.summary ?? 'the folder task finished.'} The changes were applied, but I couldn't open ${name}: ${openError}`,
+                summary: `${summary.summary ?? 'the folder task finished.'} The changes were applied, but I couldn't open ${name}: ${presentation.error}`,
               };
               whisper.show();
             } else {
@@ -430,12 +445,12 @@ function createServices(tray: TrayRef): Services {
               };
             }
           }
-          conversationRef.current?.deliverAgentResult(delivered);
+          conversationRef.current?.deliverHelperBuddyResult(delivered);
         })
         .catch((error: unknown) => {
           const detail = error instanceof Error ? error.message : String(error);
           console.error('[filesystem] completion failed', error);
-          conversationRef.current?.deliverAgentResult({
+          conversationRef.current?.deliverHelperBuddyResult({
             ...summary,
             status: 'failed',
             error: detail,
@@ -483,8 +498,8 @@ function createServices(tray: TrayRef): Services {
     overlays,
     panel: panelPortWithWhisperMirror,
     codexAuth,
-    agents,
-    prepareAgentFilesystem: async (task, agentId) => {
+    helperBuddies,
+    prepareHelperBuddyFilesystem: async (task, helperBuddyId) => {
       let selection = filesystem.activeSelection();
       if (!selection) {
         const result = await dialog.showOpenDialog({
@@ -501,10 +516,10 @@ function createServices(tray: TrayRef): Services {
         whisper.show();
       }
       const prepared = await filesystem.prepare(selection.id, task);
-      await filesystem.attachAgent(prepared.taskId, agentId);
+      await filesystem.attachHelperBuddy(prepared.taskId, helperBuddyId);
       return { taskId: prepared.taskId, rootName: prepared.rootName };
     },
-    failAgentFilesystem: async (taskId, reason) => {
+    failHelperBuddyFilesystem: async (taskId, reason) => {
       await filesystem.fail(taskId, reason);
     },
     computerUseSecurity: {
@@ -585,7 +600,9 @@ function createServices(tray: TrayRef): Services {
     permissions,
     computerUseRuntime,
     filesystem,
-    agents,
+    markdown,
+    memories,
+    helperBuddies,
     conversation,
     phoneAudio,
     phoneBridgeSupervisor,
@@ -682,9 +699,9 @@ function wireCodexSignin({ settings, panel, conversation }: Services): CodexSign
     panel.send('panel:codex-signin', state);
     panel.send('panel:settings', settings.get());
     if (state.signedIn && state.valid) {
-      panel.resolveCurrentActionableError(['agent_not_signed_in']);
+      panel.resolveCurrentActionableError(['helper_buddy_not_signed_in']);
     }
-    conversation.onAgentAvailabilityChanged();
+    conversation.onHelperBuddyAvailabilityChanged();
   };
   const oauth = new CodexOAuthLoopback({
     auth: getCodexAuthProvider(),
@@ -721,7 +738,7 @@ function registerInvokeHandlers(
   {
     settings,
     conversation,
-    agents,
+    helperBuddies,
     permissions,
     panel,
     whisper,
@@ -751,18 +768,18 @@ function registerInvokeHandlers(
     if (typeof grantId !== 'string' || typeof request !== 'string')
       throw new Error('invalid filesystem task');
     const prepared = await filesystem.prepare(grantId, request);
-    const agentId = `agent_fs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    await filesystem.attachAgent(prepared.taskId, agentId);
-    const brief: AgentBrief = {
-      id: agentId,
+    const helperBuddyId = `helper_buddy_fs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    await filesystem.attachHelperBuddy(prepared.taskId, helperBuddyId);
+    const brief: HelperBuddyBrief = {
+      id: helperBuddyId,
       userRequest: request.trim(),
       task: request.trim(),
+      browserEnabled: false,
       recentTranscript: '',
       createdAt: Date.now(),
-      browserEnabled: false,
       filesystem: { taskId: prepared.taskId, rootName: prepared.rootName },
     };
-    const spawned = agents.spawn(brief);
+    const spawned = helperBuddies.spawn(brief);
     if (!spawned.ok) {
       const reason =
         spawned.reason === 'not_signed_in'
@@ -786,7 +803,7 @@ function registerInvokeHandlers(
   handle('filesystem:cancel', async (taskId) => {
     const state = filesystem.state(taskId);
     if (!state) return;
-    if (state.agentId) agents.cancel(state.agentId);
+    if (state.helperBuddyId) helperBuddies.cancel(state.helperBuddyId);
     else await filesystem.cancelPending(taskId);
   });
   // Known limitation: mic devices are enumerated by the panel renderer
@@ -806,24 +823,24 @@ function registerInvokeHandlers(
   // M17 addition (integration-approved): Codex sign-in snapshot bootstrap.
   handle('codex:signin-state', () => getCodexAuthProvider().codexSignInState());
   handle('codex:sign-in', () => codexOAuth.start());
-  handle('agents:list', () => agents.list());
-  handle('agents:cancel', async (id) => {
-    agents.cancel(id);
-    await computerUseRuntime.cancelAgent(id);
+  handle('helper-buddies:list', () => helperBuddies.list());
+  handle('helper-buddies:cancel', async (id) => {
+    helperBuddies.cancel(id);
+    await computerUseRuntime.cancelHelperBuddy(id);
   });
-  handle('agents:cancel-all', async () => {
-    agents.cancelAll();
+  handle('helper-buddies:cancel-all', async () => {
+    helperBuddies.cancelAll();
     await computerUseRuntime.cancelAll();
   });
-  handle('agents:mark-seen', (id) => agents.markSeen(id));
-  handle('approval:resolve', (agentId, approvalId, verdict) =>
-    computerUseRuntime.controller.resolveApproval(agentId, approvalId, verdict),
+  handle('helper-buddies:mark-seen', (id) => helperBuddies.markSeen(id));
+  handle('approval:resolve', (helperBuddyId, approvalId, verdict) =>
+    computerUseRuntime.controller.resolveApproval(helperBuddyId, approvalId, verdict),
   );
-  handle('approval:show-window', (agentId, approvalId) =>
-    computerUseRuntime.controller.showApprovalWindow(agentId, approvalId),
+  handle('approval:show-window', (helperBuddyId, approvalId) =>
+    computerUseRuntime.controller.showApprovalWindow(helperBuddyId, approvalId),
   );
-  handle('approval:hide-window', (agentId, approvalId) =>
-    computerUseRuntime.controller.hideApprovalWindow(agentId, approvalId),
+  handle('approval:hide-window', (helperBuddyId, approvalId) =>
+    computerUseRuntime.controller.hideApprovalWindow(helperBuddyId, approvalId),
   );
   handle('approvals:list', () => computerUseRuntime.controller.listApprovals());
   handle('grants:list', () => computerUseRuntime.controller.listGrants());
@@ -833,12 +850,12 @@ function registerInvokeHandlers(
     computerUseRuntime.controller.listEnrolledSites(),
   );
   handle('buddy-browser:sign-out-site', async (domain) => {
-    await agents.withBrowserAdmissionBlocked(() =>
+    await helperBuddies.withBrowserAdmissionBlocked(() =>
       computerUseRuntime.controller.signOutSite(domain),
     );
   });
   handle('buddy-browser:clear', async () => {
-    await agents.withBrowserAdmissionBlocked(() => computerUseRuntime.controller.clearAll());
+    await helperBuddies.withBrowserAdmissionBlocked(() => computerUseRuntime.controller.clearAll());
   });
 }
 
@@ -857,14 +874,14 @@ function validAudioDeviceError(payload: AudioDeviceError): AudioDeviceError | nu
 }
 
 /** IPC payloads are untrusted renderer input — validate before acting. */
-function validAgentId(payload: { id: string }): string | null {
+function validHelperBuddyId(payload: { id: string }): string | null {
   return payload && typeof payload.id === 'string' ? payload.id : null;
 }
 
 function registerRendererEvents({
   conversation,
   whisper,
-  agents,
+  helperBuddies,
   panel,
   computerUseRuntime,
   filesystem,
@@ -886,19 +903,19 @@ function registerRendererEvents({
     conversation.handlePlaybackRing(ring);
   });
   // Waiting helpers use their click to bring the approval queue into view.
-  onRendererEvent('overlay:agent-click', (payload) => {
-    const id = validAgentId(payload);
+  onRendererEvent('overlay:helper-buddy-click', (payload) => {
+    const id = validHelperBuddyId(payload);
     if (id === null) return;
-    const agent = agents.list().find((item) => item.id === id);
-    if (filesystem.state()?.agentId === id) whisper.show();
-    else if (agent?.status === 'waiting_approval') panel.show();
+    const helperBuddy = helperBuddies.list().find((item) => item.id === id);
+    if (filesystem.state()?.helperBuddyId === id) whisper.show();
+    else if (helperBuddy?.status === 'waiting_approval') panel.show();
   });
-  onRendererEvent('overlay:agent-cancel', (payload) => {
-    const id = validAgentId(payload);
+  onRendererEvent('overlay:helper-buddy-cancel', (payload) => {
+    const id = validHelperBuddyId(payload);
     if (id !== null) {
-      agents.cancel(id);
+      helperBuddies.cancel(id);
       void computerUseRuntime
-        .cancelAgent(id)
+        .cancelHelperBuddy(id)
         .catch((error: unknown) =>
           console.error('[computer-use] agent cancellation failed', error),
         );
@@ -1010,7 +1027,7 @@ function wirePowerMonitor({
   hotkey,
   conversation,
   permissions,
-  agents,
+  helperBuddies,
   computerUseRuntime,
 }: Services): void {
   // F1 fix (C1 + sleep/resume): the secure desktop (Ctrl+Alt+Del) and lock
@@ -1021,7 +1038,7 @@ function wirePowerMonitor({
     sessionRecorder?.record('system_lock', null);
     hotkey.forceCancel();
     conversation.deactivateFullRealtime();
-    void agents
+    void helperBuddies
       .cancelBrowserRuns()
       .then(() => computerUseRuntime.suspend())
       .catch((error: unknown) => console.error('[computer-use] lock shutdown failed', error));
@@ -1031,7 +1048,7 @@ function wirePowerMonitor({
     sessionRecorder?.flush();
     hotkey.forceCancel();
     conversation.deactivateFullRealtime();
-    void agents
+    void helperBuddies
       .cancelBrowserRuns()
       .then(() => computerUseRuntime.suspend())
       .catch((error: unknown) => console.error('[computer-use] suspend shutdown failed', error));
@@ -1070,8 +1087,9 @@ function buildDebugSurface({
   overlays,
   panel,
   hotkey,
-  agents,
+  helperBuddies,
   computerUseRuntime,
+  filesystem,
 }: Services): void {
   const getDebugState = (): DebugState => ({
     appVersion: app.getVersion(),
@@ -1109,30 +1127,39 @@ function buildDebugSurface({
     grounding: {
       query: (q) => conversation.debugGroundingQuery(q),
     },
-    agents: {
-      spawn: (task) =>
-        agents.spawn({
-          id: `agent_debug_${Date.now()}`,
+    helperBuddies: {
+      spawn: async (task) => {
+        const selection = filesystem.activeSelection();
+        if (!selection) return { ok: false, reason: 'choose a helper folder first' };
+        const id = `helper_buddy_debug_${Date.now()}`;
+        const prepared = await filesystem.prepare(selection.id, task);
+        await filesystem.attachHelperBuddy(prepared.taskId, id);
+        const result = helperBuddies.spawn({
+          id,
           userRequest: task,
           task,
+          browserEnabled: false,
           recentTranscript: '',
           createdAt: Date.now(),
-          browserEnabled: false,
-        }),
+          filesystem: { taskId: prepared.taskId, rootName: prepared.rootName },
+        });
+        if (!result.ok) await filesystem.fail(prepared.taskId, result.reason);
+        return result;
+      },
       spawnBrowser: (task) =>
-        agents.spawn({
-          id: `agent_debug_browser_${Date.now()}`,
+        helperBuddies.spawn({
+          id: `helper_buddy_debug_browser_${Date.now()}`,
           userRequest: task,
           task,
           recentTranscript: '',
           createdAt: Date.now(),
           browserEnabled: true,
         }),
-      list: () => agents.list(),
+      list: () => helperBuddies.list(),
       cancel: (id) => {
-        agents.cancel(id);
+        helperBuddies.cancel(id);
         void computerUseRuntime
-          .cancelAgent(id)
+          .cancelHelperBuddy(id)
           .catch((error: unknown) =>
             console.error('[computer-use] debug cancellation failed', error),
           );
@@ -1143,16 +1170,16 @@ function buildDebugSurface({
         ok: false,
         error:
           'standalone assessment has no trusted browser observation; spawn a browser mock scenario to exercise the production gate',
-        agentId: input.agentId ?? null,
+        helperBuddyId: input.helperBuddyId ?? null,
       }),
       listGrants: () => computerUseRuntime.controller.listGrants(),
-      resolveAgentApproval: async (agentId, approvalId, verdict) => {
+      resolveHelperBuddyApproval: async (helperBuddyId, approvalId, verdict) => {
         const request = computerUseRuntime.controller
           .listApprovals()
           .find((item) => item.approvalId === approvalId);
-        if (!request || request.agentId !== agentId) return false;
+        if (!request || request.helperBuddyId !== helperBuddyId) return false;
         await computerUseRuntime.controller.resolveApproval(
-          request.agentId,
+          request.helperBuddyId,
           request.approvalId,
           verdict,
         );
@@ -1172,13 +1199,14 @@ function registerShutdown(
     conversation,
     phoneAudio,
     phoneBridgeSupervisor,
-    agents,
+    helperBuddies,
     computerUseRuntime,
     sessionRecorder,
     modelExecutionRecorder,
     overlays,
     panel,
     whisper,
+    markdown,
   }: Services,
   codexOAuth: CodexOAuthLoopback,
   codexPoll: NodeJS.Timeout,
@@ -1213,13 +1241,14 @@ function registerShutdown(
       await attempt('conversation', () => conversation.close());
       await attempt('phone audio', () => phoneAudio?.close());
       await attempt('phone bridge', () => phoneBridgeSupervisor?.close());
-      await attempt('agents', () => agents.dispose());
+      await attempt('helper-buddies', () => helperBuddies.dispose());
       await attempt('computer use', () => computerUseRuntime.dispose());
       await attempt('model execution recorder', () => modelExecutionRecorder.close('app_quit'));
       await attempt('session recorder', () => sessionRecorder?.close('app_quit'));
       await attempt('overlays', () => overlays.destroy());
       await attempt('panel', () => panel.destroy());
       await attempt('whisper', () => whisper.destroy());
+      await attempt('markdown windows', () => markdown.destroy());
       shutdownFinished = true;
       app.quit();
     })();

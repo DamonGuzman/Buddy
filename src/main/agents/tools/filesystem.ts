@@ -1,6 +1,6 @@
-import type { AgentToolSpec } from '../types';
+import type { HelperBuddyToolSpec } from '../types';
 
-export const filesystemTools: AgentToolSpec[] = [
+export const filesystemTools: HelperBuddyToolSpec[] = [
   {
     definition: {
       type: 'function',

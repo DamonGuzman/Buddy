@@ -35,7 +35,7 @@ export interface FilesystemTaskView {
   request: string;
   status: FilesystemTaskStatus;
   createdAt: number;
-  agentId?: string;
+  helperBuddyId?: string;
   summary?: string;
   error?: string;
   changes: FilesystemChange[];

@@ -100,20 +100,6 @@ const SCENARIOS = [
     },
   },
   {
-    // M11: agent-mode stub — ARCHITECTURE §2/§5 promise a friendly
-    // "coming soon" voice line when the user asks for agent mode.
-    name: 'agent-mode',
-    description: 'user text contains "agent": friendly coming-soon line (stubbed feature)',
-    matches: (turn) => /\bagent\b/.test(userTextOf(turn)),
-    async run(io) {
-      await io.speak(
-        "agent mode isn't ready quite yet — soon i'll be able to click around for you, " +
-          'not just point. for now, ask me to point at anything and i will.',
-      );
-      await io.done('completed');
-    },
-  },
-  {
     name: 'garbage-args',
     description: 'user text contains "garbage": point_at with non-JSON arguments',
     matches: (turn) => /\bgarbage\b/.test(userTextOf(turn)),

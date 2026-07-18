@@ -34,7 +34,7 @@ import type { PhoneAudioBridgeStatus } from './phone-audio-bridge-supervisor';
 import type { ResponseStatus, ResponseUsage } from './realtime/protocol';
 import type { ToolCall } from './realtime/session';
 import type {
-  AgentSummary,
+  HelperBuddySummary,
   AssistantState,
   PlaybackStatsUpdate,
   PointerCommand,
@@ -151,7 +151,7 @@ export interface SessionEventMap {
   // App bootstrap / OS lifecycle (index.ts).
   phone_audio_bridge_status: PhoneAudioBridgeStatus;
   phone_audio_bridge_client: { state: 'connected' | 'disconnected' };
-  agents_changed: AgentSummary[];
+  agents_changed: HelperBuddySummary[];
   action_gate_assessment: ActionGateJournalEntry;
   computer_action_executed: ComputerActionOutcomeEntry;
   computer_action_failed: ComputerActionOutcomeEntry;

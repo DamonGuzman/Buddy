@@ -42,17 +42,16 @@ typed action** and is always signposted by a visible indicator.
 - Persona system prompt: lowercase, warm, brief, "written for the ear", never ends on a dead-end —
   always plants a seed for something more ambitious to try next. Calls `point_at` whenever it
   references something on screen.
+- Helper buddies: the foreground Buddy delegates substantive background work through
+  `spawn_helper_buddy`, checks progress with `check_helper_buddies`, and synthesizes completion
+  results. Helper buddies use the ChatGPT subscription backend, Firecrawl, durable memory, and
+  picker-authorized transactional filesystem tools; explicitly granted tasks can also use Buddy's
+  persistent browser profile through the shared ActionGate. See `docs/HELPER-BUDDY-MODE.md` and
+  `docs/HELPER-BUDDY-EXECUTION.md`.
 - **Mock Realtime server** (local WS, speaks the same protocol subset) + **debug harness** for QA.
 
 **Out (stub or defer):**
 
-- Agent mode ("Buddy, agent") — main-process background helpers with client-executed Firecrawl v2
-  search, scrape, map, crawl, batch scrape, and research tools, persisted results, cancellation,
-  and voice handoff/return. Firecrawl Agent/Extract are intentionally not registered because Buddy
-  owns the agent loop. An explicitly granted
-  task may also use Buddy's dedicated persistent browser profile through the shared ActionGate;
-  the user's live desktop remains a separate Settings opt-in with one-use human approval per
-  action. See `docs/AGENT-COMPUTER-USE.md`.
 - Cloudflare Worker / ephemeral-token proxy (MVP is local-key, single user).
 - Integrations (Notion/Gmail/Calendar/Linear), wake word, ElevenLabs, auto-update, installer polish.
 
@@ -84,10 +83,10 @@ typed action** and is always signposted by a visible indicator.
   survives as a hidden audio host (mic capture + voice playback AudioWorklets live in its
   renderer, pre-created at app-ready, unthrottled) whose only visible face is a settings-only
   view opened from the tray's Settings item (plus first-run / actionable-error showOnce).
-  Transcript, composer, and agents view are deleted — the whisper composer, caption bubbles,
+  Transcript, composer, and helper-buddy view are deleted — the whisper composer, caption bubbles,
   and overlay helper sprites carry those jobs. Tray click now toggles the whisper; a second
-  app launch summons it too. Clicking a helper sprite expands its card in place to the agent's
-  full status (M22, docs/AGENT-MODE.md §5.5). Internal `panel:*` channel and
+  app launch summons it too. Clicking a helper sprite expands its card in place to the helper buddy's
+  full status (M22, docs/HELPER-BUDDY-MODE.md §5.5). Internal `panel:*` channel and
   file names remain for wire/history stability and now denote this window.
 - **Whisper renderer** (M20): ~340×244 transparent frameless composer anchored beside the buddy's
   rest spot — the text channel for can't-talk environments. Summoned by a hotkey TAP (release
@@ -99,19 +98,27 @@ typed action** and is always signposted by a visible indicator.
   Main mirrors `panel:transcript` + `panel:assistant-state` to it at the conversation's panel
   port (index.ts), so the conversation package stays whisper-unaware. Typed turns pair with the
   `voiceMuted` setting (quiet mode): model audio deltas are not played and captions are forced.
+- **Markdown renderer**: a normal focusable, resizable document window for verified helper outputs.
+  Main validates and reads bounded UTF-8 `.md`/`.markdown`-family files, then exposes only the title
+  and content to the sender-bound sandboxed preload. React renders GFM with raw HTML and arbitrary
+  image loading disabled; the window stays hidden until the rich tree commits. Rendering failures
+  fail closed and never fall back to an OS source editor. Other output types keep their native app.
 - IPC is **typed**: all channels + payload types live in `src/shared/ipc.ts`. Renderers get a
   narrow `window.clicky` API from `preload`. No `remote`, contextIsolation on everywhere.
 
-## 5. Module map (ownership boundaries for agents)
+## 5. Module map
 
 ```
 src/
   shared/            types, ipc contract, settings schema, constants  (integration-owned)
   main/
     index.ts         app bootstrap, wiring only
+    agents/          background helper loop, capabilities, and owner-only Markdown memory store
     tray.ts          tray icon + menu
-    windows/         overlay + panel + whisper window management (per-display lifecycle,
-                     display hotplug; whisper.ts = M20 floating composer)
+    windows/         overlay + panel + whisper + rich Markdown window management (per-display
+                     lifecycle, display hotplug; whisper.ts = M20 floating composer)
+    markdown/        bounded regular-file detection and strict UTF-8 document loading
+    output-presenter.ts  routes Markdown outputs internally and other artifacts to native apps
     hotkey.ts        uiohook hold-to-talk state machine (down→capture+listen, up→commit;
                      M20: release within TAP_MAX_MS additionally emits 'tap' → whisper)
     capture.ts       multi-display screenshot pipeline (capture, resize, label, filter own windows)
@@ -129,15 +136,15 @@ src/
                      read state, trigger pointer, dump last capture metadata
   renderer/
     overlay/         buddy canvas/DOM, bezier animation, caption bubble, indicators,
-                     agent helper sprites + hover card + click-to-expand full status
-                     (M19/M22, docs/AGENT-MODE.md §5.5)
+                     helper-buddy sprites + hover card + click-to-expand full status
+                     (M19/M22, docs/HELPER-BUDDY-MODE.md §5.5)
     panel/           M21: settings-only React app + the hidden audio engines
-                     (the chat panel UI — transcript/composer/agents — is deleted)
+                     (the chat panel UI — transcript/composer/helper-buddies — is deleted)
     whisper/         M20 floating composer (reply stack + input + quiet-mode toggle)
   preload/           contextBridge APIs for each renderer
 tools/
   mock-realtime/     standalone Node WS server speaking the Realtime protocol subset; scripted
-                     scenarios (answer+point, multi-point, tone-audio output, agent-mode stub)
+                     scenarios (answer+point, multi-point, tone-audio output, errors)
 tests/               vitest unit tests (coords, protocol framing, settings, hotkey FSM)
 ```
 
@@ -230,8 +237,8 @@ listener are created BEFORE `hotkey.start()` (an unlistened EventEmitter `error`
 boot). Last resort: `uncaughtException`/`unhandledRejection` log to `<userData>/clicky.log`
 and keep the tray app alive (verify with `CLICKY_TEST_THROW=exception|rejection`). Hostile-
 endpoint testing: `tools/mock-realtime/reject-server.js` (HTTP-status upgrade rejections,
-pre-settle quota errors); mock scenarios cover rate-limit / server-error / incomplete / agent-
-mode. Runtime flags (`hookAlive`, CLICKY_* dev flags) reach the panel via `panel:runtime`.
+pre-settle quota errors); mock scenarios cover rate-limit / server-error / incomplete responses.
+Runtime flags (`hookAlive`, CLICKY_* dev flags) reach the panel via `panel:runtime`.
 
 ## 7c. Local session history
 
@@ -239,7 +246,7 @@ Every app run is recorded under `<userData>/sessions/YYYY-MM-DD/<timestamp>_<ses
 debugging. `events.jsonl` is an append-only, sequenced journal, so completed records survive an
 abrupt exit; `session.json` is an atomically replaced manifest whose `active` status identifies an
 uncleanly-ended run. The journal includes renderer-safe settings, assistant/realtime state,
-transcript upserts, errors, agent snapshots, tool calls, pointer attribution, response usage,
+transcript upserts, errors, helper-buddy snapshots, tool calls, pointer attribution, response usage,
 playback statistics, and complete turn timings. Each explicit turn also retains its JPEG captures
 (with SHA-256 + `CaptureMeta`) and lossless input/output PCM sidecars (24 kHz, mono, signed 16-bit
 little-endian). No continuous capture is added: only the screenshots/audio already collected for an

@@ -8,7 +8,7 @@
  * approved edits.
  */
 
-export * from './types/agents';
+export * from './types/helper-buddies';
 export * from './types/actionable-error';
 export * from './types/audio';
 export * from './types/capture';

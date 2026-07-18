@@ -36,11 +36,16 @@ import {
   CARD_SHOW_DELAY_MS,
   FINISHED_LINGER_MS,
   HELPER_ARC_RADIUS,
-} from '../src/renderer/overlay/agents-ui';
-import type { HelperView } from '../src/renderer/overlay/agents-ui';
+} from '../src/renderer/overlay/helper-buddies-ui';
+import type { HelperView } from '../src/renderer/overlay/helper-buddies-ui';
 import { DWELL_MS as HOVER_DWELL_MS, HINT_DELAY_MS } from '../src/renderer/overlay/hover';
 import type { AuxHoverGeometry, HoverGateInput, Vec } from '../src/renderer/overlay/hover';
-import type { AgentSummary, AssistantState, OverlayHoverEvent, Rect } from '../src/shared/types';
+import type {
+  HelperBuddySummary,
+  AssistantState,
+  OverlayHoverEvent,
+  Rect,
+} from '../src/shared/types';
 
 // ---------------------------------------------------------------------------
 // Fake time: a TimerHost + Clock that fires due timers in order on advance().
@@ -395,9 +400,9 @@ describe('PointerChoreographer', () => {
 
 const NOW0 = 10_000_000;
 
-function agent(over: Partial<AgentSummary>): AgentSummary {
+function helperBuddy(over: Partial<HelperBuddySummary>): HelperBuddySummary {
   return {
-    id: 'agent_1_1',
+    id: 'helper_buddy_1_1',
     task: 'find the best 27 inch monitor under $400',
     status: 'running',
     createdAt: NOW0 - 30_000,
@@ -459,17 +464,39 @@ describe('HelperHoverController', () => {
   // Bottom-right anchor: arc sweeps up-left, first slot straight up.
   const SPRITE: Vec = { x: 900, y: 500 - HELPER_ARC_RADIUS };
 
-  it('derives the cluster + aux geometry from the agent list', () => {
+  it('derives the cluster + aux geometry from the helper-buddy list', () => {
     const h = helperHarness();
-    h.ctrl.setAgents([agent({ id: 'a' })]);
+    h.ctrl.setHelperBuddies([helperBuddy({ id: 'a' })]);
     expect(h.out.cluster).toEqual({ anchor: { x: 900, y: 500 }, dir: -1, vdir: -1 });
     expect(h.out.view.shown.map((a) => a.id)).toEqual(['a']);
     expect(h.out.aux).toEqual({ targets: [SPRITE], targetRadius: 18, rect: null });
   });
 
+  it('never lets a stale bootstrap replace a pushed list, including an empty push', () => {
+    const populated = helperBuddy({ id: 'snapshot-only' });
+
+    const afterPopulatedPush = helperHarness();
+    afterPopulatedPush.ctrl.setHelperBuddies([helperBuddy({ id: 'pushed' })]);
+    expect(afterPopulatedPush.ctrl.bootstrap([populated])).toBe(false);
+    expect(afterPopulatedPush.out.view.shown.map((item) => item.id)).toEqual(['pushed']);
+
+    const afterEmptyPush = helperHarness();
+    afterEmptyPush.ctrl.setHelperBuddies([]);
+    expect(afterEmptyPush.ctrl.bootstrap([populated])).toBe(false);
+    expect(afterEmptyPush.out.view.shown).toEqual([]);
+  });
+
+  it('accepts the bootstrap exactly once when no push arrived', () => {
+    const h = helperHarness();
+    expect(h.ctrl.bootstrap([helperBuddy({ id: 'snapshot' })])).toBe(true);
+    expect(h.out.view.shown.map((item) => item.id)).toEqual(['snapshot']);
+    expect(h.ctrl.bootstrap([helperBuddy({ id: 'stale' })])).toBe(false);
+    expect(h.out.view.shown.map((item) => item.id)).toEqual(['snapshot']);
+  });
+
   it('shows the card after the show-grace and hides after the hide-grace', async () => {
     const h = helperHarness();
-    h.ctrl.setAgents([agent({ id: 'a' })]);
+    h.ctrl.setHelperBuddies([helperBuddy({ id: 'a' })]);
     h.setCursor(SPRITE);
     h.ctrl.updateFromCursor();
     expect(h.out.hover).toBeNull(); // anti-flicker: not yet
@@ -489,7 +516,7 @@ describe('HelperHoverController', () => {
 
   it('a quick pass over a sprite never opens the card', async () => {
     const h = helperHarness();
-    h.ctrl.setAgents([agent({ id: 'a' })]);
+    h.ctrl.setHelperBuddies([helperBuddy({ id: 'a' })]);
     h.setCursor(SPRITE);
     h.ctrl.updateFromCursor();
     h.setCursor({ x: 700, y: 100 });
@@ -500,7 +527,7 @@ describe('HelperHoverController', () => {
 
   it('keeps the card open while the cursor sits inside it, and syncs its rect', async () => {
     const h = helperHarness();
-    h.ctrl.setAgents([agent({ id: 'a' })]);
+    h.ctrl.setHelperBuddies([helperBuddy({ id: 'a' })]);
     h.setCursor(SPRITE);
     h.ctrl.updateFromCursor();
     await h.time.advance(CARD_SHOW_DELAY_MS);
@@ -518,7 +545,10 @@ describe('HelperHoverController', () => {
 
   it('switches directly between helper sprites with no grace delay', async () => {
     const h = helperHarness();
-    h.ctrl.setAgents([agent({ id: 'a' }), agent({ id: 'b', createdAt: NOW0 - 10_000 })]);
+    h.ctrl.setHelperBuddies([
+      helperBuddy({ id: 'a' }),
+      helperBuddy({ id: 'b', createdAt: NOW0 - 10_000 }),
+    ]);
     const targets = h.out.aux?.targets ?? [];
     expect(targets).toHaveLength(2);
     h.setCursor(targets[0] ?? null);
@@ -532,7 +562,7 @@ describe('HelperHoverController', () => {
 
   it('ineligible hovering (machine disabled, not interactive) selects nothing', async () => {
     const h = helperHarness();
-    h.ctrl.setAgents([agent({ id: 'a' })]);
+    h.ctrl.setHelperBuddies([helperBuddy({ id: 'a' })]);
     h.setEligible(false);
     h.setCursor(SPRITE);
     h.ctrl.updateFromCursor();
@@ -542,8 +572,8 @@ describe('HelperHoverController', () => {
 
   it('release() drops an overdue hovered helper and sweeps it away shortly after', async () => {
     const h = helperHarness();
-    const done = agent({ id: 'd', status: 'done', unseen: true, finishedAt: NOW0 - 1_000 });
-    h.ctrl.setAgents([done]);
+    const done = helperBuddy({ id: 'd', status: 'done', unseen: true, finishedAt: NOW0 - 1_000 });
+    h.ctrl.setHelperBuddies([done]);
     h.setCursor(SPRITE);
     h.ctrl.updateFromCursor();
     await h.time.advance(CARD_SHOW_DELAY_MS);
@@ -564,8 +594,8 @@ describe('HelperHoverController', () => {
 
   it('a pinned (expanded) helper is exempt from the linger clock until unpinned', async () => {
     const h = helperHarness();
-    const done = agent({ id: 'd', status: 'done', unseen: true, finishedAt: NOW0 - 1_000 });
-    h.ctrl.setAgents([done]);
+    const done = helperBuddy({ id: 'd', status: 'done', unseen: true, finishedAt: NOW0 - 1_000 });
+    h.ctrl.setHelperBuddies([done]);
     // Pinned via the expanded card (hover may sit on the overflow pebble or
     // elsewhere) — the helper must survive well past its linger window.
     h.ctrl.setPinned('d');

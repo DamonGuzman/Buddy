@@ -19,8 +19,8 @@ export type ActionableErrorKind =
   | 'hotkey_dead'
   | 'settings_reset'
   | 'settings_save_failed'
-  | 'agent_not_signed_in'
-  | 'agent_quota';
+  | 'helper_buddy_not_signed_in'
+  | 'helper_buddy_quota';
 
 /** Settings destination that can help resolve an actionable failure. */
 export type ActionableErrorTarget =

@@ -37,7 +37,7 @@ interface SettingsViewProps {
   onPermissionHealth: (health: PermissionHealth) => void;
 }
 
-/** Settings: API key, model, voice, captions, mic, hotkey, agent-mode teaser. */
+/** Settings: API key, model, voice, captions, mic, hotkey, helper-buddy status. */
 export function SettingsView({
   settings,
   session,
@@ -207,7 +207,7 @@ export function SettingsView({
             <span>🪄</span>
             <span>
               {settings.firecrawlApiKeyPresent && !settings.firecrawlApiKeyUnreadable
-                ? 'agent mode is ready — say “buddy, agent…” to send off research.'
+                ? 'helper buddies are ready — ask buddy to send one off for research.'
                 : 'add a Firecrawl key above to give helper buddies live web research.'}
             </span>
           </div>

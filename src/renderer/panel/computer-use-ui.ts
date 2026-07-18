@@ -3,7 +3,7 @@ import type { ApprovalGrant, ApprovalRequest } from '../../shared/types';
 export type ApprovalInteractionAction = 'once' | 'always' | 'deny' | 'takeover';
 
 interface ApprovalInteractionToken {
-  agentId: string;
+  helperBuddyId: string;
   approvalId: string;
   action: ApprovalInteractionAction;
 }
@@ -17,7 +17,11 @@ export class ApprovalInteractionLatch {
   private token: ApprovalInteractionToken | null = null;
 
   arm(request: ApprovalRequest, action: ApprovalInteractionAction): void {
-    this.token = { agentId: request.agentId, approvalId: request.approvalId, action };
+    this.token = {
+      helperBuddyId: request.helperBuddyId,
+      approvalId: request.approvalId,
+      action,
+    };
   }
 
   consume(request: ApprovalRequest, action: ApprovalInteractionAction): boolean {
@@ -25,7 +29,7 @@ export class ApprovalInteractionLatch {
     this.token = null;
     return (
       token !== null &&
-      token.agentId === request.agentId &&
+      token.helperBuddyId === request.helperBuddyId &&
       token.approvalId === request.approvalId &&
       token.action === action
     );
@@ -34,10 +38,10 @@ export class ApprovalInteractionLatch {
 
 export function isExactApproval(
   request: ApprovalRequest | undefined,
-  agentId: string,
+  helperBuddyId: string,
   approvalId: string,
 ): request is ApprovalRequest {
-  return request?.agentId === agentId && request.approvalId === approvalId;
+  return request?.helperBuddyId === helperBuddyId && request.approvalId === approvalId;
 }
 
 /** Keep approval screenshots renderer-safe regardless of whether main sends raw base64 or a data URL. */
@@ -126,26 +130,26 @@ export function approvalPresentation(request: ApprovalRequest): ApprovalPresenta
   switch (request.kind) {
     case 'browser-capability':
       return {
-        title: 'a helper wants to use its browser',
+        title: 'a helper buddy wants to use its browser',
         intro:
-          'this grants browser use for this helper run only. check the task before continuing.',
+          'this grants browser use for this helper-buddy run only. check the task before continuing.',
         approveLabel: 'allow this run',
       };
     case 'needs-user':
       return {
-        title: 'a helper needs your help',
+        title: 'a helper buddy needs your help',
         intro: 'buddy paused at a sign-in or check that only you should handle.',
         approveLabel: 'approve once',
       };
     case 'live-action':
       return {
-        title: 'a helper wants to use your computer',
+        title: 'a helper buddy wants to use your computer',
         intro: 'nothing has happened yet. check the target and choose what buddy should do.',
         approveLabel: 'approve once',
       };
     case 'browser-action':
       return {
-        title: 'a helper needs your ok',
+        title: 'a helper buddy needs your ok',
         intro: 'nothing has happened yet. check the target and choose what buddy should do.',
         approveLabel: 'approve once',
       };

@@ -15,5 +15,5 @@ Other approaches you've thought about, if any.
 
 **Additional context**
 Note that some capabilities are deliberately deferred for safety reasons —
-see `docs/AGENT-MODE.md` §"Deferred capability" before proposing agent
+see `docs/HELPER-BUDDY-MODE.md` §"Deferred capability" before proposing agent
 write-actions.

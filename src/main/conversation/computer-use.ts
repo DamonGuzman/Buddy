@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import { resolveGroundingAuth } from '../auth/auth-source';
 import type { CodexProvider } from '../auth/auth-source';
-import type { AgentActionGatePort, AgentApprovalPort } from '../agents/types';
+import type { HelperBuddyActionGatePort, HelperBuddyApprovalPort } from '../agents/types';
 import type { ActionableErrorIdentity } from '../../shared/types';
 import type { CaptureResult } from '../capture';
 import { ComputerUseOperator } from '../computer/operator';
@@ -27,9 +27,9 @@ export interface ComputerUseDeps {
   settings: SettingsPort;
   guard: TurnGuard;
   /** Shared gate instance used by helper-browser actions. */
-  gate?: AgentActionGatePort;
+  gate?: HelperBuddyActionGatePort;
   /** Shared main-process approval queue; parks the operator without keeping a model request open. */
-  approvals?: AgentApprovalPort;
+  approvals?: HelperBuddyApprovalPort;
   /** Native AX/UIA receiver identity; absent makes live keyboard input mechanically unavailable. */
   evidence?: LiveDesktopEvidencePort;
   /** Exact latest typed/ASR request, never the foreground model's `use_computer.task` claim. */
@@ -52,7 +52,7 @@ export interface ComputerUseDeps {
 export class ComputerUseRunner {
   private input: ComputerInputController | null = null;
   private busy = false;
-  private active: { agentId: string; abort: AbortController } | null = null;
+  private active: { helperBuddyId: string; abort: AbortController } | null = null;
 
   constructor(private readonly deps: ComputerUseDeps) {}
 
@@ -76,8 +76,8 @@ export class ComputerUseRunner {
     const active = this.active;
     if (active) {
       active.abort.abort(new Error('computer use runner was disposed'));
-      this.deps.approvals?.cancelAgent(active.agentId);
-      this.deps.gate?.cancelAgent(active.agentId);
+      this.deps.approvals?.cancelHelperBuddy(active.helperBuddyId);
+      this.deps.gate?.cancelHelperBuddy(active.helperBuddyId);
     }
     this.input?.dispose();
   }
@@ -103,9 +103,9 @@ export class ComputerUseRunner {
     }
     this.input ??= createComputerInputController(deps.userDataDir());
     this.busy = true;
-    const agentId = `live_${randomUUID()}`;
+    const helperBuddyId = `live_${randomUUID()}`;
     const abort = new AbortController();
-    this.active = { agentId, abort };
+    this.active = { helperBuddyId, abort };
     const planRepairIdentity = deps.codexPlanRepairIdentity();
     try {
       const driver = new LiveDesktopDriver({
@@ -115,7 +115,7 @@ export class ComputerUseRunner {
       const operator = new ComputerUseOperator({
         auth: resolved,
         driver,
-        agentId,
+        helperBuddyId,
         userRequest,
         gate,
         approvals,
@@ -141,9 +141,9 @@ export class ComputerUseRunner {
     } catch (error) {
       return { error: errorMessage(error) };
     } finally {
-      approvals.cancelAgent(agentId);
-      gate.cancelAgent(agentId);
-      if (this.active?.agentId === agentId) this.active = null;
+      approvals.cancelHelperBuddy(helperBuddyId);
+      gate.cancelHelperBuddy(helperBuddyId);
+      if (this.active?.helperBuddyId === helperBuddyId) this.active = null;
       this.busy = false;
     }
   }

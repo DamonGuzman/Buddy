@@ -1,6 +1,6 @@
 /**
  * codex/transport.ts — the shared Codex Responses wire transport extracted
- * from responses-session.ts / agents/backend.ts / rest-grounder.ts. These
+ * from responses-session.ts / agents/helper-buddy-backend.ts / rest-grounder.ts. These
  * tests pin the pieces the backend gates on (URL, impersonation headers) and
  * the SSE reader mechanics (newline buffering, decoder flush, whole-body
  * fallback, cooperative stop). Fully offline.

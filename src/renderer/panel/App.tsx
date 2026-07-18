@@ -4,7 +4,7 @@
  * renderer alive, unthrottled, from app start so mic capture and voice
  * playback work the moment the hotkey goes down), and showing the settings
  * surface when opened from the tray. The old chat panel — transcript,
- * composer, agents view — was retired in favor of the whisper composer and
+ * composer, helper-buddy view — was retired in favor of the whisper composer and
  * the overlay's caption bubbles / helper sprites.
  */
 
@@ -53,14 +53,14 @@ export function App(): React.JSX.Element {
               resolving={computerUse.resolving}
               actingInPlace={computerUse.actingInPlace}
               error={computerUse.error}
-              onResolve={(agentId, approvalId, verdict) =>
-                void computerUse.resolve(agentId, approvalId, verdict)
+              onResolve={(helperBuddyId, approvalId, verdict) =>
+                void computerUse.resolve(helperBuddyId, approvalId, verdict)
               }
-              onShowBrowser={(agentId, approvalId) =>
-                void computerUse.showBrowser(agentId, approvalId)
+              onShowBrowser={(helperBuddyId, approvalId) =>
+                void computerUse.showBrowser(helperBuddyId, approvalId)
               }
-              onFinishInBrowser={(agentId, approvalId) =>
-                void computerUse.finishInBrowser(agentId, approvalId)
+              onFinishInBrowser={(helperBuddyId, approvalId) =>
+                void computerUse.finishInBrowser(helperBuddyId, approvalId)
               }
             />
           </div>

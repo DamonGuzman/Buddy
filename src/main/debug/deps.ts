@@ -7,7 +7,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { GroundingDebugReport } from '../conversation/pointer-pipeline';
 import type {
-  AgentSummary,
+  HelperBuddySummary,
   DebugState,
   PlaybackCommand,
   PlaybackStatsUpdate,
@@ -44,9 +44,14 @@ export interface GroundingDebugDeps {
   }) => Promise<GroundingDebugReport>;
 }
 
-export interface AgentDebugDeps {
-  spawn(task: string): { ok: true; agentId: string } | { ok: false; reason: string };
-  list(): AgentSummary[];
+export interface HelperBuddyDebugDeps {
+  spawn(
+    task: string,
+  ):
+    | { ok: true; helperBuddyId: string }
+    | { ok: false; reason: string }
+    | Promise<{ ok: true; helperBuddyId: string } | { ok: false; reason: string }>;
+  list(): HelperBuddySummary[];
   cancel(id: string): void;
 }
 
@@ -55,7 +60,7 @@ export interface DebugServerDeps {
   pipeline?: PipelineDebugDeps;
   audioEval?: AudioEvalDebugDeps;
   grounding?: GroundingDebugDeps;
-  agents?: AgentDebugDeps;
+  helperBuddies?: HelperBuddyDebugDeps;
 }
 
 export type RouteHandler = (

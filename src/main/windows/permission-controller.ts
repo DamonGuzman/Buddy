@@ -38,7 +38,7 @@ export interface PermissionControllerOptions {
 
 export class PermissionController {
   private readonly readSnapshot: () => MacPermissionSnapshot;
-  private readonly buildHealth: PermissionControllerOptions['buildHealth'];
+  private readonly buildHealth: NonNullable<PermissionControllerOptions['buildHealth']>;
   private readonly repair: NonNullable<PermissionControllerOptions['repair']>;
   private readonly reset: NonNullable<PermissionControllerOptions['reset']>;
   private readonly reveal: NonNullable<PermissionControllerOptions['reveal']>;
@@ -64,7 +64,7 @@ export class PermissionController {
   }
 
   current(): PermissionHealth {
-    return this.buildHealth!(this.readSnapshot(), this.options.hotkey.status());
+    return this.buildHealth(this.readSnapshot(), this.options.hotkey.status());
   }
 
   /** Check grants, stop on revocation, and retry once on a valid transition. */
@@ -86,7 +86,7 @@ export class PermissionController {
       this.options.hotkey.start();
     }
 
-    const health = this.buildHealth!(snapshot, this.options.hotkey.status());
+    const health = this.buildHealth(snapshot, this.options.hotkey.status());
     this.publish(health);
     return health;
   }

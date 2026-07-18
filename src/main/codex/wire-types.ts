@@ -10,7 +10,7 @@
  *    THIS app actually puts on the wire. `codex/responses-session.ts` builds
  *    its history exclusively from these.
  *  - `ResponseItem` — the deliberately loose escape hatch (moved here from
- *    `agents/types.ts`, which re-exports it): the agent loop appends items
+ *    `agents/types.ts`, which re-exports it): the helper-buddy loop appends items
  *    returned by the backend to history VERBATIM, including shapes we do not
  *    model (reasoning items, function calls, ...). Every
  *    `ResponseInputItem` is assignable to `ResponseItem`.

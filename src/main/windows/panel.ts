@@ -1,6 +1,6 @@
 /**
  * Settings + audio-host window (M21: the chat panel is GONE — no transcript,
- * no composer, no agents view; the whisper and the overlay carry those).
+ * no composer, no helper-buddy view; the whisper and the overlay carry those).
  * This ~380x520 frameless window survives for exactly two jobs:
  *
  * 1. HIDDEN AUDIO HOST — `start()` pre-creates the window at app-ready and

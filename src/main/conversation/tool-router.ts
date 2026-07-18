@@ -1,6 +1,6 @@
 /**
  * Transport-agnostic tool-call routing. Both model paths surface the same
- * four tools — point_at / spawn_agent / check_agents / use_computer — but
+ * four tools — point_at / spawn_helper_buddy / check_helper_buddies / use_computer — but
  * deliver them differently: the realtime session pre-parses (and for
  * point_at pre-validates) arguments, while the Codex text path hands over a
  * raw `argsJson` string. The parsers below normalize both into ONE
@@ -20,8 +20,8 @@ import type { ToolCall } from '../realtime/session';
 
 /** One normalized tool invocation, or a rejection carrying the tool output error. */
 export type ToolInvocation =
-  | { kind: 'spawn_agent'; args: unknown }
-  | { kind: 'check_agents'; args: unknown }
+  | { kind: 'spawn_helper_buddy'; args: unknown }
+  | { kind: 'check_helper_buddies'; args: unknown }
   | { kind: 'use_computer'; args: unknown }
   | { kind: 'point_at'; args: PointAtArgs }
   | { kind: 'reject'; error: string };
@@ -45,7 +45,7 @@ export function parseCodexToolCall(
   argsJson: string,
   metas: CaptureResult['meta'][],
 ): ToolInvocation {
-  if (name === 'spawn_agent' || name === 'check_agents' || name === 'use_computer') {
+  if (name === 'spawn_helper_buddy' || name === 'check_helper_buddies' || name === 'use_computer') {
     return { kind: name, args: parseJsonOrEmpty(argsJson) };
   }
   if (name !== 'point_at') {
@@ -70,7 +70,11 @@ export function parseCodexToolCall(
  * so this only classifies.
  */
 export function parseRealtimeToolCall(call: ToolCall): ToolInvocation {
-  if (call.name === 'spawn_agent' || call.name === 'check_agents' || call.name === 'use_computer') {
+  if (
+    call.name === 'spawn_helper_buddy' ||
+    call.name === 'check_helper_buddies' ||
+    call.name === 'use_computer'
+  ) {
     return { kind: call.name, args: call.args };
   }
   if (call.name !== 'point_at') {

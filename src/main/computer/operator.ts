@@ -1,6 +1,10 @@
 import type { ChatGptCodexAuthSource } from '../auth/auth-source';
 import type { ApprovalRequest } from '../../shared/types';
-import type { AgentActionGatePort, AgentApprovalPort, AgentApprovalVerdict } from '../agents/types';
+import type {
+  HelperBuddyActionGatePort,
+  HelperBuddyApprovalPort,
+  HelperBuddyApprovalVerdict,
+} from '../agents/types';
 import type {
   GateDriverInspection,
   GateDriverPort,
@@ -194,11 +198,11 @@ export interface ComputerUseOperatorOptions {
   auth: ChatGptCodexAuthSource;
   driver: ComputerDriver;
   /** One immutable identity for this foreground computer-use run. */
-  agentId: string;
+  helperBuddyId: string;
   /** Exact typed/ASR request. The model-authored `task` is never substituted for this authority. */
   userRequest: string;
-  gate: AgentActionGatePort;
-  approvals: AgentApprovalPort;
+  gate: HelperBuddyActionGatePort;
+  approvals: HelperBuddyApprovalPort;
   evidence?: LiveDesktopEvidencePort;
   signal?: AbortSignal;
   initialCaptures?: CaptureResult[];
@@ -214,7 +218,7 @@ export class ComputerUseOperator {
   private finalText = '';
 
   constructor(private readonly options: ComputerUseOperatorOptions) {
-    if (!options.agentId.trim()) throw new Error('computer-use agentId is required');
+    if (!options.helperBuddyId.trim()) throw new Error('computer-use helperBuddyId is required');
     if (!options.userRequest.trim())
       throw new Error('computer use requires the exact user request');
     this.captures = options.initialCaptures ?? [];
@@ -303,8 +307,8 @@ export class ComputerUseOperator {
       // A stale re-assessment can produce a fresh escalation. Live desktop
       // never carries an old human decision forward, so discard every parked
       // capability when this run leaves its single-action boundary.
-      this.options.approvals.cancelAgent(this.options.agentId);
-      this.options.gate.cancelAgent(this.options.agentId);
+      this.options.approvals.cancelHelperBuddy(this.options.helperBuddyId);
+      this.options.gate.cancelHelperBuddy(this.options.helperBuddyId);
     }
   }
 
@@ -441,7 +445,7 @@ export class ComputerUseOperator {
     allowedPoll.unref?.();
 
     const request: GatedActionRequest = {
-      agentId: this.options.agentId,
+      helperBuddyId: this.options.helperBuddyId,
       origin: 'live-desktop',
       userRequest: this.options.userRequest,
       taskClaim,
@@ -504,7 +508,7 @@ export class ComputerUseOperator {
             replacements += 1;
             if (replacements >= MAX_APPROVAL_REPLACEMENTS) {
               resolution.acknowledge();
-              this.options.gate.cancelAgent(this.options.agentId);
+              this.options.gate.cancelHelperBuddy(this.options.helperBuddyId);
               return {
                 error: 'desktop action approval could not stabilize after fresh evidence checks',
               };
@@ -535,7 +539,7 @@ function liveApprovalRequest(
   escalation: Extract<GateExecutionResult<void>, { kind: 'escalated' }>,
 ): ApprovalRequest {
   return Object.freeze<ApprovalRequest>({
-    agentId: escalation.agentId,
+    helperBuddyId: escalation.helperBuddyId,
     approvalId: escalation.approvalId,
     kind: 'live-action',
     userRequest: escalation.userRequest,
@@ -717,7 +721,7 @@ function closedGateOutcome(
   return { error: 'the desktop changed while approval was pending, so the action was discarded' };
 }
 
-function approvalFailure(verdict: Exclude<AgentApprovalVerdict, 'once'>): string {
+function approvalFailure(verdict: Exclude<HelperBuddyApprovalVerdict, 'once'>): string {
   if (verdict === 'deny') return 'the user denied this desktop action';
   if (verdict === 'handled') return 'the pending desktop action was discarded after user control';
   return 'standing approval is unavailable for live desktop actions';

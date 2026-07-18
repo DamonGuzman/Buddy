@@ -3,8 +3,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CodexAgentBackend } from '../src/main/agents/backend';
-import type { AgentBackendRequest } from '../src/main/agents/types';
+import { CodexHelperBuddyBackend } from '../src/main/agents/helper-buddy-backend';
+import type { HelperBuddyBackendRequest } from '../src/main/agents/types';
 import type { AuthSource } from '../src/main/auth/auth-source';
 import { CodexResponsesSession } from '../src/main/codex/responses-session';
 import { RestGrounder } from '../src/main/grounding/rest-grounder';
@@ -69,7 +69,7 @@ describe('model transport instrumentation', () => {
     });
     await codexSession.submit({ text: 'codex user prompt' });
 
-    const agentBackend = new CodexAgentBackend(
+    const helperBuddyBackend = new CodexHelperBuddyBackend(
       {
         getCodexAuth: () => ({
           accessToken: 'stored-secret',
@@ -105,16 +105,16 @@ describe('model transport instrumentation', () => {
           { status: 200 },
         )) as typeof fetch,
     );
-    const agentRequest: AgentBackendRequest = {
+    const agentRequest: HelperBuddyBackendRequest = {
       model: 'gpt-5.6-sol',
       instructions: 'helper buddy instructions',
       input: [],
       tools: [],
       effort: 'medium',
       signal: new AbortController().signal,
-      runContext: { agentId: 'agent-observability-test', requestAttempt: 1 },
+      runContext: { helperBuddyId: 'agent-observability-test', requestAttempt: 1 },
     };
-    await agentBackend.request(agentRequest);
+    await helperBuddyBackend.request(agentRequest);
 
     const apiPayload = {
       id: 'resp_ground',
@@ -193,7 +193,7 @@ describe('model transport instrumentation', () => {
     const journal = readFileSync(recorder.filePath, 'utf8');
     for (const transport of [
       'chatgpt-codex-responses',
-      'chatgpt-codex-agent',
+      'chatgpt-codex-helper-buddy',
       'openai-responses-grounding',
       'chatgpt-codex-grounding',
       'openai-realtime-websocket',

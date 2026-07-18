@@ -34,12 +34,12 @@ describe('parseCodexToolCall', () => {
   const metas = [capture(0).meta];
 
   it('classifies the delegation tools, degrading malformed JSON to empty args', () => {
-    expect(parseCodexToolCall('spawn_agent', '{"task":"t"}', metas)).toEqual({
-      kind: 'spawn_agent',
+    expect(parseCodexToolCall('spawn_helper_buddy', '{"task":"t"}', metas)).toEqual({
+      kind: 'spawn_helper_buddy',
       args: { task: 't' },
     });
-    expect(parseCodexToolCall('check_agents', 'not json', metas)).toEqual({
-      kind: 'check_agents',
+    expect(parseCodexToolCall('check_helper_buddies', 'not json', metas)).toEqual({
+      kind: 'check_helper_buddies',
       args: {},
     });
     expect(parseCodexToolCall('use_computer', '[broken', metas)).toEqual({
@@ -82,8 +82,8 @@ describe('parseCodexToolCall', () => {
 describe('parseRealtimeToolCall', () => {
   it('passes through pre-parsed args and trusts the session-validated point_at', () => {
     expect(
-      parseRealtimeToolCall({ callId: 'c1', name: 'spawn_agent', args: { task: 't' } }),
-    ).toEqual({ kind: 'spawn_agent', args: { task: 't' } });
+      parseRealtimeToolCall({ callId: 'c1', name: 'spawn_helper_buddy', args: { task: 't' } }),
+    ).toEqual({ kind: 'spawn_helper_buddy', args: { task: 't' } });
     expect(
       parseRealtimeToolCall({
         callId: 'c2',

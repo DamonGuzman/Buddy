@@ -14,7 +14,7 @@ import { createRequire } from 'node:module';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ConversationDeps } from '../src/main/conversation';
 import { DEFAULT_SETTINGS } from '../src/shared/types';
-import type { AgentSummary } from '../src/shared/types';
+import type { HelperBuddySummary } from '../src/shared/types';
 import type * as MockRealtime from '../tools/mock-realtime/server';
 
 const captureAllDisplaysMock = vi.hoisted(() =>
@@ -404,7 +404,7 @@ describe('Conversation: quick barge-in tap commit guard (M9)', () => {
   it('immediately hands a completed helper result to a resting open-mic Buddy', async () => {
     const markSpoken = vi.fn();
     const deps = fakeDeps({ capture: vi.fn(), playback: vi.fn(), sendAudio: vi.fn() }, true);
-    deps.agents = {
+    deps.helperBuddies = {
       isReady: () => true,
       list: () => [],
       spawn: () => ({ ok: false, reason: 'filesystem_unavailable' }),
@@ -416,7 +416,7 @@ describe('Conversation: quick barge-in tap commit guard (M9)', () => {
     expect(conversation.assistantState()).toBe('listening');
 
     const before = server.clientEvents.length;
-    const completed: AgentSummary = {
+    const completed: HelperBuddySummary = {
       id: 'agent_open_mic',
       task: 'compare the options',
       status: 'done',
@@ -428,14 +428,14 @@ describe('Conversation: quick barge-in tap commit guard (M9)', () => {
       spoken: false,
       unseen: true,
     };
-    conversation.deliverAgentResult(completed);
+    conversation.deliverHelperBuddyResult(completed);
 
     await vi.waitFor(() => {
       const events = server.clientEvents.slice(before);
       const injected = events.find(
         (event) =>
           event.type === 'conversation.item.create' &&
-          JSON.stringify(event).includes('<agent_id>agent_open_mic</agent_id>'),
+          JSON.stringify(event).includes('<helper_buddy_id>agent_open_mic</helper_buddy_id>'),
       );
       expect(injected).toBeDefined();
       expect(events.some((event) => event.type === 'response.create')).toBe(true);

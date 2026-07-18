@@ -16,6 +16,6 @@ invariant. Coverage includes:
 - DOM inspection through open shadow DOM and same/cross-origin iframes;
 - permission denial, download cancellation, popup denial, and cross-domain navigation blocking;
 - visible enrollment sharing the persistent buddy profile with recreated hidden drivers;
-- a composed `AgentRunner` flow from capability approval through independent action review,
+- a composed `HelperBuddyRunner` flow from capability approval through independent action review,
   one-use human approval, real browser action, fresh evidence capture, and persisted result; and
 - browser-window destruction plus fail-fast behavior after disposal.

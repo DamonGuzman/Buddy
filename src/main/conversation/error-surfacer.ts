@@ -175,9 +175,12 @@ export class ErrorSurfacer {
     resolvePanelActionableError(expected);
   }
 
-  /** A completed agent run proves sign-in and agent quota are currently usable. */
+  /** A completed helper-buddy run proves sign-in and helper-buddy quota are usable. */
   noteAgentSucceeded(): void {
-    const expected = currentPanelActionableError(['agent_not_signed_in', 'agent_quota']);
+    const expected = currentPanelActionableError([
+      'helper_buddy_not_signed_in',
+      'helper_buddy_quota',
+    ]);
     resolvePanelActionableError(expected);
   }
 

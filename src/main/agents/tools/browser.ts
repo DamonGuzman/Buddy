@@ -1,6 +1,6 @@
 import { asFiniteNumber } from '../../util/guards';
-import { AGENT_TOOL_TIMEOUT_MS } from '../config';
-import type { AgentToolSpec } from '../types';
+import { HELPER_BUDDY_TOOL_TIMEOUT_MS } from '../helper-buddy-config';
+import type { HelperBuddyToolSpec } from '../types';
 
 const JUSTIFICATION_MAX = 1_000;
 const TEXT_MAX = 10_000;
@@ -15,8 +15,8 @@ function browserSpec(
   description: string,
   properties: Record<string, unknown>,
   required: string[],
-  stepKind: AgentToolSpec['stepKind'] = 'action',
-): AgentToolSpec {
+  stepKind: HelperBuddyToolSpec['stepKind'] = 'action',
+): HelperBuddyToolSpec {
   return {
     definition: {
       type: 'function',
@@ -36,7 +36,7 @@ function browserSpec(
         additionalProperties: false,
       },
     },
-    timeoutMs: AGENT_TOOL_TIMEOUT_MS,
+    timeoutMs: HELPER_BUDDY_TOOL_TIMEOUT_MS,
     stepKind,
     async execute(args, ctx) {
       if (!ctx.browser)
@@ -98,7 +98,7 @@ export const browserScreenshotTool = browserSpec(
   'browse',
 );
 
-export const needsUserTool: AgentToolSpec = {
+export const needsUserTool: HelperBuddyToolSpec = {
   definition: {
     type: 'function',
     name: 'needs_user',
@@ -123,7 +123,7 @@ export const needsUserTool: AgentToolSpec = {
   },
 };
 
-export const browserTools: AgentToolSpec[] = [
+export const browserTools: HelperBuddyToolSpec[] = [
   browserNavigateTool,
   browserClickTool,
   browserTypeTool,

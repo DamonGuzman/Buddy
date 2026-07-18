@@ -2,10 +2,12 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { join } from 'node:path';
 import { app, BrowserWindow, nativeImage } from 'electron';
 import type { DownloadItem } from 'electron';
-import { AgentRunner } from '../../src/main/agents/agent';
-import { AgentApprovalCoordinator } from '../../src/main/agents/approvals';
+import { HelperBuddyRunner } from '../../src/main/agents/helper-buddy';
+import { HelperBuddyMemoryStore } from '../../src/main/agents/helper-buddy-memory-store';
+import { HelperBuddyApprovalCoordinator } from '../../src/main/agents/approvals';
 import { ActionGate } from '../../src/main/agents/gate/action-gate';
 import {
   ApprovalFollowThroughTracker,
@@ -15,7 +17,11 @@ import {
   markEvidenceScreenshot,
   type ActionReviewEvidence,
 } from '../../src/main/agents/gate/reviewer';
-import type { AgentBackend, AgentBackendResult } from '../../src/main/agents/types';
+import type {
+  HelperBuddyBackend,
+  HelperBuddyBackendResult,
+  HelperBuddyFilesystemToolPort,
+} from '../../src/main/agents/types';
 import { OffscreenBrowserDriver } from '../../src/main/computer/browser-driver';
 import { BuddyBrowserProfile } from '../../src/main/computer/browser-profile';
 import type { CaptureResult } from '../../src/main/capture';
@@ -114,9 +120,9 @@ function nativeSurfacePage(): string {
   );
 }
 
-function agentFlowPage(sent: boolean): string {
+function helperBuddyFlowPage(sent: boolean): string {
   return html(
-    `<form action="/agent-submit" method="get">
+    `<form action="/helper-buddy-submit" method="get">
        <button id="send-update" type="submit" style="left:80px;top:80px;width:220px">Send update</button>
      </form>
      <div id="output" style="left:80px;top:150px">${sent ? 'composed action executed' : 'action idle'}</div>`,
@@ -168,13 +174,13 @@ async function startFixtures(): Promise<FixtureServers> {
       res.end();
       return;
     }
-    if (url.pathname === '/agent-submit') {
+    if (url.pathname === '/helper-buddy-submit') {
       res.statusCode = 302;
       res.setHeader(
         'set-cookie',
-        `agent_action=${encodeURIComponent(runToken)}; Path=/; SameSite=Lax`,
+        `helper_buddy_action=${encodeURIComponent(runToken)}; Path=/; SameSite=Lax`,
       );
-      res.setHeader('location', '/agent-flow?sent=1');
+      res.setHeader('location', '/helper-buddy-flow?sent=1');
       res.end();
       return;
     }
@@ -198,9 +204,9 @@ async function startFixtures(): Promise<FixtureServers> {
       );
       return;
     }
-    if (url.pathname === '/agent-flow-status') {
+    if (url.pathname === '/helper-buddy-flow-status') {
       const executed = (req.headers.cookie ?? '').includes(
-        `agent_action=${encodeURIComponent(runToken)}`,
+        `helper_buddy_action=${encodeURIComponent(runToken)}`,
       );
       res.setHeader('content-type', 'text/html; charset=utf-8');
       res.end(
@@ -212,7 +218,8 @@ async function startFixtures(): Promise<FixtureServers> {
     }
     res.setHeader('content-type', 'text/html; charset=utf-8');
     if (url.pathname === '/controls') res.end(controlsPage());
-    else if (url.pathname === '/agent-flow') res.end(agentFlowPage(url.searchParams.has('sent')));
+    else if (url.pathname === '/helper-buddy-flow')
+      res.end(helperBuddyFlowPage(url.searchParams.has('sent')));
     else if (url.pathname === '/frames') res.end(framesPage(cross.origin));
     else if (url.pathname === '/same-frame') res.end(framePage('same-origin target'));
     else if (url.pathname === '/security') res.end(securityPage(cross.origin));
@@ -349,7 +356,7 @@ async function expectNavigationRejected(profile: BuddyBrowserProfile, url: strin
 function backendResult(
   call: { callId: string; name: string; args: Record<string, unknown> } | null,
   text = '',
-): AgentBackendResult {
+): HelperBuddyBackendResult {
   return {
     ok: true,
     outputItems:
@@ -380,7 +387,7 @@ function backendResult(
   };
 }
 
-async function runComposedAgentFlow(
+async function runComposedHelperBuddyFlow(
   profile: BuddyBrowserProfile,
   origin: string,
 ): Promise<OffscreenBrowserDriver> {
@@ -395,8 +402,8 @@ async function runComposedAgentFlow(
   const journal: Array<{ actionKind: string; disposition: string }> = [];
   let executedOutcomes = 0;
   let approvalError: Error | null = null;
-  let coordinator!: AgentApprovalCoordinator;
-  coordinator = new AgentApprovalCoordinator({
+  let coordinator!: HelperBuddyApprovalCoordinator;
+  coordinator = new HelperBuddyApprovalCoordinator({
     onChanged: (requests) => {
       for (const request of requests) {
         if (resolvedApprovals.has(request.approvalId)) continue;
@@ -460,24 +467,24 @@ async function runComposedAgentFlow(
     followThrough: new ApprovalFollowThroughTracker(),
   });
 
-  const backend: AgentBackend = {
+  const backend: HelperBuddyBackend = {
     isReady: () => true,
     request: async (request) => {
       round += 1;
       console.log(`BROWSER_E2E COMPOSED backend round ${round}`);
       if (round === 1) {
         return backendResult({
-          callId: 'navigate-agent-flow',
+          callId: 'navigate-helper-buddy-flow',
           name: 'browser_navigate',
           args: {
-            url: `${origin}/agent-flow`,
+            url: `${origin}/helper-buddy-flow`,
             justification: 'Open the enrolled page where the user asked me to send the update.',
           },
         });
       }
       if (round === 2) {
         return backendResult({
-          callId: 'observe-agent-flow',
+          callId: 'observe-helper-buddy-flow',
           name: 'browser_screenshot',
           args: {
             justification: 'Inspect the enrolled page before acting on the requested update.',
@@ -487,12 +494,12 @@ async function runComposedAgentFlow(
       if (round === 3) {
         if (!lastCapture) {
           throw new Error(
-            `agent did not receive a fresh post-navigation capture: ${JSON.stringify(request.input)}`,
+            `helper buddy did not receive a fresh post-navigation capture: ${JSON.stringify(request.input)}`,
           );
         }
         const target = point(lastCapture, { x: 180, y: 100 });
         return backendResult({
-          callId: 'send-agent-update',
+          callId: 'send-helper-buddy-update',
           name: 'browser_click',
           args: {
             x: target.x,
@@ -506,16 +513,18 @@ async function runComposedAgentFlow(
     },
   };
 
-  const runner = new AgentRunner({
+  const runner = new HelperBuddyRunner({
     brief: {
-      id: 'electron-composed-agent',
+      id: 'electron-composed-helper-buddy',
       userRequest: 'Send the update on the enrolled local test site.',
       task: 'Send the requested update with the buddy browser.',
       recentTranscript: '',
       createdAt: Date.now(),
-      browserEnabled: true,
+      filesystem: { taskId: 'electron-composed-filesystem', rootName: 'e2e-fixture' },
     },
     backend,
+    memory: await initializedMemoryStore(),
+    filesystem: unusedFilesystemPort(),
     browser: {
       createDriver: async () => {
         console.log('BROWSER_E2E COMPOSED create real driver');
@@ -546,12 +555,15 @@ async function runComposedAgentFlow(
   await Promise.all(approvalResolutions);
   console.log(`BROWSER_E2E COMPOSED runner ${summary.status}`);
   if (approvalError) throw approvalError;
-  if (summary.status !== 'done') throw new Error(`composed agent ended as ${summary.status}`);
+  if (summary.status !== 'done')
+    throw new Error(`composed helper buddy ended as ${summary.status}`);
   if (approvalKinds.join(',') !== 'browser-capability,browser-action') {
     throw new Error(`unexpected approval flow: ${approvalKinds.join(',')}`);
   }
   if (updateStatuses.filter((status) => status === 'waiting_approval').length < 2) {
-    throw new Error('agent did not park for both capability and consequential-action approval');
+    throw new Error(
+      'helper buddy did not park for both capability and consequential-action approval',
+    );
   }
   const clickReview = reviewed.find((evidence) => evidence.actionName === 'click');
   if (!clickReview?.facts?.text.includes('Send update') || !clickReview.facts.inForm) {
@@ -576,14 +588,14 @@ async function runComposedAgentFlow(
     );
   }
   if (captureCount < 5 || !lastCapture) {
-    throw new Error(`agent did not perform required fresh observations: ${captureCount}`);
+    throw new Error(`helper buddy did not perform required fresh observations: ${captureCount}`);
   }
   if (executedOutcomes < 2) {
     throw new Error(`gate did not journal both executed actions: ${executedOutcomes}`);
   }
 
   const verificationDriver = new OffscreenBrowserDriver({ profile });
-  await verificationDriver.navigate(`${origin}/agent-flow-status`);
+  await verificationDriver.navigate(`${origin}/helper-buddy-flow-status`);
   const verificationCapture = await observe(verificationDriver);
   await expectText(
     verificationDriver,
@@ -592,6 +604,25 @@ async function runComposedAgentFlow(
     'composed action persisted',
   );
   return verificationDriver;
+}
+
+function unusedFilesystemPort(): HelperBuddyFilesystemToolPort {
+  const unexpected = async (): Promise<never> => {
+    throw new Error('the browser E2E fixture must not invoke filesystem tools');
+  };
+  return {
+    runShell: unexpected,
+    stagePaths: unexpected,
+    runStagedShell: unexpected,
+    describeChanges: unexpected,
+    presentFile: unexpected,
+  };
+}
+
+async function initializedMemoryStore(): Promise<HelperBuddyMemoryStore> {
+  const store = new HelperBuddyMemoryStore(join(app.getPath('userData'), 'memories'));
+  await store.initialize();
+  return store;
 }
 
 async function run(): Promise<void> {
@@ -839,11 +870,11 @@ async function run(): Promise<void> {
     });
 
     await check(
-      'AgentRunner composes capability approval, gate review, human approval, real click, and fresh capture',
+      'HelperBuddyRunner composes capability approval, gate review, human approval, real click, and fresh capture',
       async () => {
         await driver!.dispose();
         driver = null;
-        driver = await runComposedAgentFlow(profile, fixtures.mainOrigin);
+        driver = await runComposedHelperBuddyFlow(profile, fixtures.mainOrigin);
       },
     );
 

@@ -34,12 +34,12 @@ import { HoverDragController } from './hover-controller';
 import type { HintBubbleState } from './hover-controller';
 import { TimerBag } from './timer-bag';
 import { parseOverlayParams } from './query-params';
-import { AgentCluster } from './AgentHelpers';
-import type { HelperView } from './agents-ui';
+import { HelperBuddyCluster } from './HelperBuddies';
+import type { HelperView } from './helper-buddies-ui';
 import { TriangleSvg } from './TriangleSvg';
 import { BuddyIsland } from './BuddyIsland';
 import type {
-  AgentSummary,
+  HelperBuddySummary,
   AssistantState,
   OverlayDisplaySurface,
   OverlayHoverConfig,
@@ -119,7 +119,7 @@ function App(): React.JSX.Element {
   const [interactive, setInteractive] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [hoverCfg, setHoverCfg] = useState<OverlayHoverConfig | null>(null);
-  // M19 agent-helper state (mirrors of HelperHoverController — one clock).
+  // M19 helper-buddy state (mirrors of HelperHoverController — one clock).
   const [helperView, setHelperView] = useState<HelperView>({ shown: [], overflow: [] });
   const [helperHover, setHelperHover] = useState<string | null>(null);
   // M22: helper whose card is click-expanded to its full status (ref mirror
@@ -128,7 +128,7 @@ function App(): React.JSX.Element {
   const helperExpandedRef = useRef<string | null>(null);
   const [cluster, setCluster] = useState<ClusterGeom | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
-  const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [helperBuddies, setHelperBuddies] = useState<HelperBuddySummary[]>([]);
   const [displaySurface, setDisplaySurface] = useState<OverlayDisplaySurface>({
     kind: 'off',
     notchWidth: 0,
@@ -221,7 +221,7 @@ function App(): React.JSX.Element {
       applyAux: (aux) => hoverCtrl.setAux(aux),
       onView: (view) => {
         setHelperView(view);
-        // M22: the expanded agent vanished from the cluster (e.g. cancelled).
+        // M22: the expanded helper buddy vanished from the cluster (e.g. cancelled).
         const id = helperExpandedRef.current;
         if (id !== null && ![...view.shown, ...view.overflow].some((a) => a.id === id)) {
           clearHelperExpanded();
@@ -301,13 +301,25 @@ function App(): React.JSX.Element {
     };
 
     // --------------------------------------------------------------- init --
+    // StrictMode mounts, tears down, and mounts this effect again in
+    // development. Promise continuations from the first mount must never
+    // mutate its disposed controllers or overwrite newer pushed state.
+    let disposed = false;
     choreographer.jumpToRest();
     bumpActivity();
-    void clicky.getAssistantState().then((s) => {
-      currentState = s;
-      choreographer.assistantStateChanged(s, cfgRef.current?.fullRealtimeMode ?? false);
-      setAssistantState(s);
+
+    let assistantStatePushed = false;
+    const offState = clicky.onAssistantState((state) => {
+      assistantStatePushed = true;
+      applyState(state);
     });
+    void clicky
+      .getAssistantState()
+      .then((state) => {
+        if (disposed || assistantStatePushed) return;
+        applyState(state);
+      })
+      .catch(() => undefined);
 
     const offPointer = clicky.onPointer((cmd) => {
       bumpActivity();
@@ -320,8 +332,6 @@ function App(): React.JSX.Element {
         choreographer.hide();
       }
     });
-
-    const offState = clicky.onAssistantState(applyState);
 
     const offCapture = clicky.onCaptureIndicator(({ active }) => {
       bumpActivity();
@@ -380,7 +390,7 @@ function App(): React.JSX.Element {
     void clicky
       .getHoverConfig()
       .then((cfg) => {
-        if (cfgRef.current === null) applyHoverConfig(cfg);
+        if (!disposed && cfgRef.current === null) applyHoverConfig(cfg);
       })
       .catch(() => {});
 
@@ -413,26 +423,31 @@ function App(): React.JSX.Element {
     hoverCtrl.sendStatus(); // initial snapshot (buddy rest position) for debug/QA
     // ------------------------------------------------------- end M15 hover --
 
-    // ------------------------------------------- M19 agent helpers wiring --
-    const offAgents = clicky.onAgents((list) => {
-      setAgents(list);
-      helpers.setAgents(list);
+    // -------------------------------------------- M19 helper-buddy helper wiring --
+    const offHelperBuddies = clicky.onHelperBuddies((list) => {
+      setHelperBuddies(list);
+      helpers.setHelperBuddies(list);
     });
-    const offDisplaySurface = clicky.onDisplaySurface(setDisplaySurface);
+    let displaySurfacePushed = false;
+    const offDisplaySurface = clicky.onDisplaySurface((surface) => {
+      displaySurfacePushed = true;
+      setDisplaySurface(surface);
+    });
     void clicky
       .getDisplaySurface()
-      .then(setDisplaySurface)
+      .then((surface) => {
+        if (!disposed && !displaySurfacePushed) setDisplaySurface(surface);
+      })
       .catch(() => undefined);
     // Bootstrap for late-created overlays (display hotplug) — push wins races.
     void clicky
-      .getAgents()
+      .getHelperBuddies()
       .then((list) => {
-        setAgents(list);
-        helpers.bootstrap(list);
+        if (!disposed && helpers.bootstrap(list)) setHelperBuddies(list);
       })
       .catch(() => {});
     helpersRef.current = helpers;
-    // --------------------------------------- end M19 agent helpers wiring --
+    // ---------------------------------------- end M19 helper-buddy helper wiring --
 
     const onResize = (): void => {
       if (choreographer.mode === 'rest') choreographer.jumpToRest();
@@ -441,6 +456,7 @@ function App(): React.JSX.Element {
     window.addEventListener('resize', onResize);
 
     return () => {
+      disposed = true;
       offPointer();
       offState();
       offCapture();
@@ -454,8 +470,8 @@ function App(): React.JSX.Element {
       window.removeEventListener('mouseup', onMouseUp);
       window.removeEventListener('contextmenu', onContextMenu);
       offCursor(); // M20 cursor feed
-      // M19 agent-helper teardown.
-      offAgents();
+      // M19 helper-buddy teardown.
+      offHelperBuddies();
       offDisplaySurface();
       helpersRef.current = null;
       window.removeEventListener('resize', onResize);
@@ -468,7 +484,7 @@ function App(): React.JSX.Element {
     };
   }, []);
 
-  // M19: measure the open agent card so the hover machine's merged region
+  // M19: measure the open helper-buddy card so the hover machine's merged region
   // (and main's exit poll) covers it exactly. Runs after every render that
   // could move/resize the card.
   useEffect(() => {
@@ -514,7 +530,7 @@ function App(): React.JSX.Element {
           now: Date.now(),
           captionShowing: caption !== null,
           interactive,
-          agentHover: helperHover !== null, // M19: the card IS the hint
+          helperBuddyHover: helperHover !== null, // M19: the card IS the hint
         })
       : null;
   /* eslint-enable react-hooks/refs, react-hooks/purity */
@@ -526,7 +542,7 @@ function App(): React.JSX.Element {
         surface={displaySurface}
         assistantState={assistantState}
         capturing={capturing}
-        agents={agents}
+        helperBuddies={helperBuddies}
         visible={buddyVisible}
       />
       <div
@@ -585,7 +601,7 @@ function App(): React.JSX.Element {
         )}
       </div>
       {cluster !== null && (
-        <AgentCluster
+        <HelperBuddyCluster
           view={helperView}
           anchor={cluster.anchor}
           dir={cluster.dir}
@@ -596,14 +612,17 @@ function App(): React.JSX.Element {
           expandedKey={helperExpanded}
           now={nowTick}
           cardRef={cardRef}
-          onAgentClick={(id) => {
-            if (agents.find((agent) => agent.id === id)?.status === 'waiting_approval') {
-              clicky.sendAgentClick(id);
+          onHelperBuddyClick={(id) => {
+            if (
+              helperBuddies.find((helperBuddy) => helperBuddy.id === id)?.status ===
+              'waiting_approval'
+            ) {
+              clicky.sendHelperBuddyClick(id);
               return;
             }
             toggleHelperExpanded(id);
           }}
-          onAgentCancel={(id) => clicky.sendAgentCancel(id)}
+          onHelperBuddyCancel={(id) => clicky.sendHelperBuddyCancel(id)}
         />
       )}
       {pulses.map((p) => (

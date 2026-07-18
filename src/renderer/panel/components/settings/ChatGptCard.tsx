@@ -89,7 +89,7 @@ export function ChatGptCard({ settings, onPatch }: ChatGptCardProps): React.JSX.
         </>
       ) : (
         <p className="text-xs leading-relaxed text-muted-foreground">
-          connect chatgpt to use your plan for pointing and background agents.
+          connect chatgpt to use your plan for pointing and helper buddies.
         </p>
       )}
       {!settings.codexValid ? (

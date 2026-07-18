@@ -4,8 +4,8 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FilesystemTaskService } from '../src/main/filesystem/service';
-import { agentToolDefinitions } from '../src/main/agents/tools';
-import type { AgentSummary } from '../src/shared/types';
+import { helperBuddyToolDefinitions } from '../src/main/agents/tools';
+import type { HelperBuddySummary } from '../src/shared/types';
 
 const cleanup: string[] = [];
 
@@ -14,22 +14,25 @@ afterEach(async () => {
 });
 
 describe.runIf(process.platform === 'darwin')('macOS host filesystem execution', () => {
-  it('gives filesystem agents every Firecrawl endpoint plus staged shell tools, never browser tools', () => {
-    expect(agentToolDefinitions(false, true)).toEqual([
+  it('gives every helper Firecrawl, staged shell, and browser tools together', () => {
+    expect(helperBuddyToolDefinitions()).toEqual(
+      expect.arrayContaining([
       expect.objectContaining({ type: 'function', name: 'web_search' }),
       expect.objectContaining({ type: 'function', name: 'web_scrape' }),
       expect.objectContaining({ type: 'function', name: 'web_map' }),
       expect.objectContaining({ type: 'function', name: 'web_crawl' }),
       expect.objectContaining({ type: 'function', name: 'web_batch_scrape' }),
       expect.objectContaining({ type: 'function', name: 'web_research' }),
+      expect.objectContaining({ type: 'function', name: 'memory_save' }),
+      expect.objectContaining({ type: 'function', name: 'memory_load' }),
+      expect.objectContaining({ type: 'function', name: 'memory_delete' }),
       expect.objectContaining({ type: 'function', name: 'run_shell' }),
       expect.objectContaining({ type: 'function', name: 'stage_paths' }),
       expect.objectContaining({ type: 'function', name: 'run_staged_shell' }),
       expect.objectContaining({ type: 'function', name: 'workspace_changes' }),
       expect.objectContaining({ type: 'function', name: 'present_file' }),
-    ]);
-    expect(agentToolDefinitions(false, true).map((tool) => tool.name)).not.toContain(
-      'browser_navigate',
+      expect.objectContaining({ type: 'function', name: 'browser_navigate' }),
+    ]),
     );
   });
 
@@ -122,8 +125,8 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
       service.prepare(grant.id, 'create the second report'),
     ]);
     await Promise.all([
-      service.attachAgent(first.taskId, 'agent-first'),
-      service.attachAgent(second.taskId, 'agent-second'),
+      service.attachHelperBuddy(first.taskId, 'helper-buddy-first'),
+      service.attachHelperBuddy(second.taskId, 'helper-buddy-second'),
     ]);
     await Promise.all([
       service.stagePaths(first.taskId, ['first.md']),
@@ -145,8 +148,8 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
     ]);
 
     const [firstCompletion, secondCompletion] = await Promise.all([
-      service.completeAgent(doneSummary('agent-first', 'create the first report')),
-      service.completeAgent(doneSummary('agent-second', 'create the second report')),
+      service.completeHelperBuddy(doneSummary('helper-buddy-first', 'create the first report')),
+      service.completeHelperBuddy(doneSummary('helper-buddy-second', 'create the second report')),
     ]);
 
     expect(firstCompletion.view).toMatchObject({ status: 'published', canUndo: true });
@@ -185,8 +188,8 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
     const grant = await service.grant(root);
     const first = await service.prepare(grant.id, 'first persistent task');
     const second = await service.prepare(grant.id, 'second persistent task');
-    await service.attachAgent(first.taskId, 'agent-persist-first');
-    await service.attachAgent(second.taskId, 'agent-persist-second');
+    await service.attachHelperBuddy(first.taskId, 'helper-buddy-persist-first');
+    await service.attachHelperBuddy(second.taskId, 'helper-buddy-persist-second');
 
     const restarted = new FilesystemTaskService({
       basePath: privateData,
@@ -203,6 +206,81 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
       taskId: second.taskId,
       status: 'failed',
     });
+  });
+
+  it('binds each filesystem task to exactly one valid helper buddy identity', async () => {
+    const outer = await realpath(
+      await mkdtemp(join(homedir(), '.buddy-filesystem-identity-test-')),
+    );
+    cleanup.push(outer);
+    const root = join(outer, 'selected');
+    await mkdir(root);
+    const service = new FilesystemTaskService({
+      basePath: join(outer, 'private'),
+      onState: () => {},
+      onSelection: () => {},
+    });
+    await service.initialize();
+    const grant = await service.grant(root);
+    const first = await service.prepare(grant.id, 'first identity-bound task');
+    const second = await service.prepare(grant.id, 'second identity-bound task');
+
+    await expect(service.attachHelperBuddy(first.taskId, ' ')).rejects.toThrow(
+      'helper buddy id is invalid',
+    );
+    await service.attachHelperBuddy(first.taskId, 'helper-buddy-filesystem-owner');
+    await expect(
+      service.attachHelperBuddy(first.taskId, 'replacement-helper-buddy'),
+    ).rejects.toThrow('already has a helper buddy');
+    await expect(
+      service.attachHelperBuddy(second.taskId, 'helper-buddy-filesystem-owner'),
+    ).rejects.toThrow('already attached to another filesystem task');
+    expect(service.state(first.taskId)?.helperBuddyId).toBe('helper-buddy-filesystem-owner');
+    expect(service.state(second.taskId)?.helperBuddyId).toBeUndefined();
+  });
+
+  it('fails closed and retains the safe copy when a persisted task root becomes unsafe', async () => {
+    const outer = await realpath(await mkdtemp(join(homedir(), '.buddy-filesystem-root-test-')));
+    cleanup.push(outer);
+    const root = join(outer, 'selected');
+    const privateData = join(outer, 'private');
+    await mkdir(root);
+    const service = new FilesystemTaskService({
+      basePath: privateData,
+      onState: () => {},
+      onSelection: () => {},
+    });
+    await service.initialize();
+    const grant = await service.grant(root);
+    const task = await service.prepare(grant.id, 'persist a root-scoped task');
+    const recordPath = join(privateData, 'tasks', task.taskId, 'task.json');
+    const record = JSON.parse(await readFile(recordPath, 'utf8')) as {
+      rootPath: string;
+      view: { rootName: string; displayPath: string };
+    };
+    record.rootPath = '/';
+    record.view.rootName = '';
+    record.view.displayPath = '/';
+    await writeFile(recordPath, JSON.stringify(record));
+
+    const restarted = new FilesystemTaskService({
+      basePath: privateData,
+      onState: () => {},
+      onSelection: () => {},
+    });
+    await restarted.initialize();
+
+    expect(restarted.state(task.taskId)).toMatchObject({
+      status: 'failed',
+      canUndo: false,
+      error: expect.stringContaining('could not re-authorize the selected folder'),
+    });
+    expect(restarted.retainedWorkspacePath(task.taskId)).toBe(
+      join(privateData, 'tasks', task.taskId, 'workspace'),
+    );
+    await expect(readFile(recordPath, 'utf8')).resolves.toContain(
+      'private safe copy was retained for inspection',
+    );
   });
 
   it('publishes on completion, returns the selected presentation file, and retains verified Undo', async () => {
@@ -222,7 +300,7 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
     await service.initialize();
     const grant = await service.grant(root);
     const prepared = await service.prepare(grant.id, 'update the sample files');
-    await service.attachAgent(prepared.taskId, 'agent-test');
+    await service.attachHelperBuddy(prepared.taskId, 'helper-buddy-test');
 
     const controller = new AbortController();
     expect(await readFile(join(root, 'existing.txt'), 'utf8')).toBe('before\n');
@@ -266,8 +344,8 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
     );
     await service.presentFile(prepared.taskId, 'created/new.txt');
 
-    const summary: AgentSummary = {
-      id: 'agent-test',
+    const summary: HelperBuddySummary = {
+      id: 'helper-buddy-test',
       task: 'update the sample files',
       status: 'done',
       createdAt: Date.now(),
@@ -277,7 +355,7 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
       spoken: false,
       unseen: true,
     };
-    const completion = await service.completeAgent(summary);
+    const completion = await service.completeHelperBuddy(summary);
     expect(completion).toMatchObject({
       handled: true,
       error: null,
@@ -328,7 +406,7 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
     await service.initialize();
     const grant = await service.grant(root);
     const task = await service.prepare(grant.id, 'create the finished report');
-    await service.attachAgent(task.taskId, 'agent-fallback');
+    await service.attachHelperBuddy(task.taskId, 'helper-buddy-fallback');
     await service.stagePaths(task.taskId, ['report.md']);
     await service.runStagedShell(
       task.taskId,
@@ -337,8 +415,8 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
       new AbortController().signal,
     );
 
-    const completion = await service.completeAgent({
-      id: 'agent-fallback',
+    const completion = await service.completeHelperBuddy({
+      id: 'helper-buddy-fallback',
       task: 'create the finished report',
       status: 'done',
       createdAt: Date.now(),
@@ -366,7 +444,7 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
     await service.initialize();
     const grant = await service.grant(root);
     const task = await service.prepare(grant.id, 'change the document');
-    await service.attachAgent(task.taskId, 'agent-conflict');
+    await service.attachHelperBuddy(task.taskId, 'helper-buddy-conflict');
     await service.stagePaths(task.taskId, ['document.txt']);
     await service.runStagedShell(
       task.taskId,
@@ -376,8 +454,8 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
     );
     await writeFile(join(root, 'document.txt'), 'newer human edit');
 
-    const completion = await service.completeAgent({
-      id: 'agent-conflict',
+    const completion = await service.completeHelperBuddy({
+      id: 'helper-buddy-conflict',
       task: 'change the document',
       status: 'done',
       createdAt: Date.now(),
@@ -409,7 +487,7 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
     await service.initialize();
     const grant = await service.grant(root);
     const task = await service.prepare(grant.id, 'create one file');
-    await service.attachAgent(task.taskId, 'agent-scope');
+    await service.attachHelperBuddy(task.taskId, 'helper-buddy-scope');
     await service.stagePaths(task.taskId, ['allowed/result.txt']);
     await service.runStagedShell(
       task.taskId,
@@ -418,8 +496,8 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
       new AbortController().signal,
     );
 
-    await service.completeAgent({
-      id: 'agent-scope',
+    await service.completeHelperBuddy({
+      id: 'helper-buddy-scope',
       task: 'create one file',
       status: 'done',
       createdAt: Date.now(),
@@ -473,7 +551,7 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function doneSummary(id: string, task: string): AgentSummary {
+function doneSummary(id: string, task: string): HelperBuddySummary {
   return {
     id,
     task,

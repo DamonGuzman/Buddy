@@ -65,7 +65,7 @@ const FORM_FIELD_TAGS = new Set(['input', 'textarea', 'select']);
 
 /**
  * Mechanical pre-review policy. This function deliberately ignores the
- * acting agent's justification: only the proposed action and DOM facts may
+ * acting helper buddy's justification: only the proposed action and DOM facts may
  * affect the trigger decision.
  */
 export function classifyTrigger({ action, facts, seenDomains = [] }: TriggerInput): TriggerVerdict {

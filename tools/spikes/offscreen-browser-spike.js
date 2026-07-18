@@ -1,5 +1,5 @@
 // Spike: validate the offscreen browser computer-use mechanisms for helper buddies.
-// Design doc: docs/AGENT-COMPUTER-USE.md §2.2 (its results table comes from this script).
+// Design doc: docs/HELPER-BUDDY-COMPUTER-USE.md §2.2 (its results table comes from this script).
 // Run: npx electron tools/spikes/offscreen-browser-spike.js
 // (Writes spike-capture.png next to this file; verified 2026-07-14 on Electron 43.1.0.)
 // Verifies, against a HIDDEN BrowserWindow (show:false, never shown):

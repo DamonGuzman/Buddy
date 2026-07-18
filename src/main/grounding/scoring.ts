@@ -117,11 +117,21 @@ export function levenshtein(a: string, b: string): number {
     curr[0] = i;
     for (let j = 1; j <= b.length; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[j] = Math.min(prev[j]! + 1, curr[j - 1]! + 1, prev[j - 1]! + cost);
+      curr[j] = Math.min(
+        requiredDistanceCell(prev, j) + 1,
+        requiredDistanceCell(curr, j - 1) + 1,
+        requiredDistanceCell(prev, j - 1) + cost,
+      );
     }
     [prev, curr] = [curr, prev];
   }
-  return prev[b.length]!;
+  return requiredDistanceCell(prev, b.length);
+}
+
+function requiredDistanceCell(row: number[], index: number): number {
+  const value = row[index];
+  if (value === undefined) throw new Error(`levenshtein row is missing index ${index}`);
+  return value;
 }
 
 /** Normalized string similarity in [0, 1]. */

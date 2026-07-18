@@ -1,7 +1,7 @@
-import type { AgentToolSpec } from '../types';
-import { AGENT_TOOL_TIMEOUT_MS } from '../config';
+import type { HelperBuddyToolSpec } from '../types';
+import { HELPER_BUDDY_TOOL_TIMEOUT_MS } from '../helper-buddy-config';
 
-export const scratchpadTool: AgentToolSpec = {
+export const scratchpadTool: HelperBuddyToolSpec = {
   definition: {
     type: 'function',
     name: 'scratchpad_write',
@@ -12,7 +12,7 @@ export const scratchpadTool: AgentToolSpec = {
       required: ['text'],
     },
   },
-  timeoutMs: AGENT_TOOL_TIMEOUT_MS,
+  timeoutMs: HELPER_BUDDY_TOOL_TIMEOUT_MS,
   stepKind: 'note',
   async execute(args, ctx) {
     const text = typeof args['text'] === 'string' ? args['text'].slice(0, 20_000) : '';

@@ -48,9 +48,9 @@ export type ErrorKind =
   | 'response_incomplete'
   | 'server_error'
   | 'renderer_dead'
-  // M18 additions (integration-approved): agent mode (docs/AGENT-MODE.md §7).
-  | 'agent_backend_down'
-  | 'agent_tool_failed';
+  // M18 additions: helper buddies (docs/HELPER-BUDDY-MODE.md §7).
+  | 'helper_buddy_backend_down'
+  | 'helper_buddy_tool_failed';
 
 export type ErrorSurface = 'transcript' | 'pill' | 'caption' | 'tray';
 
@@ -119,8 +119,8 @@ const ACTIONABLE_TARGET: Record<ActionableErrorKind, ActionableErrorTarget> = {
   hotkey_dead: 'permissions',
   settings_reset: 'openai',
   settings_save_failed: 'settings',
-  agent_not_signed_in: 'chatgpt',
-  agent_quota: 'chatgpt',
+  helper_buddy_not_signed_in: 'chatgpt',
+  helper_buddy_quota: 'chatgpt',
 };
 
 /** Convert a catalog presentation into persistent Settings repair state. */
@@ -330,27 +330,27 @@ const CATALOG: Record<ErrorKind, CatalogEntry> = {
     surfaces: ['tray'],
     autoShowPanel: false,
   },
-  // M18 (integration): agent-mode failures (docs/AGENT-MODE.md §7). The two
+  // M18: helper-buddy failures (docs/HELPER-BUDDY-MODE.md §7). The two
   // actionable gates (sign-in, plan quota) auto-show the panel once and add a
   // caption — they hit while the user is looking at the screen, not the panel.
-  // The rest land on the agent Card + transcript; agent_quota and
-  // agent_backend_down FAIL CLOSED (the run stops, no retry storm).
-  agent_not_signed_in: {
-    copy: 'agent mode needs your chatgpt sign-in — connect it in settings.',
+  // The rest land on the helper buddy card + transcript; helper_buddy_quota and
+  // helper_buddy_backend_down FAIL CLOSED (the run stops, no retry storm).
+  helper_buddy_not_signed_in: {
+    copy: 'helper buddies need your chatgpt sign-in — connect it in settings.',
     surfaces: ['transcript', 'caption'],
     autoShowPanel: true,
   },
-  agent_quota: {
-    copy: 'your chatgpt plan is out of agent runs for now — voice still works.',
+  helper_buddy_quota: {
+    copy: 'your chatgpt plan is out of helper buddy runs for now — voice still works.',
     surfaces: ['transcript', 'caption'],
     autoShowPanel: true,
   },
-  agent_backend_down: {
-    copy: "couldn't reach chatgpt just now — i stopped that agent; try again in a bit.",
+  helper_buddy_backend_down: {
+    copy: "couldn't reach chatgpt just now — i stopped that helper buddy; try again in a bit.",
     surfaces: ['transcript'],
     autoShowPanel: false,
   },
-  agent_tool_failed: {
+  helper_buddy_tool_failed: {
     copy: "one of my tools kept failing on that task — here's what i got anyway.",
     surfaces: ['transcript'],
     autoShowPanel: false,

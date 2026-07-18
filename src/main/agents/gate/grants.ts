@@ -238,8 +238,8 @@ export class ApprovalFollowThroughTracker {
     assertPositiveInteger(this.maxActions, 'maxActions');
   }
 
-  activate(agentId: string, domain: string): FollowThroughCoverage {
-    const id = checkedAgentId(agentId);
+  activate(helperBuddyId: string, domain: string): FollowThroughCoverage {
+    const id = checkedHelperBuddyId(helperBuddyId);
     const timestamp = checkedTimestamp(this.now());
     const coverage: ActiveCoverage = {
       domain: normalizeDomain(domain),
@@ -255,8 +255,8 @@ export class ApprovalFollowThroughTracker {
   }
 
   /** Read-only check for reviewer evidence. It does not spend an action. */
-  coverageFor(agentId: string, domain: string): FollowThroughCoverage | null {
-    const id = checkedAgentId(agentId);
+  coverageFor(helperBuddyId: string, domain: string): FollowThroughCoverage | null {
+    const id = checkedHelperBuddyId(helperBuddyId);
     const coverage = this.validCoverage(id);
     if (coverage === null) return null;
     return coverage.domain === normalizeDomain(domain) ? publicCoverage(coverage) : null;
@@ -266,8 +266,8 @@ export class ApprovalFollowThroughTracker {
    * Spend coverage only after the flagged action actually executes. Leaving
    * the approved domain ends the chain instead of allowing a later bounce-back.
    */
-  recordExecutedAction(agentId: string, domain: string): boolean {
-    const id = checkedAgentId(agentId);
+  recordExecutedAction(helperBuddyId: string, domain: string): boolean {
+    const id = checkedHelperBuddyId(helperBuddyId);
     const coverage = this.validCoverage(id);
     if (coverage === null) return false;
     if (coverage.domain !== normalizeDomain(domain)) {
@@ -279,20 +279,20 @@ export class ApprovalFollowThroughTracker {
     return true;
   }
 
-  deactivate(agentId: string): void {
-    this.active.delete(agentId.trim());
+  deactivate(helperBuddyId: string): void {
+    this.active.delete(helperBuddyId.trim());
   }
 
   clear(): void {
     this.active.clear();
   }
 
-  private validCoverage(agentId: string): ActiveCoverage | null {
-    const coverage = this.active.get(agentId);
+  private validCoverage(helperBuddyId: string): ActiveCoverage | null {
+    const coverage = this.active.get(helperBuddyId);
     if (!coverage) return null;
     const timestamp = checkedTimestamp(this.now());
     if (timestamp < coverage.activatedAt || timestamp >= coverage.expiresAt) {
-      this.active.delete(agentId);
+      this.active.delete(helperBuddyId);
       return null;
     }
     return coverage;
@@ -360,10 +360,10 @@ function publicCoverage(coverage: ActiveCoverage): FollowThroughCoverage {
   };
 }
 
-function checkedAgentId(value: string): string {
+function checkedHelperBuddyId(value: string): string {
   const id = value.trim();
-  if (!id) throw new Error('agent id is required');
-  if (id.length > MAX_GRANT_ID_LENGTH) throw new Error('agent id exceeds the size limit');
+  if (!id) throw new Error('helper buddy id is required');
+  if (id.length > MAX_GRANT_ID_LENGTH) throw new Error('helper buddy id exceeds the size limit');
   return id;
 }
 

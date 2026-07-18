@@ -1,5 +1,9 @@
 import type { ApprovalRequest } from '../../shared/types';
-import type { AgentApprovalPort, AgentApprovalResolution, AgentApprovalVerdict } from './types';
+import type {
+  HelperBuddyApprovalPort,
+  HelperBuddyApprovalResolution,
+  HelperBuddyApprovalVerdict,
+} from './types';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -10,13 +14,13 @@ interface Deferred<T> {
 interface PendingApproval {
   request: ApprovalRequest;
   signal: AbortSignal;
-  delivery: Deferred<AgentApprovalResolution>;
+  delivery: Deferred<HelperBuddyApprovalResolution>;
   acknowledgment: Deferred<void> | null;
   resolving: boolean;
   onAbort(): void;
 }
 
-export interface AgentApprovalCoordinatorOptions {
+export interface HelperBuddyApprovalCoordinatorOptions {
   /** Full immutable snapshot after every add/remove/atomic replacement. */
   onChanged(requests: ApprovalRequest[]): void;
 }
@@ -26,25 +30,25 @@ export interface AgentApprovalCoordinatorOptions {
  * a delivered verdict is resolving; UI invocation completes only after the
  * parked executor acknowledges the gate/persistence/dispatch outcome.
  */
-export class AgentApprovalCoordinator implements AgentApprovalPort {
+export class HelperBuddyApprovalCoordinator implements HelperBuddyApprovalPort {
   private readonly pending = new Map<string, PendingApproval>();
 
-  constructor(private readonly options: AgentApprovalCoordinatorOptions) {}
+  constructor(private readonly options: HelperBuddyApprovalCoordinatorOptions) {}
 
-  request(request: ApprovalRequest, signal: AbortSignal): Promise<AgentApprovalResolution> {
+  request(request: ApprovalRequest, signal: AbortSignal): Promise<HelperBuddyApprovalResolution> {
     if (signal.aborted) return Promise.resolve(cancelledResolution());
     const existing = this.pending.get(request.approvalId);
     if (existing) {
-      if (existing.request.agentId !== request.agentId)
-        throw new Error('approval id is already bound to another agent');
+      if (existing.request.helperBuddyId !== request.helperBuddyId)
+        throw new Error('approval id is already bound to another helper buddy');
       if (!sameRequest(existing.request, request))
         throw new Error('approval id cannot be reused with different immutable evidence');
       if (existing.resolving)
         throw new Error(`approval ${request.approvalId} is already resolving`);
       return existing.delivery.promise;
     }
-    if (this.list().some((item) => item.agentId === request.agentId))
-      throw new Error(`agent ${request.agentId} already has a pending approval`);
+    if (this.list().some((item) => item.helperBuddyId === request.helperBuddyId))
+      throw new Error(`helper buddy ${request.helperBuddyId} already has a pending approval`);
 
     const pending = this.createPending(request, signal);
     this.pending.set(request.approvalId, pending);
@@ -57,7 +61,7 @@ export class AgentApprovalCoordinator implements AgentApprovalPort {
     return pending.delivery.promise;
   }
 
-  resolve(approvalId: string, verdict: AgentApprovalVerdict): Promise<void> {
+  resolve(approvalId: string, verdict: HelperBuddyApprovalVerdict): Promise<void> {
     if (!isApprovalVerdict(verdict))
       return Promise.reject(new Error('approval verdict is invalid'));
     const pending = this.pending.get(approvalId);
@@ -80,9 +84,9 @@ export class AgentApprovalCoordinator implements AgentApprovalPort {
     return pending.acknowledgment.promise;
   }
 
-  cancelAgent(agentId: string): void {
+  cancelHelperBuddy(helperBuddyId: string): void {
     for (const pending of [...this.pending.values()]) {
-      if (pending.request.agentId === agentId) this.cancelPending(pending);
+      if (pending.request.helperBuddyId === helperBuddyId) this.cancelPending(pending);
     }
   }
 
@@ -105,8 +109,8 @@ export class AgentApprovalCoordinator implements AgentApprovalPort {
 
   private resolution(
     pending: PendingApproval,
-    verdict: AgentApprovalVerdict,
-  ): AgentApprovalResolution {
+    verdict: HelperBuddyApprovalVerdict,
+  ): HelperBuddyApprovalResolution {
     let settled = false;
     const assertLive = (): void => {
       if (settled) throw new Error('approval resolution was already settled');
@@ -126,7 +130,7 @@ export class AgentApprovalCoordinator implements AgentApprovalPort {
           settled = true;
           pending.resolving = false;
           pending.acknowledgment = null;
-          pending.delivery = deferred<AgentApprovalResolution>();
+          pending.delivery = deferred<HelperBuddyApprovalResolution>();
           acknowledgment?.reject(asError(error));
           throw error;
         }
@@ -139,14 +143,14 @@ export class AgentApprovalCoordinator implements AgentApprovalPort {
         const acknowledgment = pending.acknowledgment;
         pending.resolving = false;
         pending.acknowledgment = null;
-        pending.delivery = deferred<AgentApprovalResolution>();
+        pending.delivery = deferred<HelperBuddyApprovalResolution>();
         acknowledgment?.reject(error);
       },
       replace: async (request) => {
         assertLive();
         if (pending.signal.aborted) throw new Error('approval was cancelled');
-        if (request.agentId !== pending.request.agentId)
-          throw new Error('replacement approval must belong to the same agent');
+        if (request.helperBuddyId !== pending.request.helperBuddyId)
+          throw new Error('replacement approval must belong to the same helper buddy');
         if (request.approvalId === pending.request.approvalId)
           throw new Error('replacement approval requires a new immutable id');
         if (this.pending.has(request.approvalId))
@@ -174,7 +178,7 @@ export class AgentApprovalCoordinator implements AgentApprovalPort {
     const pending: PendingApproval = {
       request: cloneRequest(request),
       signal,
-      delivery: deferred<AgentApprovalResolution>(),
+      delivery: deferred<HelperBuddyApprovalResolution>(),
       acknowledgment: null,
       resolving: false,
       onAbort: () => this.cancelPending(pending),
@@ -208,7 +212,7 @@ export class AgentApprovalCoordinator implements AgentApprovalPort {
   }
 }
 
-function isApprovalVerdict(value: unknown): value is AgentApprovalVerdict {
+function isApprovalVerdict(value: unknown): value is HelperBuddyApprovalVerdict {
   return value === 'once' || value === 'always' || value === 'deny' || value === 'handled';
 }
 
@@ -218,7 +222,7 @@ function cloneRequest(request: ApprovalRequest): ApprovalRequest {
 
 function sameRequest(left: ApprovalRequest, right: ApprovalRequest): boolean {
   return (
-    left.agentId === right.agentId &&
+    left.helperBuddyId === right.helperBuddyId &&
     left.approvalId === right.approvalId &&
     left.kind === right.kind &&
     left.userRequest === right.userRequest &&
@@ -238,7 +242,7 @@ function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
 }
 
-function cancelledResolution(): AgentApprovalResolution {
+function cancelledResolution(): HelperBuddyApprovalResolution {
   return {
     verdict: 'deny',
     acknowledge: () => undefined,

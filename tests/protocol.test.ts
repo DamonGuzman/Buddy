@@ -303,17 +303,17 @@ describe('persona tool definition', () => {
     expect(instructions).toContain('point_at');
     expect(instructions).toContain('chatgpt sign-in');
     expect(instructions).toContain('<system_reminder>');
-    expect(instructions).toContain('<agent_result>');
+    expect(instructions).toContain('<helper_buddy_result>');
     expect(getToolDefinitions().map((t) => t.name)).toEqual(['point_at']);
     expect(getToolDefinitions(true).map((t) => t.name)).toEqual([
       'point_at',
-      'spawn_agent',
-      'check_agents',
+      'spawn_helper_buddy',
+      'check_helper_buddies',
     ]);
     expect(getToolDefinitions(true, true).map((t) => t.name)).toEqual([
       'point_at',
-      'spawn_agent',
-      'check_agents',
+      'spawn_helper_buddy',
+      'check_helper_buddies',
       'use_computer',
     ]);
     const computerTool = getToolDefinitions(true, true).find(
@@ -326,8 +326,8 @@ describe('persona tool definition', () => {
     );
     expect(getTextToolDefinitions(true).map((t) => t.name)).toEqual([
       'point_at',
-      'spawn_agent',
-      'check_agents',
+      'spawn_helper_buddy',
+      'check_helper_buddies',
     ]);
   });
 
@@ -337,7 +337,9 @@ describe('persona tool definition', () => {
       expect(instructions).toContain('own the outcome, not just the conversation');
       expect(instructions).toContain('produce usable work instead of generic advice');
       expect(instructions).toContain('as buddy, your primary role');
-      expect(instructions).toContain('interface between the person and your background subagents');
+      expect(instructions).toContain(
+        'interface between the person and your background helper buddies',
+      );
       expect(instructions).toContain('delegate almost every substantive task');
       expect(instructions).toContain('do not try to complete that work yourself first');
       expect(instructions).toContain('evaluate and synthesize its result');

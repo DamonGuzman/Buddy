@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { AgentSummary } from '../src/shared/types';
+import type { HelperBuddySummary } from '../src/shared/types';
 import { resolveIslandActivity } from '../src/renderer/overlay/island-state';
 
-function agent(patch: Partial<AgentSummary>): AgentSummary {
+function helperBuddy(patch: Partial<HelperBuddySummary>): HelperBuddySummary {
   return {
-    id: 'agent-1',
+    id: 'helper-buddy-1',
     task: 'compare displays',
     status: 'running',
     createdAt: 1,
@@ -21,7 +21,7 @@ describe('resolveIslandActivity', () => {
       resolveIslandActivity({
         assistantState: 'listening',
         capturing: true,
-        agents: [],
+        helperBuddies: [],
         revealNewResult: false,
       }),
     ).toEqual({ kind: 'capture', label: 'seeing your screen' });
@@ -32,7 +32,7 @@ describe('resolveIslandActivity', () => {
       resolveIslandActivity({
         assistantState: 'speaking',
         capturing: false,
-        agents: [agent({})],
+        helperBuddies: [helperBuddy({})],
         revealNewResult: false,
       })?.kind,
     ).toBe('speaking');
@@ -43,19 +43,22 @@ describe('resolveIslandActivity', () => {
       resolveIslandActivity({
         assistantState: 'idle',
         capturing: false,
-        agents: [agent({ id: 'working' }), agent({ id: 'waiting', status: 'waiting_approval' })],
+        helperBuddies: [
+          helperBuddy({ id: 'working' }),
+          helperBuddy({ id: 'waiting', status: 'waiting_approval' }),
+        ],
         revealNewResult: false,
       }),
     ).toEqual({ kind: 'approval', label: 'a helper needs your ok', count: 1 });
   });
 
   it('collapses unseen results to a persistent dot after the reveal', () => {
-    const agents = [agent({ status: 'done', unseen: true })];
+    const helperBuddies = [helperBuddy({ status: 'done', unseen: true })];
     expect(
       resolveIslandActivity({
         assistantState: 'idle',
         capturing: false,
-        agents,
+        helperBuddies,
         revealNewResult: true,
       })?.kind,
     ).toBe('result');
@@ -63,7 +66,7 @@ describe('resolveIslandActivity', () => {
       resolveIslandActivity({
         assistantState: 'idle',
         capturing: false,
-        agents,
+        helperBuddies,
         revealNewResult: false,
       })?.kind,
     ).toBe('result-dot');
@@ -74,7 +77,7 @@ describe('resolveIslandActivity', () => {
       resolveIslandActivity({
         assistantState: 'idle',
         capturing: false,
-        agents: [],
+        helperBuddies: [],
         revealNewResult: false,
       }),
     ).toBeNull();
