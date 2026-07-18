@@ -95,7 +95,7 @@ export interface ComputerUseController {
  *
  * Construction is Electron-free. The first operation awaits app readiness,
  * then creates one persistent profile, grant store, gate, and visible-window
- * service. Browser-enabled HelperBuddyManager runs receive `browser`; foreground
+ * service. Every HelperBuddyManager run receives `browser`; foreground
  * ComputerUseRunner receives the same `gate` and `approvals` ports.
  */
 export class ComputerUseRuntime {

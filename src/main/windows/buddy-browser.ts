@@ -19,7 +19,7 @@ import {
 
 export type ApprovalResolution = 'once' | 'always' | 'deny';
 
-/** The visible-takeover seam implemented by an agent's offscreen driver. */
+/** The visible-takeover seam implemented by a helper buddy's offscreen driver. */
 export interface BuddyBrowserSurface {
   /** Show and invoke `onDone` if the user closes the visible window. */
   showForUser(onDone: () => void): void | Promise<void>;
@@ -66,8 +66,8 @@ interface ApprovalBinding {
  * Owns enrollment and visible-takeover lifecycle for the buddy browser.
  *
  * Approval windows are always resolved by the globally unique approval ID
- * first and only then checked against the supplied agent ID. A stale card can
- * therefore never reveal whatever browser happens to belong to that agent
+ * first and only then checked against the supplied helper buddy ID. A stale card can
+ * therefore never reveal whatever browser happens to belong to that helper buddy
  * now.
  */
 export class BuddyBrowserWindowService {
@@ -116,12 +116,14 @@ export class BuddyBrowserWindowService {
     return this.enrollmentOpening;
   }
 
-  /** Register one active offscreen browser. Duplicate agent IDs fail fast. */
+  /** Register one active offscreen browser. Duplicate helper buddy IDs fail fast. */
   registerSurface(helperBuddyId: string, surface: BuddyBrowserSurface): () => void {
     this.assertAlive();
-    assertOpaqueId(helperBuddyId, 'agent');
+    assertOpaqueId(helperBuddyId, 'helper buddy');
     if (this.surfaces.has(helperBuddyId)) {
-      throw new Error(`buddy browser surface already registered for agent: ${helperBuddyId}`);
+      throw new Error(
+        `buddy browser surface already registered for helper buddy: ${helperBuddyId}`,
+      );
     }
     const record: RegisteredSurface = {
       surface,
@@ -156,16 +158,16 @@ export class BuddyBrowserWindowService {
     });
   }
 
-  /** Bind one concrete pending approval to the agent's current browser. */
+  /** Bind one concrete pending approval to the helper buddy's current browser. */
   bindApproval(helperBuddyId: string, approvalId: string): () => Promise<void> {
     this.assertAlive();
-    assertOpaqueId(helperBuddyId, 'agent');
+    assertOpaqueId(helperBuddyId, 'helper buddy');
     assertOpaqueId(approvalId, 'approval');
     if (this.approvals.has(approvalId)) {
       throw new Error(`buddy browser approval is already bound: ${approvalId}`);
     }
     const surface = this.surfaces.get(helperBuddyId);
-    if (!surface) throw new Error(`no buddy browser surface for agent: ${helperBuddyId}`);
+    if (!surface) throw new Error(`no buddy browser surface for helper buddy: ${helperBuddyId}`);
     surface.approvalIds.add(approvalId);
     this.approvals.set(approvalId, { helperBuddyId, surface, takeoverShown: false });
     return () => this.releaseApproval(helperBuddyId, approvalId);
@@ -213,7 +215,7 @@ export class BuddyBrowserWindowService {
   }
 
   /**
-   * Freeze the exact surface before an approval can resume its parked agent.
+   * Freeze the exact surface before an approval can resume its parked helper buddy.
    * The binding intentionally remains live until the approval write succeeds.
    */
   async freezeApproval(helperBuddyId: string, approvalId: string): Promise<void> {
@@ -295,7 +297,7 @@ export class BuddyBrowserWindowService {
 
   private requireApproval(helperBuddyId: string, approvalId: string): ApprovalBinding {
     this.assertAlive();
-    assertOpaqueId(helperBuddyId, 'agent');
+    assertOpaqueId(helperBuddyId, 'helper buddy');
     assertOpaqueId(approvalId, 'approval');
     const binding = this.approvals.get(approvalId);
     if (!binding || binding.helperBuddyId !== helperBuddyId) {

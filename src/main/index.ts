@@ -390,8 +390,8 @@ function createServices(tray: TrayRef): Services {
         })
       : null;
 
-  // The agent manager and the conversation reference each other (finished
-  // Helper buddies deliver INTO the conversation; the conversation spawns THROUGH
+  // The helper-buddy manager and the conversation reference each other (finished
+  // helper buddies deliver INTO the conversation; the conversation spawns THROUGH
   // the manager), and the manager must be constructed first (ConversationDeps
   // takes it). Late-bind the back-edge through this ref — it is assigned the
   // moment the conversation exists, and helper-buddy runs are async, so no manager
@@ -409,7 +409,7 @@ function createServices(tray: TrayRef): Services {
     // M21: the panel's helper-buddies view is gone — the overlay sprites are
     // the helper-buddy surface now.
     onHelperBuddiesChanged: (list) => {
-      sessionRecorder?.record('agents_changed', list);
+      sessionRecorder?.record('helper_buddies_changed', list);
       overlays.broadcast('overlay:helper-buddies', list);
     },
     onFinished: (summary) => {
@@ -774,7 +774,6 @@ function registerInvokeHandlers(
       id: helperBuddyId,
       userRequest: request.trim(),
       task: request.trim(),
-      browserEnabled: false,
       recentTranscript: '',
       createdAt: Date.now(),
       filesystem: { taskId: prepared.taskId, rootName: prepared.rootName },
@@ -784,7 +783,9 @@ function registerInvokeHandlers(
       const reason =
         spawned.reason === 'not_signed_in'
           ? 'Sign in to ChatGPT in Buddy Settings before starting a folder task.'
-          : 'Filesystem execution is unavailable.';
+          : spawned.reason === 'filesystem_unavailable'
+            ? 'Filesystem execution is unavailable.'
+            : 'Browser execution is unavailable.';
       return filesystem.fail(prepared.taskId, reason);
     }
     whisper.show();
@@ -1138,7 +1139,6 @@ function buildDebugSurface({
           id,
           userRequest: task,
           task,
-          browserEnabled: false,
           recentTranscript: '',
           createdAt: Date.now(),
           filesystem: { taskId: prepared.taskId, rootName: prepared.rootName },
@@ -1146,15 +1146,6 @@ function buildDebugSurface({
         if (!result.ok) await filesystem.fail(prepared.taskId, result.reason);
         return result;
       },
-      spawnBrowser: (task) =>
-        helperBuddies.spawn({
-          id: `helper_buddy_debug_browser_${Date.now()}`,
-          userRequest: task,
-          task,
-          recentTranscript: '',
-          createdAt: Date.now(),
-          browserEnabled: true,
-        }),
       list: () => helperBuddies.list(),
       cancel: (id) => {
         helperBuddies.cancel(id);

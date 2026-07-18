@@ -20,7 +20,7 @@ interface StoredMemory extends HelperBuddyMemoryMetadata {
 
 /**
  * Durable, shared helper memory. Each record is a standalone Markdown file so
- * filesystem helpers can inspect the directory with ordinary read-only tools;
+ * helpers can inspect the directory with ordinary read-only tools;
  * all mutations still go through this service for validation and atomicity.
  */
 export class HelperBuddyMemoryStore implements HelperBuddyMemoryToolPort {

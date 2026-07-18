@@ -86,17 +86,17 @@ describe('BuddyBrowserWindowService', () => {
       getCurrentUrl: vi.fn(() => 'https://linear.app/acme'),
       dispose: vi.fn(async () => undefined),
     };
-    const managed = service.registerOffscreenDriver('agent-1', driver as never);
-    service.bindApproval('agent-1', 'approval-1');
+    const managed = service.registerOffscreenDriver('helper-buddy-1', driver as never);
+    service.bindApproval('helper-buddy-1', 'approval-1');
 
-    await service.showApprovalWindow('agent-1', 'approval-1');
-    await service.hideApprovalWindow('agent-1', 'approval-1');
+    await service.showApprovalWindow('helper-buddy-1', 'approval-1');
+    await service.hideApprovalWindow('helper-buddy-1', 'approval-1');
     await managed.dispose();
 
     expect(driver.showForTakeover).toHaveBeenCalledWith(expect.any(Function));
     expect(driver.hideAfterTakeover).toHaveBeenCalledOnce();
     expect(driver.dispose).toHaveBeenCalledOnce();
-    await expect(service.showApprovalWindow('agent-1', 'approval-1')).rejects.toThrow(
+    await expect(service.showApprovalWindow('helper-buddy-1', 'approval-1')).rejects.toThrow(
       'stale or mismatched',
     );
   });
@@ -160,8 +160,8 @@ describe('BuddyBrowserWindowService', () => {
     unrelated.surface.dispose.mockImplementation(async () => {
       sequence.push('dispose-notion');
     });
-    service.registerSurface('agent-linear', affected.surface);
-    service.registerSurface('agent-notion', unrelated.surface);
+    service.registerSurface('helper-buddy-linear', affected.surface);
+    service.registerSurface('helper-buddy-notion', unrelated.surface);
 
     await service.signOutSite('.LINEAR.APP');
 
@@ -174,18 +174,18 @@ describe('BuddyBrowserWindowService', () => {
     const done = vi.fn();
     const service = new BuddyBrowserWindowService({ profile, onTakeoverDone: done });
     const { surface, closeByUser } = surfaceFixture();
-    service.registerSurface('agent-1', surface);
-    service.bindApproval('agent-1', 'approval-1');
+    service.registerSurface('helper-buddy-1', surface);
+    service.bindApproval('helper-buddy-1', 'approval-1');
 
-    await expect(service.showApprovalWindow('agent-2', 'approval-1')).rejects.toThrow(
+    await expect(service.showApprovalWindow('helper-buddy-2', 'approval-1')).rejects.toThrow(
       'stale or mismatched',
     );
-    await expect(service.showApprovalWindow('agent-1', 'approval-old')).rejects.toThrow(
+    await expect(service.showApprovalWindow('helper-buddy-1', 'approval-old')).rejects.toThrow(
       'stale or mismatched',
     );
-    await service.showApprovalWindow('agent-1', 'approval-1');
+    await service.showApprovalWindow('helper-buddy-1', 'approval-1');
     closeByUser();
-    await vi.waitFor(() => expect(done).toHaveBeenCalledWith('agent-1', 'approval-1'));
+    await vi.waitFor(() => expect(done).toHaveBeenCalledWith('helper-buddy-1', 'approval-1'));
     expect(surface.hideFromUser).toHaveBeenCalledOnce();
   });
 
@@ -202,11 +202,11 @@ describe('BuddyBrowserWindowService', () => {
     surface.hideFromUser.mockImplementation(async () => {
       sequence.push('hide');
     });
-    service.registerSurface('agent-1', surface);
-    service.bindApproval('agent-1', 'approval-1');
-    await service.showApprovalWindow('agent-1', 'approval-1');
+    service.registerSurface('helper-buddy-1', surface);
+    service.bindApproval('helper-buddy-1', 'approval-1');
+    await service.showApprovalWindow('helper-buddy-1', 'approval-1');
 
-    await service.hideApprovalWindow('agent-1', 'approval-1');
+    await service.hideApprovalWindow('helper-buddy-1', 'approval-1');
 
     expect(sequence).toEqual(['hide', 'handled']);
   });
@@ -219,14 +219,16 @@ describe('BuddyBrowserWindowService', () => {
       .mockResolvedValueOnce();
     const service = new BuddyBrowserWindowService({ profile, onTakeoverDone });
     const { surface } = surfaceFixture();
-    service.registerSurface('agent-1', surface);
-    service.bindApproval('agent-1', 'approval-1');
-    await service.showApprovalWindow('agent-1', 'approval-1');
+    service.registerSurface('helper-buddy-1', surface);
+    service.bindApproval('helper-buddy-1', 'approval-1');
+    await service.showApprovalWindow('helper-buddy-1', 'approval-1');
 
-    await expect(service.hideApprovalWindow('agent-1', 'approval-1')).rejects.toThrow(
+    await expect(service.hideApprovalWindow('helper-buddy-1', 'approval-1')).rejects.toThrow(
       'coordinator unavailable',
     );
-    await expect(service.hideApprovalWindow('agent-1', 'approval-1')).resolves.toBeUndefined();
+    await expect(
+      service.hideApprovalWindow('helper-buddy-1', 'approval-1'),
+    ).resolves.toBeUndefined();
 
     expect(surface.hideFromUser).toHaveBeenCalledOnce();
     expect(onTakeoverDone).toHaveBeenCalledTimes(2);
@@ -244,18 +246,18 @@ describe('BuddyBrowserWindowService', () => {
       onTakeoverClosed: osClosed,
     });
     const takeover = surfaceFixture();
-    service.registerSurface('agent-1', takeover.surface);
-    service.bindApproval('agent-1', 'approval-1');
-    await service.showApprovalWindow('agent-1', 'approval-1');
+    service.registerSurface('helper-buddy-1', takeover.surface);
+    service.bindApproval('helper-buddy-1', 'approval-1');
+    await service.showApprovalWindow('helper-buddy-1', 'approval-1');
 
-    await expect(service.hideApprovalWindow('agent-1', 'approval-1')).rejects.toThrow(
+    await expect(service.hideApprovalWindow('helper-buddy-1', 'approval-1')).rejects.toThrow(
       'handled acknowledgment failed',
     );
     expect(osClosed).not.toHaveBeenCalled();
 
-    await service.showApprovalWindow('agent-1', 'approval-1');
+    await service.showApprovalWindow('helper-buddy-1', 'approval-1');
     takeover.closeByUser();
-    await vi.waitFor(() => expect(osClosed).toHaveBeenCalledWith('agent-1', 'approval-1'));
+    await vi.waitFor(() => expect(osClosed).toHaveBeenCalledWith('helper-buddy-1', 'approval-1'));
     expect(explicitDone).toHaveBeenCalledOnce();
   });
 
@@ -271,8 +273,8 @@ describe('BuddyBrowserWindowService', () => {
       sequence.push('dispose-2');
     });
     await service.openEnrollment('https://linear.app');
-    service.registerSurface('agent-1', first.surface);
-    service.registerSurface('agent-2', second.surface);
+    service.registerSurface('helper-buddy-1', first.surface);
+    service.registerSurface('helper-buddy-2', second.surface);
 
     await service.clearAll();
 
@@ -285,7 +287,7 @@ describe('BuddyBrowserWindowService', () => {
     const { profile } = profileFixture();
     const service = new BuddyBrowserWindowService({ profile });
     const active = surfaceFixture();
-    service.registerSurface('agent-1', active.surface);
+    service.registerSurface('helper-buddy-1', active.surface);
 
     await service.suspend();
 
@@ -305,9 +307,9 @@ describe('BuddyBrowserIpcController', () => {
     surface.surface.hideFromUser.mockImplementation(async () => {
       sequence.push('hide');
     });
-    windows.registerSurface('agent-1', surface.surface);
-    windows.bindApproval('agent-1', 'approval-1');
-    await windows.showApprovalWindow('agent-1', 'approval-1');
+    windows.registerSurface('helper-buddy-1', surface.surface);
+    windows.bindApproval('helper-buddy-1', 'approval-1');
+    await windows.showApprovalWindow('helper-buddy-1', 'approval-1');
     const resolve = vi.fn(async () => {
       sequence.push('resolve');
     });
@@ -318,11 +320,11 @@ describe('BuddyBrowserIpcController', () => {
       revokeGrant: () => undefined,
     });
 
-    await controller.resolveApproval('agent-1', 'approval-1', 'always');
+    await controller.resolveApproval('helper-buddy-1', 'approval-1', 'always');
 
     expect(sequence).toEqual(['hide', 'resolve']);
-    expect(resolve).toHaveBeenCalledWith('agent-1', 'approval-1', 'always');
-    await expect(windows.showApprovalWindow('agent-1', 'approval-1')).rejects.toThrow(
+    expect(resolve).toHaveBeenCalledWith('helper-buddy-1', 'approval-1', 'always');
+    await expect(windows.showApprovalWindow('helper-buddy-1', 'approval-1')).rejects.toThrow(
       'stale or mismatched',
     );
   });
@@ -332,9 +334,9 @@ describe('BuddyBrowserIpcController', () => {
     const windows = new BuddyBrowserWindowService({ profile });
     const surface = surfaceFixture();
     surface.surface.hideFromUser.mockRejectedValueOnce(new Error('window would not hide'));
-    windows.registerSurface('agent-1', surface.surface);
-    windows.bindApproval('agent-1', 'approval-1');
-    await windows.showApprovalWindow('agent-1', 'approval-1');
+    windows.registerSurface('helper-buddy-1', surface.surface);
+    windows.bindApproval('helper-buddy-1', 'approval-1');
+    await windows.showApprovalWindow('helper-buddy-1', 'approval-1');
     const resolve = vi.fn(async () => undefined);
     const controller = new BuddyBrowserIpcController(windows, {
       resolve,
@@ -343,11 +345,13 @@ describe('BuddyBrowserIpcController', () => {
       revokeGrant: () => undefined,
     });
 
-    await expect(controller.resolveApproval('agent-1', 'approval-1', 'once')).rejects.toThrow(
-      'window would not hide',
-    );
+    await expect(
+      controller.resolveApproval('helper-buddy-1', 'approval-1', 'once'),
+    ).rejects.toThrow('window would not hide');
 
     expect(resolve).not.toHaveBeenCalled();
-    await expect(windows.showApprovalWindow('agent-1', 'approval-1')).resolves.toBeUndefined();
+    await expect(
+      windows.showApprovalWindow('helper-buddy-1', 'approval-1'),
+    ).resolves.toBeUndefined();
   });
 });

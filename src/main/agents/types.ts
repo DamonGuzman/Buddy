@@ -50,10 +50,8 @@ export interface HelperBuddyBrief {
   screenshot?: { jpegBase64: string; meta: CaptureMeta }; // active display's turn capture
   recentTranscript: string; // last ~6 entries flattened "user:/clicky:", capped ~1500 chars
   createdAt: number;
-  /** Explicit per-task capability grant. False keeps every acting tool out of the model request. */
-  browserEnabled: boolean;
-  /** Present only for a picker-authorized, no-browser staged filesystem task. */
-  filesystem?: { taskId: string; rootName: string };
+  /** Picker-authorized transactional workspace available alongside the shared browser. */
+  filesystem: { taskId: string; rootName: string };
 }
 
 export interface HelperBuddyFilesystemToolPort {
@@ -91,7 +89,7 @@ export interface HelperBuddyMemorySaveInput {
   content: string;
 }
 
-/** Durable Markdown memory shared by every background helper profile. */
+/** Durable Markdown memory shared by every background helper. */
 export interface HelperBuddyMemoryToolPort {
   /** Absolute owner-only directory exposed in the progressive-disclosure catalog. */
   readonly directory: string;
@@ -209,10 +207,10 @@ export interface HelperBuddyToolContext {
   memory: HelperBuddyMemoryToolPort;
   /** Firecrawl v2 transport. Present for every helper in production. */
   firecrawl?: FirecrawlClientPort;
-  /** Present only when this task was explicitly granted browser use. */
-  browser?: HelperBuddyBrowserToolPort;
-  /** Present only for a picker-authorized staged filesystem task. */
-  filesystem?: HelperBuddyFilesystemToolPort;
+  /** Shared persistent-browser capability, guarded by ActionGate. */
+  browser: HelperBuddyBrowserToolPort;
+  /** Picker-authorized staged filesystem capability. */
+  filesystem: HelperBuddyFilesystemToolPort;
 }
 
 export interface HelperBuddyBrowserToolResult {
@@ -256,7 +254,7 @@ export interface HelperBuddyManagerDeps {
   isReady(): boolean;
   /** Push the full renderer-safe list to the overlay helper-buddy surface. */
   onHelperBuddiesChanged(list: HelperBuddySummary[]): void;
-  /** Fires once per agent reaching a terminal status. */
+  /** Fires once per helper buddy reaching a terminal status. */
   onFinished(summary: HelperBuddySummary): void;
   /** Tray balloon nudge; injected so manager stays Electron-free in tests. */
   notify?(title: string, body: string): void;

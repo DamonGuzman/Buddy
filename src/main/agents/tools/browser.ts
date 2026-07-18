@@ -39,8 +39,6 @@ function browserSpec(
     timeoutMs: HELPER_BUDDY_TOOL_TIMEOUT_MS,
     stepKind,
     async execute(args, ctx) {
-      if (!ctx.browser)
-        return JSON.stringify({ error: 'browser use was not granted for this task' });
       if (!justification(args)) return JSON.stringify({ error: 'justification is required' });
       return (await ctx.browser.execute(name, args)).output;
     },
@@ -117,7 +115,6 @@ export const needsUserTool: HelperBuddyToolSpec = {
   },
   stepKind: 'review',
   async execute(args, ctx) {
-    if (!ctx.browser) return JSON.stringify({ error: 'browser use was not granted for this task' });
     if (!justification(args)) return JSON.stringify({ error: 'justification is required' });
     return (await ctx.browser.requestUser(args)).output;
   },

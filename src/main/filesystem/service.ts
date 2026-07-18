@@ -205,7 +205,7 @@ export class FilesystemTaskService implements HelperBuddyFilesystemToolPort {
     return cloneView(record.view);
   }
 
-  /** Idempotent stale/pre-agent cancellation; a missing task is already cancelled. */
+  /** Idempotent stale/pre-helper-buddy cancellation; a missing task is already cancelled. */
   async cancelPending(taskId: string): Promise<void> {
     const record = this.records.get(taskId);
     if (!record) return;

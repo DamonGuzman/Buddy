@@ -1,10 +1,10 @@
 /**
  * One owner of the tinted status badge/pill idiom (border + background at
  * low alpha + bright text) shared by the header state badge, the settings
- * key/sign-in badges, and the agent status pills.
+ * key/sign-in badges, and helper-buddy status pills.
  */
 export const STATUS_TINT = {
-  /** Success: key saved, signed in, speaking, agent done. */
+  /** Success: key saved, signed in, speaking, helper buddy done. */
   positive: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
   /** Attention: expired session, thinking, mock server. */
   warning: 'border-amber-400/40 bg-amber-400/10 text-amber-300',

@@ -167,7 +167,7 @@ export class BuddyBrowserProfile {
       webPreferences: { ...BROWSER_WEB_PREFERENCES, partition: this.partition },
     };
     const win = new BrowserWindow(windowOptions);
-    // Agent-generated clicks count as renderer user activation, so autoplay policy alone is not
+    // Helper-buddy-generated clicks count as renderer user activation, so autoplay policy alone is not
     // enough. Keep page audio muted for both hidden operation and visible login takeover.
     win.webContents.setAudioMuted(true);
     win.webContents.on('will-prevent-unload', (event) => {

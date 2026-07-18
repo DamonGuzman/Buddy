@@ -1,6 +1,6 @@
 # Buddy for macOS and Windows — MVP Architecture & Scope
 
-> The single source of truth for this MVP. All implementation agents read this first.
+> The single source of truth for this MVP. All contributors read this first.
 
 ## 1. Product in one paragraph
 
@@ -44,8 +44,8 @@ typed action** and is always signposted by a visible indicator.
   references something on screen.
 - Helper buddies: the foreground Buddy delegates substantive background work through
   `spawn_helper_buddy`, checks progress with `check_helper_buddies`, and synthesizes completion
-  results. Helper buddies use the ChatGPT subscription backend, Firecrawl, durable memory, and
-  picker-authorized transactional filesystem tools; explicitly granted tasks can also use Buddy's
+  results. Every helper buddy uses the same full capability surface: the ChatGPT subscription
+  backend, Firecrawl, durable memory, picker-authorized transactional filesystem tools, and Buddy's
   persistent browser profile through the shared ActionGate. See `docs/HELPER-BUDDY-MODE.md` and
   `docs/HELPER-BUDDY-EXECUTION.md`.
 - **Mock Realtime server** (local WS, speaks the same protocol subset) + **debug harness** for QA.
@@ -287,7 +287,7 @@ model call does not silently proceed without observability.
 ## 9. Conventions
 
 - TypeScript strict. No `any` at module boundaries. Prettier defaults, 100-col.
-- Every module owned by one agent per wave; **shared files (`src/shared/*`) change only via the
+- Every module has one owner per wave; **shared files (`src/shared/*`) change only via the
   integration/orchestrator-approved edits**.
 - Commit per milestone with clear messages.
 - `npm run dev` (electron-vite dev), `npm run build`, `npm test`, `npm run mock` (mock server),

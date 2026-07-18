@@ -1,5 +1,5 @@
 /**
- * M18: the TEXT panel path — a typed question runs on gpt-5.6-sol over the
+ * M18: the typed whisper path — a typed question runs on gpt-5.6-sol over the
  * user's ChatGPT (Codex) subscription: stream text to the transcript
  * (+ caption), hand complete tool calls to the shared router, and round-trip
  * buffered tool outputs through continue() like voice. Fails closed on plan
@@ -30,7 +30,7 @@ import type { TurnTelemetry } from './turn-telemetry';
 
 /**
  * M18: the narrow slice of `CodexResponsesSession` the conversation drives for
- * the TEXT panel path. Kept as an interface so tests can inject a fake without
+ * the typed whisper path. Kept as an interface so tests can inject a fake without
  * the real transport (see `ConversationDeps.buildCodexSession`).
  */
 export interface CodexTextSession {

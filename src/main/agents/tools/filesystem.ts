@@ -28,8 +28,6 @@ export const filesystemTools: HelperBuddyToolSpec[] = [
     timeoutMs: 125_000,
     stepKind: 'shell',
     async execute(args, ctx) {
-      if (!ctx.filesystem || !ctx.brief.filesystem)
-        throw new Error('filesystem access was not granted for this task');
       const script = typeof args['script'] === 'string' ? args['script'] : '';
       const cwd = typeof args['cwd'] === 'string' ? args['cwd'] : '.';
       const result = await ctx.filesystem.runShell(
@@ -65,8 +63,6 @@ export const filesystemTools: HelperBuddyToolSpec[] = [
     timeoutMs: 125_000,
     stepKind: 'file',
     async execute(args, ctx) {
-      if (!ctx.filesystem || !ctx.brief.filesystem)
-        throw new Error('filesystem access was not granted for this task');
       const paths = Array.isArray(args['paths'])
         ? args['paths'].filter((value): value is string => typeof value === 'string')
         : [];
@@ -99,8 +95,6 @@ export const filesystemTools: HelperBuddyToolSpec[] = [
     timeoutMs: 125_000,
     stepKind: 'shell',
     async execute(args, ctx) {
-      if (!ctx.filesystem || !ctx.brief.filesystem)
-        throw new Error('filesystem access was not granted for this task');
       const script = typeof args['script'] === 'string' ? args['script'] : '';
       const cwd = typeof args['cwd'] === 'string' ? args['cwd'] : '.';
       return JSON.stringify(
@@ -119,8 +113,6 @@ export const filesystemTools: HelperBuddyToolSpec[] = [
     timeoutMs: 30_000,
     stepKind: 'file',
     async execute(_args, ctx) {
-      if (!ctx.filesystem || !ctx.brief.filesystem)
-        throw new Error('filesystem access was not granted for this task');
       return ctx.filesystem.describeChanges(ctx.brief.filesystem.taskId);
     },
   },
@@ -145,8 +137,6 @@ export const filesystemTools: HelperBuddyToolSpec[] = [
     timeoutMs: 30_000,
     stepKind: 'file',
     async execute(args, ctx) {
-      if (!ctx.filesystem || !ctx.brief.filesystem)
-        throw new Error('filesystem access was not granted for this task');
       const path = typeof args['path'] === 'string' ? args['path'] : '';
       return ctx.filesystem.presentFile(ctx.brief.filesystem.taskId, path);
     },

@@ -151,7 +151,7 @@ export interface SessionEventMap {
   // App bootstrap / OS lifecycle (index.ts).
   phone_audio_bridge_status: PhoneAudioBridgeStatus;
   phone_audio_bridge_client: { state: 'connected' | 'disconnected' };
-  agents_changed: HelperBuddySummary[];
+  helper_buddies_changed: HelperBuddySummary[];
   action_gate_assessment: ActionGateJournalEntry;
   computer_action_executed: ComputerActionOutcomeEntry;
   computer_action_failed: ComputerActionOutcomeEntry;

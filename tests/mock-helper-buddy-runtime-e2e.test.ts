@@ -26,10 +26,7 @@ import type { ApprovalGrant, ApprovalRequest } from '../src/shared/types';
 import type { CaptureResult } from '../src/main/capture';
 import type { ComputerDriver, DriverPoint, MouseButton } from '../src/main/computer/driver';
 import { createTestAgentMemory } from './support/helper-buddy-memory';
-import {
-  createTestHelperBuddyFilesystem,
-  TEST_FILESYSTEM_BRIEF,
-} from './support/helper-buddy-capabilities';
+import { createTestHelperBuddyFilesystem } from './support/helper-buddy-capabilities';
 
 interface RuntimeResult {
   status: string;
@@ -46,9 +43,9 @@ async function runScenario(scenario: MockHelperBuddyScenario): Promise<RuntimeRe
     id: `runtime-${scenario}`,
     userRequest: task,
     task,
+    filesystem: { taskId: `runtime-${scenario}`, rootName: 'test-root' },
     recentTranscript: '',
     createdAt: 1,
-    filesystem: TEST_FILESYSTEM_BRIEF,
   };
   const driver = new ScriptedDriver();
   const reviewer = new MockActionReviewer();

@@ -34,7 +34,7 @@ interface HelperBuddyStrikes {
   targets: Map<string, number>;
 }
 
-/** Run-local denial accounting. One instance may safely serve multiple buddies. */
+/** Run-local denial accounting. One instance may safely serve multiple helper buddies. */
 export class DenialStrikeCounter {
   private readonly helperBuddies = new Map<string, HelperBuddyStrikes>();
   private readonly thresholds: DenialStrikeThresholds;

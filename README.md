@@ -40,14 +40,15 @@ Choose the artifact for your computer. MVP builds are unsigned:
    machine before it's stored and never shown again.
 3. Paste your Firecrawl key in **Settings → Firecrawl** to enable search, full-page scrape, map,
    crawl, batch scrape, and research for helper buddies.
-4. On macOS, use **Settings → Permissions** to grant microphone, screen recording, accessibility,
+4. Use **Settings → ChatGPT** to connect the plan that powers helper buddies.
+5. On macOS, use **Settings → Permissions** to grant microphone, screen recording, accessibility,
    and input monitoring only when Buddy asks for each capability.
-5. **Hold the platform hotkey and talk** ("what am I looking at?"). Keep holding while you
+6. **Hold the platform hotkey and talk** ("what am I looking at?"). Keep holding while you
    speak; release to send. Buddy answers in voice and points at what it mentions.
-6. For a hands-free back-and-forth, enable **full realtime mode** in settings. Press the hotkey
+7. For a hands-free back-and-forth, enable **full realtime mode** in settings. Press the hotkey
    once to activate and once more to deactivate; silence ends each turn automatically, and Buddy
    takes a fresh screenshot for every speech turn.
-7. Somewhere quiet? Tap the hotkey to open the whisper composer and type instead — same pipeline.
+8. Somewhere quiet? Tap the hotkey to open the whisper composer and type instead — same pipeline.
 
 The hotkey is fixed at Control plus the left Option/Alt key for the MVP. Right Option/Alt never
 triggers it, avoiding AltGr on international Windows layouts.
@@ -64,7 +65,7 @@ conversation quality stay comparable.
 - Capture is **always signposted**: a visible indicator shows whenever Buddy is looking/listening.
 - Your OpenAI and Firecrawl API keys are stored **encrypted locally** (macOS Keychain or Windows DPAPI via Electron
   `safeStorage`) and
-  never leaves the main process.
+  never leave the main process.
 - No servers of ours: audio and screenshots go **directly from your machine to OpenAI**. When a
   helper uses a web tool, only that tool's query, URL, and options go directly to Firecrawl; the
   Firecrawl key never goes to OpenAI. Uninstalling removes the app; the compatibility data dir (`%APPDATA%/heyclicky`)
@@ -135,8 +136,8 @@ Read `docs/ARCHITECTURE.md` first (scope, module ownership, IPC/coordinate contr
 
 ## Known MVP limitations
 
-- **Computer use is deliberately bounded** — a helper can use Buddy's dedicated browser only
-  when the foreground handoff grants browser access for that task. It cannot borrow the user's
+- **Computer use is deliberately bounded** — every helper buddy has the same tool surface, but its
+  first browser action must pass an explicit capability approval. It cannot borrow the user's
   normal browser profile, type credentials, accept OAuth grants, upload/download files, or bypass
   the independent action reviewer and raise-hand approvals. Live-desktop mouse/keyboard use is a
   separate Settings opt-in and every proposed action requires a one-use human approval.

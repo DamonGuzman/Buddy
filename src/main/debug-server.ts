@@ -31,7 +31,6 @@ import {
   isMockHelperBuddyScenario,
   markMockHelperBuddyTask,
   MOCK_HELPER_BUDDY_SCENARIOS,
-  type MockHelperBuddyScenario,
 } from './agents/mock-helper-buddy-backend';
 import { debugPortOverride, isDebugEnabled } from './env';
 import {
@@ -59,14 +58,6 @@ export type {
   PipelineDebugDeps,
 } from './debug/deps';
 
-export interface BrowserHelperBuddyDebugDeps extends HelperBuddyDebugDeps {
-  /** Spawn through the production HelperBuddyManager with browserEnabled=true. */
-  spawnBrowser?: (
-    task: string,
-    scenario?: MockHelperBuddyScenario,
-  ) => { ok: true; helperBuddyId: string } | { ok: false; reason: string };
-}
-
 export interface GateDebugAssessmentInput {
   helperBuddyId?: string;
   userRequest: string;
@@ -90,7 +81,7 @@ export interface ComputerUseDebugDeps {
 }
 
 export type ComputerUseDebugServerDeps = Omit<DebugServerDeps, 'helperBuddies'> & {
-  helperBuddies?: BrowserHelperBuddyDebugDeps;
+  helperBuddies?: HelperBuddyDebugDeps;
   computerUse?: ComputerUseDebugDeps;
 };
 
@@ -105,46 +96,28 @@ const ROUTES: Record<string, RouteHandler> = {
   ...OVERLAY_ROUTES,
   ...PIPELINE_ROUTES,
   ...HELPER_BUDDY_ROUTES,
-  // Overrides the task-only route with an explicit browser-capability contract.
+  // Overrides the task-only route with deterministic mock-scenario selection.
   'POST /helper-buddies/spawn': async (deps, req, res) => {
     if (!deps.helperBuddies) return sendJson(res, 503, { error: 'helper buddy runtime not wired' });
     const body = asRecord(await readJsonBody(req));
     const task = body?.['task'];
-    const browserEnabled = body?.['browserEnabled'] ?? false;
     const scenario = body?.['scenario'];
     if (!isNonBlankString(task))
       return sendJson(res, 400, {
-        error: 'expected {task: string, browserEnabled?: boolean, scenario?: string}',
+        error: 'expected {task: string, scenario?: string}',
       });
-    if (typeof browserEnabled !== 'boolean')
-      return sendJson(res, 400, { error: 'browserEnabled must be a boolean' });
     if (scenario !== undefined && !isMockHelperBuddyScenario(scenario))
       return sendJson(res, 400, {
         error: 'unknown mock scenario',
         scenarios: MOCK_HELPER_BUDDY_SCENARIOS,
       });
-    if (scenario !== undefined && scenario !== 'research' && browserEnabled !== true)
-      return sendJson(res, 400, {
-        error: 'computer-use mock scenarios require browserEnabled:true',
-      });
-    const helperBuddyDeps = deps.helperBuddies as BrowserHelperBuddyDebugDeps;
-    const result = browserEnabled
-      ? helperBuddyDeps.spawnBrowser
-        ? helperBuddyDeps.spawnBrowser(
-            scenario === undefined ? task.trim() : markMockHelperBuddyTask(scenario, task),
-            scenario,
-          )
-        : { ok: false as const, reason: 'browser debug spawn is not wired' }
-      : await helperBuddyDeps.spawn(
-          scenario === undefined || scenario === 'research'
-            ? task.trim()
-            : markMockHelperBuddyTask(scenario, task),
-        );
-    sendJson(
-      res,
-      result.ok ? 202 : browserEnabled && !helperBuddyDeps.spawnBrowser ? 503 : 409,
-      result,
+    const result = await deps.helperBuddies.spawn(
+      scenario === undefined || scenario === 'research'
+        ? task.trim()
+        : markMockHelperBuddyTask(scenario, task),
+      scenario,
     );
+    sendJson(res, result.ok ? 202 : 409, result);
   },
   'GET /mock/helper-buddy-scenarios': (_deps, _req, res) => {
     sendJson(res, 200, { scenarios: MOCK_HELPER_BUDDY_SCENARIOS });

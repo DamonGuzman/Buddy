@@ -144,7 +144,7 @@ export class HelperBuddyManager {
     for (const runner of this.runners.values()) runner.cancel();
   }
   /**
-   * Destructive browser-state boundary: cancel and join every browser-enabled
+   * Destructive browser-state boundary: cancel and join every helper
    * runner, including one still in its initial backend deliberation. Repeat
    * until registration is empty so profile clearing cannot race late lazy
    * driver creation.

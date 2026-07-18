@@ -2,7 +2,7 @@
 
 > Implemented architecture and release contract. Gives helper buddies (docs/HELPER-BUDDY-MODE.md) a
 > computer of their own to
-> act with — a dedicated offscreen browser workspace — governed by an **action-review agent** as
+> act with — a dedicated offscreen browser workspace — governed by an **independent action reviewer** as
 > the first line of defense and **raise-hand** (human approval) as the absolute fallback. Depends
 > on the shipped helper-buddy runtime (`src/main/agents/`), the Sol computer-use operator
 > (`src/main/computer/`), and Codex auth. Read `docs/ARCHITECTURE.md` first; this doc assumes it.
@@ -17,17 +17,16 @@
 
 ## 0. Executive summary
 
-Every helper profile receives the complete Firecrawl web tool set. Research-only helpers otherwise
-remain read-only (Firecrawl / scratchpad / read_screen). An
-explicitly browser-enabled handoff can additionally use a browser the buddy can _drive_. The
-implementation gives each such helper a **hidden
+Every helper receives the complete Firecrawl, durable memory, transactional filesystem, and browser
+tool sets in one model request. There are no capability-selected helper profiles. The implementation
+gives each helper a **hidden
 `BrowserWindow`** on a persistent "buddy work profile" partition, driven entirely through
 synthetic input.
 
 This browser workspace is **not a security sandbox or an isolation boundary**. Electron renderer
 sandboxing and process hardening reduce renderer privileges, but the persistent profile
 deliberately shares enrolled sessions across buddies. Safety comes from the mechanically enforced
-action gate, independent review agent, explicit user enrollment, hard-denied actions, and
+action gate, independent reviewer, explicit user enrollment, hard-denied actions, and
 raise-hand approval.
 
 ```
@@ -37,7 +36,7 @@ raise-hand approval.
   ActionGate  ── unflagged ──────────────► execute
         │ flagged (DOM hit-test: submit/send/pay/…)
         ▼
-  Review agent (one-shot, strict JSON)
+  Independent reviewer (one-shot, strict JSON)
         ├─ approve  ──────────────────────► execute
         ├─ deny     ─► tool output {denied, reason}; final. 3 strikes → escalate/halt
         └─ escalate ─► raise-hand: user approves once / always / denies
@@ -52,7 +51,7 @@ Five pillars, one line each:
    renderer input, and capture via `capturePage()` (§2.2).
 3. **Gate**: mechanically unbypassable, placed between tool-call parse and input dispatch; a pure
    DOM-grounded trigger decides what needs review; only flagged actions pay reviewer latency.
-4. **Review agent**: judges _is this action a faithful step toward the user's stated task_ from
+4. **Independent reviewer**: judges _is this action a faithful step toward the user's stated task_ from
    ground truth (DOM hit-test, form payload, URL) + the buddy's claimed justification.
    Uncertain-alignment → deny (final); uncertain-consequence → escalate.
 5. **Approval memory**: user "always allow" grants persist across tasks as normalized action
@@ -126,8 +125,9 @@ new BrowserWindow({
 - One window per buddy → buddies parallelize with zero contention (no shared cursor, no focus).
 - `setWindowOpenHandler`: new-window requests navigate the same window (deny popups) — one
   observable surface per buddy, no invisible tab sprawl.
-- Downloads: `session.on('will-download', …)` → cancel in v1 (file writes are still deferred per
-  HELPER-BUDDY-MODE §3.2). Permission requests (camera/mic/geolocation/notifications): deny all.
+- Downloads: `session.on('will-download', …)` always cancels. User-visible file outputs go through
+  the picker-authorized transactional filesystem tools instead. Permission requests
+  (camera/mic/geolocation/notifications): deny all.
 
 ### 2.2 Input via CDP — spike-verified
 
@@ -183,14 +183,15 @@ sites deliberately:
 ### 2.5 Lifecycle
 
 Window created lazily on the buddy's first browser tool call; destroyed on terminal status
-(done/failed/cancelled) and on `manager.dispose()`. Browser helpers have no whole-run wall clock or
+(done/failed/cancelled) and on `manager.dispose()`. Helpers have no whole-run wall clock or
 step ceiling: real web tasks may take arbitrarily many observe/act rounds. They remain explicitly
 cancellable at every operation boundary, and stalled individual operations still fail fast.
 
 ## 3. Browser tools for helper buddies
 
 Registered in the existing `HelperBuddyToolSpec` registry — no sub-delegation to Sol; the buddy's own
-Codex loop drives its own window. Granted per-task (a research-only buddy gets none). Every acting
+Codex loop drives its own window. The browser surface is registered for every helper and created
+lazily only if a browser tool is called. Every acting
 tool carries a **required `justification`** parameter (product decision: always present, evidence
 for the gate) plus the shared required **`description`** parameter: a 3–12 word, non-technical
 progress line shown directly on the helper card. Missing or malformed descriptions are rejected
@@ -276,7 +277,7 @@ default). Evidence, in trust order:
    (names + values, capped, password/credential fields elided). This is the highest-value check:
    the email body says what the user asked; the recipient is not attacker-supplied.
 5. **The buddy's justification** — labeled explicitly in the reviewer prompt as _a claim by the
-   acting agent, not a fact_. A mismatch between claim and mechanical facts is itself a deny
+   acting helper buddy, not a fact_. A mismatch between claim and mechanical facts is itself a deny
    signal ("justification says 'clicking next', element is a payment submit").
 6. **The buddy's recent step trail** (existing `HelperBuddyStep` log, last ~10) and any **standing
    approval grants** matching this signature (§5).
@@ -362,7 +363,7 @@ and unresolved-element actions on the live desktop. Mechanics:
   sprite system as M19, but a waiting_approval sprite does NOT self-dismiss.
 - No response: parked buddies survive indefinitely within the app run; on quit they end
   `cancelled` with copy _"i was waiting on your ok when the app closed."_ Tray balloon on
-  escalation (same nudge budget discipline as agent completion).
+  escalation (same nudge budget discipline as helper-buddy completion).
 - Voice: if a session is live, Buddy may say one line (_"quick check — the linear buddy wants to
   submit the ticket, ok?"_) via the existing deliverHelperBuddyResult idle-turn machinery; never
   interrupts mid-turn.
@@ -417,7 +418,7 @@ are approving); everything else stays `HelperBuddySummary`-shaped.
   denies, journal records it); reviewer timeout → escalate (fail-closed check).
 - **Debug server**: `POST /gate/assess` (drive the trigger+reviewer directly),
   `GET /grants`, `POST /approvals/:approvalId/approve|deny` (with the exact `helperBuddyId` in the
-  request body; stale approval IDs never fall forward to an agent's newer request).
+  request body; stale approval IDs never fall forward to a helper buddy's newer request).
 
 ## 9. Implemented module map
 
@@ -426,7 +427,7 @@ are approving); everything else stays `HelperBuddySummary`-shaped.
   actuation contract, native AX/UIA receiver freshness, two surfaces, persistent profile,
   authenticated exact-IP network proxy, and window policy.
 - `src/main/agents/helper-buddy-browser-runtime.ts`, `tools/browser.ts`, `helper-buddy-history.ts`, and `run-budget.ts`:
-  browser-enabled helper loop, one action per observation, bounded replay, cancellation, and
+  unified helper loop, one action per observation, bounded replay, cancellation, and
   approval parking.
 - `src/main/agents/gate/`: mechanical trigger, independent reviewer, immutable ActionGate,
   redaction, strikes, persistent grants, bounded follow-through, and outcome journal.
@@ -463,14 +464,15 @@ are approving); everything else stays `HelperBuddySummary`-shaped.
 2. Domain/signature normalization uses `tldts`; model labels never create grant scope.
 3. Credential and secret-shaped fields and proposed typed values are mechanically denied or
    redacted before reviewer, renderer, or journal boundaries.
-4. Browser-enabled helpers have no whole-run model-round, active-runtime, or concurrency ceiling.
+4. Helpers have no whole-run model-round, active-runtime, or concurrency ceiling.
    Local human-approval parking affects only that action and never blocks admission or progress of
    other helpers.
 5. The shared persistent profile permits concurrent helpers. Per-action DOM/URL/payload
    reinspection and exact navigation capabilities prevent one helper from reusing another's
    approval; site sign-out, clear, lock, suspend, and shutdown cancel affected runs first.
-6. No persistent browser surface is created or read before the user grants the run's browser
-   capability. Every subsequent observation-producing tool starts a new one-action boundary.
+6. No persistent browser surface is created or read before the helper's first browser action passes
+   the browser-capability approval. Every subsequent observation-producing tool starts a new
+   one-action boundary.
 7. Buddy browser traffic resolves and validates every redirect hop, rejects mixed or non-global
    address sets, and connects the exact validated IP while preserving HTTP Host and TLS identity.
    Firecrawl traffic goes only to the fixed `api.firecrawl.dev` v2 origin. The browser's loopback

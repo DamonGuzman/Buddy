@@ -176,7 +176,7 @@ export interface RendererSendEvents {
   /** Drag-reposition finished: persist this rest fraction for this overlay. */
   'overlay:buddy-move': BuddyRestFraction;
   // M19 additions: helper buddies on the overlay.
-  /** A helper sprite / card was clicked -> open its full helper-buddy status. */
+  /** A helper sprite/card was clicked after local expansion; main may reveal related UI. */
   'overlay:helper-buddy-click': { id: string };
   /** The helper buddy card's stop affordance was clicked -> cancel it. */
   'overlay:helper-buddy-cancel': { id: string };
@@ -198,7 +198,7 @@ export interface InvokeChannels {
   'panel:ask-text': { args: [text: string]; result: void };
   /** Explicitly pick one folder and receive a non-forgeable capability persisted by the main process. */
   'filesystem:select-root': { args: []; result: FilesystemSelection | null };
-  /** Start a no-web filesystem helper against a disposable clone of the grant. */
+  /** Start a full-capability helper buddy in the picker-authorized folder. */
   'filesystem:start': {
     args: [grantId: string, request: string];
     result: FilesystemTaskView;
@@ -340,7 +340,7 @@ export interface OverlayApi {
   onHelperBuddies(cb: (helperBuddies: HelperBuddySummary[]) => void): Unsubscribe;
   /** Helper-buddy list bootstrap (push updates ride on 'overlay:helper-buddies'). */
   getHelperBuddies(): Promise<HelperBuddySummary[]>;
-  /** A helper sprite / card was clicked (main opens the full helper-buddy status). */
+  /** A helper sprite/card was clicked after local expansion; main may reveal related UI. */
   sendHelperBuddyClick(id: string): void;
   /** The helper buddy card's stop affordance was clicked. */
   sendHelperBuddyCancel(id: string): void;

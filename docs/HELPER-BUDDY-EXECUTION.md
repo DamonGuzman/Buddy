@@ -14,21 +14,22 @@ the result back to the foreground conversation. No separate approval step sits b
 completion and Buddy's handoff.
 
 The foreground Buddy remains a voice/text orchestration interface. It can delegate through
-`spawn_helper_buddy`, but it never receives filesystem or shell tools. Browser/computer use remains a
-separate actor and never shares a model context with local file contents.
+`spawn_helper_buddy`, but it never receives filesystem or shell tools itself. Every background
+helper receives these filesystem tools and Buddy's persistent browser tools in the same model
+context; browser actions remain mechanically governed by ActionGate.
 
-Every filesystem helper tool receives the same required `description` argument as the other
+Every filesystem tool receives the same required `description` argument as the other
 helper tools: 3–12 simple, non-technical words describing the current action. Buddy validates it
 before running the tool and shows it directly in the helper's activity card.
 
-Every filesystem helper also receives the complete Firecrawl tool set: search, scrape, map,
+Every helper also receives the complete Firecrawl tool set: search, scrape, map,
 crawl lifecycle, batch scrape lifecycle, and research. The shell tools remain instructed not to
 make network requests; current web material must go through the typed, abort-aware Firecrawl
 transport instead. This keeps Firecrawl universal without letting arbitrary shell commands inherit
 the encrypted key or bypass the web-response safety envelope.
 
-Every helper profile also receives the durable memory tools and a metadata-only catalog naming the
-owner-only `<userData>/memories` directory. Filesystem helpers may inspect those Markdown files by
+Every helper also receives the durable memory tools and a metadata-only catalog naming the
+owner-only `<userData>/memories` directory. Helpers may inspect those Markdown files by
 absolute path with read-only `rg` or `cat` commands even though other unrelated paths remain out of
 scope. They must use `memory_save` and `memory_delete` for mutations; direct shell writes would
 bypass the validated, atomic memory-store contract.
@@ -57,7 +58,7 @@ bypass the validated, atomic memory-store contract.
 
 ## Parallel helpers
 
-Each filesystem helper owns an independent task record, sparse workspace, baseline, before-image,
+Each helper owns an independent task record, sparse workspace, baseline, before-image,
 and Undo history. There is no global "current filesystem task" and no client-side helper count
 limit. A running, failed, published, or undoable task never blocks preparation of another helper.
 
@@ -124,14 +125,14 @@ idempotent: a stale task ID means the task is already gone, not a user-visible e
 - `src/main/filesystem/` owns grants, sparse staging, host shell execution, manifests, publication,
   and Undo.
 - `src/main/agents/tools/filesystem.ts` is the only model-tool adapter.
-- `src/main/agents/tools/firecrawl.ts` is registered alongside those filesystem tools for every
-  helper profile; the Firecrawl key never enters the shell environment.
+- `src/main/agents/tools/firecrawl.ts` and browser tools are registered alongside those filesystem
+  tools for every helper; the Firecrawl key never enters the shell environment.
 - `src/shared/types/filesystem.ts` and `filesystem:*` IPC are the renderer contract.
 - the whisper filesystem card reports progress and retains **Undo** / **Keep** after the automatic
   handoff; it is no longer an approval surface.
 
-Removing those pieces and their composition-root wiring returns Buddy to read-only/browser
-helper-buddy behavior without altering the browser security subsystem.
+Filesystem and browser composition are both required helper-runtime dependencies; removing either
+makes helper admission fail closed.
 
 ## Current platform boundary
 

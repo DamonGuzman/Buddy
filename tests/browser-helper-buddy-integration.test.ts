@@ -21,10 +21,7 @@ import type {
   GateExecutionResult,
 } from '../src/main/agents/gate/action-gate';
 import { createTestAgentMemory } from './support/helper-buddy-memory';
-import {
-  createTestHelperBuddyFilesystem,
-  TEST_FILESYSTEM_BRIEF,
-} from './support/helper-buddy-capabilities';
+import { createTestHelperBuddyFilesystem } from './support/helper-buddy-capabilities';
 
 vi.mock('electron', () => ({
   nativeImage: {
@@ -35,15 +32,14 @@ vi.mock('electron', () => ({
 const memory = createTestAgentMemory();
 const filesystem = createTestHelperBuddyFilesystem();
 
-function brief(_legacyProfile?: boolean): HelperBuddyBrief {
+function brief(id: string, task: string): HelperBuddyBrief {
   return {
-    id: 'browser-helper-buddy',
-    userRequest: 'open example.com, inspect it, and use the selected folder if useful',
-    task: 'open example.com, inspect it, and use the selected folder if useful',
-    browserEnabled: false,
+    id,
+    userRequest: task,
+    task,
+    filesystem: { taskId: 'browser-integration-task', rootName: 'test-root' },
     recentTranscript: '',
     createdAt: Date.now(),
-    filesystem: TEST_FILESYSTEM_BRIEF,
   };
 }
 
@@ -184,23 +180,22 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('full-capability HelperBuddyRunner integration', () => {
+describe('unified-capability HelperBuddyRunner integration', () => {
   it('grants browser and filesystem tools to every helper and requires browser justification', async () => {
-    const readonlyBackend = scriptedBackend(() => success([], 'research complete'));
-    const readonlyBrowser = browserDeps(fakeDriver());
-    const readonlyRunner = new HelperBuddyRunner({
+    const researchBackend = scriptedBackend(() => success([], 'research complete'));
+    const researchRunner = new HelperBuddyRunner({
       memory,
       filesystem,
-      browser: readonlyBrowser,
-      brief: brief(false),
-      backend: readonlyBackend,
+      browser: browserDeps(fakeDriver()),
+      brief: brief('research-helper-buddy', 'research example.com'),
+      backend: researchBackend,
       onUpdate: () => undefined,
     });
-    await readonlyRunner.run();
+    await researchRunner.run();
 
-    expect(toolNames(readonlyBackend.requests[0]!)).toContain('browser_navigate');
-    expect(toolNames(readonlyBackend.requests[0]!)).toContain('run_shell');
-    expect(readonlyBackend.requests[0]!.instructions).toContain(
+    expect(toolNames(researchBackend.requests[0]!)).toContain('browser_navigate');
+    expect(toolNames(researchBackend.requests[0]!)).toContain('run_shell');
+    expect(researchBackend.requests[0]!.instructions).toContain(
       "both Buddy's persistent browser and a picker-authorized filesystem workspace",
     );
 
@@ -239,7 +234,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     await new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
       backend: browserBackend,
       browser: deps,
       onUpdate: () => undefined,
@@ -274,7 +269,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     const result = await new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('description-helper-buddy', 'open example.com and inspect it'),
       backend,
       browser: deps,
       onUpdate: () => undefined,
@@ -323,7 +318,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
       const runner = new HelperBuddyRunner({
         memory,
         filesystem,
-        brief: brief(true),
+        brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
         backend,
         browser: deps,
         onUpdate: () => undefined,
@@ -386,7 +381,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     const result = await new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
       backend,
       browser: deps,
       onUpdate: () => undefined,
@@ -431,7 +426,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     const result = await new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
       backend,
       browser: deps,
       onUpdate: () => undefined,
@@ -480,7 +475,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     const result = await new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
       backend,
       browser: deps,
       onUpdate: () => undefined,
@@ -555,7 +550,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     const result = await new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
       backend,
       browser: deps,
       onUpdate: () => undefined,
@@ -625,7 +620,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     const runner = new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
       backend,
       browser: deps,
       onUpdate: () => undefined,
@@ -684,7 +679,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     const result = await new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
       backend,
       browser: deps,
       onUpdate: () => undefined,
@@ -765,7 +760,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     const runner = new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
       backend,
       browser: deps,
       onUpdate: () => undefined,
@@ -807,7 +802,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     const result = await new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
       backend,
       browser: browserDeps(driver),
       onUpdate: () => undefined,
@@ -859,7 +854,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
       const result = await new HelperBuddyRunner({
         memory,
         filesystem,
-        brief: brief(true),
+        brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
         backend,
         browser: deps,
         onUpdate: () => undefined,
@@ -886,7 +881,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     const runner = new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
       backend,
       browser: browserDeps(fakeDriver()),
       onUpdate: () => undefined,
@@ -938,7 +933,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     const runner = new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
       backend,
       browser: browserDeps(driver, approvals),
       onUpdate: () => undefined,
@@ -995,7 +990,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     const runner = new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
       backend,
       browser: browserDeps(fakeDriver(), approvals),
       onUpdate: () => undefined,
@@ -1039,7 +1034,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     const runner = new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
       backend,
       browser: browserDeps(fakeDriver(), approvals),
       onUpdate: () => undefined,
@@ -1087,7 +1082,7 @@ describe('full-capability HelperBuddyRunner integration', () => {
     const runner = new HelperBuddyRunner({
       memory,
       filesystem,
-      brief: brief(true),
+      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
       backend,
       browser: browserDeps(driver),
       onUpdate: () => undefined,

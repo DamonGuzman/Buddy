@@ -14,7 +14,6 @@ import {
   stripLinks,
 } from '../src/main/agents/helper-buddy-summary-text';
 import type { HelperBuddyBrief } from '../src/main/agents/types';
-import { TEST_FILESYSTEM_BRIEF } from './support/helper-buddy-capabilities';
 import type { HelperBuddySummary, CaptureMeta } from '../src/shared/types';
 
 describe('concise', () => {
@@ -71,12 +70,12 @@ describe('stripLinks', () => {
 describe('buildInitialMessage', () => {
   const memoryCatalog = { directory: '/data/memories', memories: [] };
   const base: HelperBuddyBrief = {
-    id: 'agent_1',
+    id: 'helper_buddy_1',
     userRequest: 'find the best monitor',
     task: 'find the best monitor',
+    filesystem: { taskId: 'summary-task', rootName: 'test-root' },
     recentTranscript: '',
     createdAt: 1,
-    filesystem: TEST_FILESYSTEM_BRIEF,
   };
 
   it('includes only the task when why/transcript/screenshot are absent', () => {

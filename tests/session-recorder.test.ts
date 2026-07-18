@@ -27,6 +27,7 @@ function makeRecorder(): SessionRecorder {
 describe('SessionRecorder', () => {
   it('keeps a crash-readable journal and atomically closes the manifest', () => {
     const recorder = makeRecorder();
+    recorder.record('helper_buddies_changed', []);
     // The journal accepts any event name at runtime (fail-soft, forward
     // compatible); widen past the compile-time SessionEventMap to exercise
     // sequencing + redaction with a synthetic event.
@@ -57,6 +58,7 @@ describe('SessionRecorder', () => {
     expect(events.map((event) => event.seq)).toEqual(events.map((_, index) => index + 1));
     expect(events.map((event) => event.type)).toEqual([
       'session_started',
+      'helper_buddies_changed',
       'custom',
       'session_ended',
     ]);

@@ -34,7 +34,6 @@ function brief(id: string): HelperBuddyBrief {
     id,
     userRequest: `research ${id}`,
     task: `research ${id}`,
-    browserEnabled: false,
     recentTranscript: '',
     createdAt: Date.now(),
     filesystem: TEST_FILESYSTEM_BRIEF,

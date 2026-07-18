@@ -331,7 +331,8 @@ describe('persona tool definition', () => {
     ]);
   });
 
-  it('makes buddy the user-facing orchestrator when agents are available', () => {
+  it('makes buddy the user-facing orchestrator when helper buddies are available', () => {
+    expect(getTextInstructions(true)).toContain('right in their\nwhisper composer');
     for (const instructions of [getSessionInstructions(true), getTextInstructions(true)]) {
       expect(instructions).toContain("you are buddy, this person's hands-on business assistant");
       expect(instructions).toContain('own the outcome, not just the conversation');

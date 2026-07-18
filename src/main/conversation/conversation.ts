@@ -236,7 +236,7 @@ export class Conversation {
   private readonly injectedCodexAuth: CodexProvider | null;
   /** CLICKY_NO_CODEX_SUB=1 forces the metered API key (eval A/B). */
   private readonly codexDisabled = isCodexSubDisabled();
-  // M18: TEXT panel path — a typed question runs on gpt-5.6-sol over the Codex
+  // M18: typed whisper path — a typed question runs on gpt-5.6-sol over the Codex
   // sub (text in, text out) with the SAME tool harness, when a valid sub is
   // signed in; otherwise it falls back to the realtime voice model.
   private readonly injectedBuildCodex: ((auth: ChatGptCodexAuthSource) => CodexTextSession) | null;

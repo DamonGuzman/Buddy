@@ -6,6 +6,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { GroundingDebugReport } from '../conversation/pointer-pipeline';
+import type { MockHelperBuddyScenario } from '../agents/mock-helper-buddy-backend';
 import type {
   HelperBuddySummary,
   DebugState,
@@ -47,6 +48,7 @@ export interface GroundingDebugDeps {
 export interface HelperBuddyDebugDeps {
   spawn(
     task: string,
+    scenario?: MockHelperBuddyScenario,
   ):
     | { ok: true; helperBuddyId: string }
     | { ok: false; reason: string }

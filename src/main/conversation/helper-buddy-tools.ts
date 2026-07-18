@@ -67,7 +67,6 @@ export class HelperBuddyTools {
       id,
       userRequest,
       task,
-      browserEnabled: false,
       filesystem,
       ...(why ? { why } : {}),
       ...(capture ? { screenshot: { jpegBase64: capture.jpegBase64, meta: capture.meta } } : {}),

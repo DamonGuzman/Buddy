@@ -87,6 +87,6 @@ export interface HelperBuddySummary {
   error?: string;
   /** Has voice delivered it yet (at-most-once spoken delivery). */
   spoken: boolean;
-  /** Panel badge: finished but not yet viewed. */
+  /** Overlay badge: finished but not yet viewed. */
   unseen: boolean;
 }

@@ -11,13 +11,13 @@
 > registers the provider-hosted web tool. All live web data is fetched by client-executed
 > Firecrawl v2 function tools; Firecrawl Agent/Extract modes are excluded.
 
-> Historical scope note: this document defines the original read-only M18 helper buddy baseline. The
-> current runtime keeps that mode for research-only tasks and adds explicitly granted Buddy-browser
-> actions under the complete safety/lifecycle contract in `docs/HELPER-BUDDY-COMPUTER-USE.md`. References
-> below to “v1 is read-only” describe that baseline, not the current browser-enabled capability.
+> Historical scope note: this document retains the original read-only M18 design below. The current
+> runtime has one helper type only. Every helper receives Firecrawl, durable memory, the
+> picker-authorized transactional filesystem, and Buddy's persistent browser through ActionGate.
+> References below to “v1 is read-only” are design history, not the current capability contract.
 
 > Current naming contract: foreground tools are `spawn_helper_buddy` and
-> `check_helper_buddies`; run IDs use `helper_buddy_<sequence>_<timestamp>`; renderer and debug
+> `check_helper_buddies`; foreground-delegated run IDs use `helper_buddy_<uuid>`; renderer and debug
 > channels use `helper-buddies:*`, `overlay:helper-buddy-*`, and `/helper-buddies`. There is no
 > transcript-intent fallback or legacy helper-mode API.
 
@@ -72,11 +72,11 @@ read-only **`check_helper_buddies`** reports current progress. The flow:
    loop over the Codex-sub Responses API, bounded client-side history for continuity, operation-health
    deadlines, cancellable, survives tray idle because it lives in the main process and never
    depends on an open window.
-3. **Research tools**: Firecrawl-backed `web_search`, `web_scrape`, `web_map`, `web_crawl`,
+3. **Unified tools**: Firecrawl-backed `web_search`, `web_scrape`, `web_map`, `web_crawl`,
    `web_batch_scrape`, and `web_research`, plus `scratchpad_write` and `read_screen`. Firecrawl
    crawl and batch tools expose their start/status/errors/cancel lifecycle so Buddy's own helper buddy
-   loop remains the orchestrator. The complete Firecrawl set is registered for research-only,
-   browser-enabled, and filesystem helpers alike.
+   loop remains the orchestrator. Browser and transactional filesystem tools are registered in the
+   same request for every helper; there are no research, browser, or filesystem helper profiles.
 4. **Delivery**: completion becomes an automated user-role foreground turn containing a trusted
    `<system_reminder>` plus an escaped `<helper_buddy_result>` data block. The originating voice or text
    session runs it immediately when idle, or after the active turn settles; overlay status and the
@@ -176,7 +176,7 @@ handoff:
 
 ```ts
 interface HelperBuddyBrief {
-  id: string; // "helper_buddy_<seq>_<ts>"
+  id: string; // "helper_buddy_<uuid>"
   task: string; // spawn_helper_buddy.task (model-cleaned)
   why?: string; // spawn_helper_buddy.why
   screenshot?: {
@@ -345,8 +345,7 @@ or the app shuts down. These deadlines detect one stalled operation; they never 
   failed, or undoable helper never blocks admission of another.
 - **Cancellation**: each helper buddy holds one `AbortController`; `manager.cancel(id)` aborts the
   in-flight backend request and any running tool, flips status to `cancelled`, and the loop's
-  `this.cancelled` check bails at the next boundary. The panel Card has a "stop" affordance
-  (§5.3); a global "stop all" lives in the helper buddys header.
+  `this.cancelled` check bails at the next boundary. The overlay card has a "stop" affordance.
 - **Survives tray idle**: helper buddies live in the **main process**, wholly independent of any
   `BrowserWindow`. The panel can be closed (it hides on blur already), the overlays idle, the
   realtime socket keep-warm-closed after 5 min — none of that touches a running helper buddy. The only
@@ -361,9 +360,9 @@ or the app shuts down. These deadlines detect one stalled operation; they never 
 
 ---
 
-## 3. Tools / capabilities (MVP)
+## 3. Historical tools / capabilities (original MVP design)
 
-Design principle: **the MVP helper buddy is read-only and user-local.** It gathers, reasons, and writes
+Historical design principle: **the original MVP helper buddy was read-only and user-local.** It gathered, reasoned, and wrote
 to its own notes. It does not touch the filesystem, run programs, or reach into the user's
 accounts. This matches the app's existing consent posture — Buddy today only ever _reads_ the
 screen on an explicit hotkey hold and _points_; it never clicks or acts. Helper buddy mode keeps that
@@ -432,10 +431,10 @@ same-name mutations, and writes owner-only files atomically through a same-direc
 file and rename. `memory_delete` uses the same canonical-name boundary. A malformed `.md` file in
 the dedicated directory fails initialization instead of being silently ignored.
 
-Filesystem helpers may use `rg` or `cat` on the exact memory directory and files exposed in the
+Helpers may use `rg` or `cat` on the exact memory directory and files exposed in the
 catalog. Direct shell writes there are forbidden; all changes go through the memory tools so the
-format, permissions, and in-process concurrency contract stay intact. Research and browser helpers
-without shell access use `memory_load`.
+format, permissions, and in-process concurrency contract stay intact. `memory_load` remains the
+preferred model-facing path when shell inspection is unnecessary.
 
 ### 3.2 Explicitly deferred (with reasons)
 
@@ -503,7 +502,7 @@ one seed for what they could do next): <2–4 sentence summary>` → `response.c
   coming up as the best all-rounder, with the koorui 27e6qc as the budget pick. i dropped the full
   rundown in the panel. want me to compare those two head to head?"_
 
-### 4.2 The panel helper-buddy surface (always)
+### 4.2 Historical panel helper-buddy surface
 
 Independent of voice, every helper buddy state change mirrors to the panel via IPC (§6.2). The Card moves
 `running → done/failed`, the activity log fills in, and the final summary + expandable
@@ -532,7 +531,7 @@ user to look or talk.
 
 ---
 
-## 5. Helper-buddy UX
+## 5. Historical helper-buddy panel UX
 
 Built on the landed M16 shadcn panel (`src/renderer/panel/components/ui/*`: `card`, `badge`,
 `button`, `scroll-area`, `separator`, plus `@radix-ui/react-collapsible` already in deps). No new
@@ -767,7 +766,7 @@ helper buddy ignores it). Drives the whole loop + panel + voice-delivery with no
 the mock realtime server enables E2E today (`docs/ARCHITECTURE.md` §8). Debug-server routes
 (`CLICKY_DEBUG=1`): `POST /helper-buddies/spawn`, `GET /helper-buddies`, `POST /helper-buddies/cancel`.
 
-### 6.4 Phased build plan + effort
+### 6.4 Historical phased build plan + effort
 
 **Phase 1 — research helper buddy, voice + panel (MVP).** ~**6–9 eng-days**.
 
@@ -793,7 +792,7 @@ the mock realtime server enables E2E today (`docs/ARCHITECTURE.md` §8). Debug-s
   file). Then the connectors phase (Calendar/Gmail/Notion/Linear) — OAuth + write consent per
   connector. Then, far later and behind its own design, any "act on screen" automation.
 
-### 6.5 Top 3 risks + mitigations
+### 6.5 Historical top 3 risks + mitigations
 
 1. **Long-running reliability** — a helper buddy must survive tray idle, keep-warm socket closure, brief
    network blips, and OS sleep without wedging or double-delivering.
@@ -843,7 +842,10 @@ reason, voice (if live) says it plainly — no retry loop that would hammer the 
 
 ---
 
-## 8. Open questions to resolve at build time
+## 8. Historical open questions
+
+These questions are retained as design provenance. The current contracts are stated at the top of
+this document and in `docs/ARCHITECTURE.md`.
 
 1. **Hosted web tool vs. own search key** (§3.3) — check whether the Codex-sub Responses API
    exposes a server-side search/browse tool on this pool; it simplifies the loop a lot if so.
@@ -854,6 +856,3 @@ reason, voice (if live) says it plainly — no retry loop that would hammer the 
    deliberately avoids it.
 5. **System-role vs `context:` framing for voice delivery** — pick whichever the realtime model
 speaks most naturally from (§4.1); a small eval like the M8.6 framing work will settle it.
-</content>
-
-</invoke>

@@ -54,8 +54,8 @@ export function ChatGptCard({ settings, onPatch }: ChatGptCardProps): React.JSX.
             )}
           </div>
           <p className="text-[11px] leading-relaxed text-muted-foreground/80">
-            buddy uses your chatgpt plan for pointing &amp; agents. voice still needs an openai api
-            key.
+            buddy uses your chatgpt plan for pointing and helper buddies. voice still needs an
+            openai api key.
           </p>
           <div className="flex min-h-7 items-center gap-2.5 border-t pt-2.5">
             <Label
