@@ -19,7 +19,7 @@ import { HELPER_BUDDY_MANAGER_DISPOSE_TIMEOUT_MS } from '../src/main/agents/help
 import { readActivityDescription } from '../src/main/agents/tools/activity-description';
 import { HelperBuddyTools } from '../src/main/conversation/helper-buddy-tools';
 import { TranscriptStore } from '../src/main/conversation/transcript-store';
-import { createTestAgentMemory } from './support/helper-buddy-memory';
+import { createTestHelperBuddyMemory } from './support/helper-buddy-memory';
 import {
   createTestHelperBuddyCapabilities,
   TEST_FILESYSTEM_BRIEF,
@@ -41,7 +41,7 @@ function brief(id: string): HelperBuddyBrief {
 }
 
 describe('Helper buddy runtime', () => {
-  const memory = createTestAgentMemory();
+  const memory = createTestHelperBuddyMemory();
   const capabilities = createTestHelperBuddyCapabilities();
   it('runs the deterministic research loop to completion and pushes renderer-safe summaries', async () => {
     const updates: unknown[] = [];
@@ -56,8 +56,11 @@ describe('Helper buddy runtime', () => {
         finished = summary.id;
       },
     });
-    expect(manager.spawn(brief('agent_1'))).toEqual({ ok: true, helperBuddyId: 'agent_1' });
-    await vi.waitFor(() => expect(finished).toBe('agent_1'));
+    expect(manager.spawn(brief('helper_buddy_1'))).toEqual({
+      ok: true,
+      helperBuddyId: 'helper_buddy_1',
+    });
+    await vi.waitFor(() => expect(finished).toBe('helper_buddy_1'));
     const record = manager.list()[0]!;
     expect(record.status).toBe('done');
     expect(record.summary).toContain('mock research run completed');
@@ -145,6 +148,9 @@ describe('Helper buddy runtime', () => {
       onFinished: () => {},
     });
     expect(signedOut.spawn(brief('nope'))).toEqual({ ok: false, reason: 'not_signed_in' });
+    expect(() => signedOut.cancel(' nope')).toThrow('canonical');
+    expect(() => signedOut.markSeen('nope\0')).toThrow('invalid');
+    expect(() => signedOut.markSpoken('nope ')).toThrow('canonical');
 
     const blocking: HelperBuddyBackend = {
       isReady: () => true,
@@ -163,6 +169,7 @@ describe('Helper buddy runtime', () => {
           );
         }),
     };
+    const notify = vi.fn();
     const manager = new HelperBuddyManager({
       ...capabilities,
       backend: blocking,
@@ -172,6 +179,7 @@ describe('Helper buddy runtime', () => {
       isReady: () => true,
       onHelperBuddiesChanged: () => {},
       onFinished: () => {},
+      notify,
     });
     for (let index = 0; index < 25; index += 1) {
       expect(manager.spawn(brief(`parallel-${index}`))).toEqual({
@@ -184,6 +192,7 @@ describe('Helper buddy runtime', () => {
     await vi.waitFor(() =>
       expect(manager.list().every((item) => item.status === 'cancelled')).toBe(true),
     );
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it('routes web search through Firecrawl and records returned sources', async () => {
@@ -339,7 +348,8 @@ describe('Helper buddy runtime', () => {
     expect(saved[0]?.status).toBe('done');
     expect(saved[0]?.finishedAt).toBeDefined();
 
-    // A fresh manager reloads from the same port; malformed rows are dropped.
+    // A fresh manager reloads from the same port. Malformed/non-terminal rows
+    // do not consume the bounded terminal-summary budget.
     const reloaded = new HelperBuddyManager({
       ...capabilities,
       backend: new MockHelperBuddyBackend(),
@@ -347,8 +357,26 @@ describe('Helper buddy runtime', () => {
       isReady: () => true,
       persistence: {
         load: () => [
-          ...saved,
-          { id: 'bogus', task: 42 },
+          ...Array.from({ length: 55 }, (_, index) => ({ id: `bogus-${index}`, task: 42 })),
+          {
+            id: 'stale_running',
+            task: 'x',
+            status: 'running',
+            createdAt: 1,
+            finishedAt: 2,
+            spoken: false,
+            unseen: false,
+            steps: [],
+          },
+          {
+            id: 'unfinished_done',
+            task: 'x',
+            status: 'done',
+            createdAt: 1,
+            spoken: false,
+            unseen: false,
+            steps: [],
+          },
           {
             id: 'bad_status',
             task: 'x',
@@ -358,6 +386,12 @@ describe('Helper buddy runtime', () => {
             unseen: false,
             steps: [],
           },
+          {
+            ...saved[0],
+            id: 'malformed_optional_field',
+            sources: 42,
+          },
+          ...saved,
         ],
         save: () => {},
       },
@@ -426,7 +460,7 @@ describe('Helper buddy runtime', () => {
 
     await manager.dispose();
 
-    expect(manager.list()[0]?.status).toBe('cancelled');
+    expect(manager.list()[0]).toMatchObject({ status: 'cancelled', unseen: false });
     expect(changed).toHaveBeenCalledTimes(callbacksBeforeDispose);
     expect(finished).not.toHaveBeenCalled();
     expect(() => manager.spawn(brief('too_late'))).toThrow('helper buddy manager is disposed');
@@ -516,7 +550,7 @@ describe('Helper buddy runtime', () => {
 
     await manager.cancelBrowserRuns();
 
-    expect(manager.list()[0]).toMatchObject({ status: 'cancelled' });
+    expect(manager.list()[0]).toMatchObject({ status: 'cancelled', unseen: false });
     expect(createDriver).not.toHaveBeenCalled();
   });
 
@@ -615,6 +649,60 @@ describe('Helper buddy runtime', () => {
       error: 'filesystem use is unavailable for helper buddies right now',
     });
     expect(surfaceError).not.toHaveBeenCalled();
+  });
+
+  it('keeps helpers waiting for approval in the unfiltered active status view', () => {
+    const now = Date.now();
+    const completed: HelperBuddySummary[] = Array.from({ length: 6 }, (_, index) => ({
+      id: `completed-${index}`,
+      task: `completed task ${index}`,
+      status: 'done',
+      createdAt: now - 2_000,
+      finishedAt: now - 1_000,
+      steps: [],
+      spoken: false,
+      unseen: false,
+    }));
+    const waiting: HelperBuddySummary = {
+      id: 'waiting-for-approval',
+      task: 'submit the reviewed form',
+      status: 'waiting_approval',
+      createdAt: now - 3_000,
+      steps: [],
+      spoken: false,
+      unseen: false,
+    };
+    const tools = helperBuddyStatusTools([...completed, waiting]);
+
+    const result = tools.checkHelperBuddies({}) as {
+      helper_buddies: Array<{ helper_buddy_id: string; status: string }>;
+    };
+
+    expect(result.helper_buddies[0]).toMatchObject({
+      helper_buddy_id: 'waiting-for-approval',
+      status: 'waiting_approval',
+    });
+    expect(result.helper_buddies).toHaveLength(6);
+  });
+
+  it('rejects an overlong helper-buddy id instead of checking a truncated identity', () => {
+    const list = vi.fn(() => []);
+    const tools = helperBuddyStatusTools([], list);
+
+    expect(tools.checkHelperBuddies({ helper_buddy_id: 'x'.repeat(201) })).toEqual({
+      error: 'helper buddy id exceeds the size limit',
+    });
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it('rejects an aliased helper-buddy id instead of trimming it to another run', () => {
+    const list = vi.fn(() => []);
+    const tools = helperBuddyStatusTools([], list);
+
+    expect(tools.checkHelperBuddies({ helper_buddy_id: ' existing-helper-buddy ' })).toEqual({
+      error: 'helper buddy id must be canonical and not contain surrounding whitespace',
+    });
+    expect(list).not.toHaveBeenCalled();
   });
 
   it('resolves the tool call and releases prepared filesystem state when admission throws', async () => {
@@ -765,6 +853,26 @@ describe('Helper buddy runtime', () => {
   });
 });
 
+function helperBuddyStatusTools(
+  helperBuddies: HelperBuddySummary[],
+  list: () => HelperBuddySummary[] = () => helperBuddies,
+): HelperBuddyTools {
+  return new HelperBuddyTools({
+    helperBuddies: {
+      isReady: () => true,
+      list,
+      spawn: () => ({ ok: true, helperBuddyId: 'unused' }),
+      markSpoken: () => undefined,
+    },
+    transcript: new TranscriptStore(10, () => undefined),
+    turnCaptures: () => [],
+    noteOrigin: () => undefined,
+    surfaceError: () => undefined,
+    prepareFilesystem: async () => ({ taskId: 'unused', rootName: 'unused' }),
+    failFilesystem: async () => undefined,
+  });
+}
+
 describe('shouldRetry policy', () => {
   const ok: HelperBuddyBackendResult = {
     ok: true,
@@ -798,6 +906,224 @@ describe('shouldRetry policy', () => {
 });
 
 describe('CodexHelperBuddyBackend wire contract', () => {
+  it('reports readiness as false when the auth provider cannot be inspected', () => {
+    const backend = new CodexHelperBuddyBackend({
+      getCodexAuth: () => {
+        throw new Error('keychain unavailable');
+      },
+      getBearer: async () => 'unused',
+    });
+
+    expect(backend.isReady()).toBe(false);
+  });
+
+  it('rejects noncanonical run correlation before authentication or transport side effects', async () => {
+    const getCodexAuth = vi.fn(() => null);
+    const getBearer = vi.fn(async () => 'unused');
+    const fetchImpl = vi.fn<typeof fetch>();
+    const backend = new CodexHelperBuddyBackend({ getCodexAuth, getBearer }, fetchImpl);
+
+    await expect(
+      backend.request({
+        model: 'gpt-5.6-sol',
+        instructions: 'test',
+        input: [],
+        tools: [],
+        effort: 'medium',
+        signal: new AbortController().signal,
+        runContext: { helperBuddyId: ' helper-buddy-1', requestAttempt: 1 },
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      retryable: false,
+      detail: expect.stringContaining('canonical'),
+    });
+    expect(getCodexAuth).not.toHaveBeenCalled();
+    expect(getBearer).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('classifies a request cancelled before admission without touching authentication', async () => {
+    const getCodexAuth = vi.fn(() => null);
+    const getBearer = vi.fn(async () => 'must-not-be-read');
+    const fetchImpl = vi.fn<typeof fetch>();
+    const backend = new CodexHelperBuddyBackend({ getCodexAuth, getBearer }, fetchImpl);
+    const controller = new AbortController();
+    controller.abort(new Error('cancelled before authentication'));
+
+    const result = await backend.request({
+      model: 'gpt-5.6-sol',
+      instructions: 'test',
+      input: [],
+      tools: [],
+      effort: 'medium',
+      signal: controller.signal,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errorKind: 'helper_buddy_backend_down',
+      detail: 'cancelled before authentication',
+      retryable: false,
+    });
+    expect(getCodexAuth).not.toHaveBeenCalled();
+    expect(getBearer).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('does not start a transport when cancellation overtakes asynchronous bearer access', async () => {
+    let finishBearer!: (bearer: string) => void;
+    const getBearer = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          finishBearer = resolve;
+        }),
+    );
+    const fetchImpl = vi.fn<typeof fetch>();
+    const backend = new CodexHelperBuddyBackend(
+      {
+        getCodexAuth: () => ({
+          accessToken: 'secret',
+          accountId: 'acct',
+          planType: 'pro',
+          expiresAt: Date.now() + 60_000,
+        }),
+        getBearer,
+      },
+      fetchImpl,
+    );
+    const controller = new AbortController();
+    const pending = backend.request({
+      model: 'gpt-5.6-sol',
+      instructions: 'test',
+      input: [],
+      tools: [],
+      effort: 'medium',
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(getBearer).toHaveBeenCalledOnce());
+
+    controller.abort(new Error('cancelled during credential refresh'));
+    finishBearer('secret');
+
+    await expect(pending).resolves.toEqual({
+      ok: false,
+      errorKind: 'helper_buddy_backend_down',
+      detail: 'cancelled during credential refresh',
+      retryable: false,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('settles cancellation even when credential refresh never returns', async () => {
+    const getBearer = vi.fn(() => new Promise<string>(() => undefined));
+    const fetchImpl = vi.fn<typeof fetch>();
+    const backend = new CodexHelperBuddyBackend(
+      {
+        getCodexAuth: () => ({
+          accessToken: 'secret',
+          accountId: 'acct',
+          planType: 'pro',
+          expiresAt: Date.now() + 60_000,
+        }),
+        getBearer,
+      },
+      fetchImpl,
+    );
+    const controller = new AbortController();
+    const pending = backend.request({
+      model: 'gpt-5.6-sol',
+      instructions: 'test',
+      input: [],
+      tools: [],
+      effort: 'medium',
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(getBearer).toHaveBeenCalledOnce());
+
+    controller.abort(new Error('cancelled during hung credential refresh'));
+
+    await expect(pending).resolves.toEqual({
+      ok: false,
+      errorKind: 'helper_buddy_backend_down',
+      detail: 'cancelled during hung credential refresh',
+      retryable: false,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('does not send an empty refreshed bearer', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const backend = new CodexHelperBuddyBackend(
+      {
+        getCodexAuth: () => ({
+          accessToken: 'secret',
+          accountId: 'acct',
+          planType: 'pro',
+          expiresAt: Date.now() + 60_000,
+        }),
+        getBearer: async () => '   ',
+      },
+      fetchImpl,
+    );
+
+    await expect(
+      backend.request({
+        model: 'gpt-5.6-sol',
+        instructions: 'test',
+        input: [],
+        tools: [],
+        effort: 'medium',
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorKind: 'helper_buddy_not_signed_in',
+      retryable: false,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('does not pair a refreshed bearer with stale account metadata after sign-out', async () => {
+    let signedIn = true;
+    const fetchImpl = vi.fn<typeof fetch>();
+    const backend = new CodexHelperBuddyBackend(
+      {
+        getCodexAuth: () =>
+          signedIn
+            ? {
+                accessToken: 'secret',
+                accountId: 'acct',
+                planType: 'pro',
+                expiresAt: Date.now() + 60_000,
+              }
+            : null,
+        getBearer: async () => {
+          signedIn = false;
+          return 'stale-secret';
+        },
+      },
+      fetchImpl,
+    );
+
+    const result = await backend.request({
+      model: 'gpt-5.6-sol',
+      instructions: 'test',
+      input: [],
+      tools: [],
+      effort: 'medium',
+      signal: new AbortController().signal,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      errorKind: 'helper_buddy_not_signed_in',
+      detail: 'codex sign-in unavailable',
+      retryable: false,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('uses store:false and sends Firecrawl web access only as client function tools', async () => {
     let body: Record<string, unknown> | null = null;
     const events = [
@@ -934,6 +1260,121 @@ describe('CodexHelperBuddyBackend wire contract', () => {
     expect(cancelled).toBe(true);
   });
 
+  it('does not let a stalled stream-cancellation hook suppress a terminal result', async () => {
+    const encoder = new TextEncoder();
+    let cancelStarted = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode('data: {"type":"response.completed","response":{"usage":{}}}\n'),
+        );
+      },
+      cancel() {
+        cancelStarted = true;
+        return new Promise<void>(() => undefined);
+      },
+    });
+    const backend = new CodexHelperBuddyBackend(
+      {
+        getCodexAuth: () => ({
+          accessToken: 'secret',
+          accountId: 'acct',
+          planType: 'pro',
+          expiresAt: Date.now() + 60_000,
+        }),
+        getBearer: async () => 'secret',
+      },
+      (async () =>
+        ({
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          body: stream,
+          text: async () => '',
+        }) as Response) as typeof fetch,
+      { responseStartTimeoutMs: 20, streamIdleTimeoutMs: 10 },
+    );
+
+    await expect(
+      backend.request({
+        model: 'gpt-5.6-sol',
+        instructions: 'test',
+        input: [],
+        tools: [],
+        effort: 'medium',
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(cancelStarted).toBe(true);
+  });
+
+  it('settles cancellation even when a response keeps producing bytes after transport abort', async () => {
+    const encoder = new TextEncoder();
+    let interval: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode('data: {"type":"response.output_text.delta","delta":"working"}\n'),
+        );
+        interval = setInterval(
+          () =>
+            controller.enqueue(
+              encoder.encode('data: {"type":"response.output_text.delta","delta":"."}\n'),
+            ),
+          2,
+        );
+      },
+      cancel() {
+        cancelled = true;
+        if (interval !== null) clearInterval(interval);
+      },
+    });
+    const fetchImpl = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          body: stream,
+          text: async () => '',
+        }) as Response,
+    ) as typeof fetch;
+    const backend = new CodexHelperBuddyBackend(
+      {
+        getCodexAuth: () => ({
+          accessToken: 'secret',
+          accountId: 'acct',
+          planType: 'pro',
+          expiresAt: Date.now() + 60_000,
+        }),
+        getBearer: async () => 'secret',
+      },
+      fetchImpl,
+      { responseStartTimeoutMs: 20, streamIdleTimeoutMs: 50 },
+    );
+    const controller = new AbortController();
+    const pending = backend.request({
+      model: 'gpt-5.6-sol',
+      instructions: 'test',
+      input: [],
+      tools: [],
+      effort: 'medium',
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+
+    controller.abort(new Error('cancelled during a live stream'));
+
+    await expect(pending).resolves.toEqual({
+      ok: false,
+      errorKind: 'helper_buddy_backend_down',
+      detail: 'cancelled during a live stream',
+      retryable: false,
+    });
+    expect(cancelled).toBe(true);
+  });
+
   it('fails a genuinely idle response with a diagnostic reason', async () => {
     let cancelled = false;
     const stream = new ReadableStream<Uint8Array>({
@@ -991,14 +1432,7 @@ describe('CodexHelperBuddyBackend wire contract', () => {
         }),
         getBearer: async () => 'secret',
       },
-      ((_url, init) =>
-        new Promise<Response>((_resolve, reject) => {
-          init?.signal?.addEventListener(
-            'abort',
-            () => reject(new DOMException('aborted', 'AbortError')),
-            { once: true },
-          );
-        })) as typeof fetch,
+      (() => new Promise<Response>(() => undefined)) as typeof fetch,
       { responseStartTimeoutMs: 10, streamIdleTimeoutMs: 20 },
     );
 
@@ -1016,6 +1450,45 @@ describe('CodexHelperBuddyBackend wire contract', () => {
       detail: 'backend response did not start within 10ms',
       retryable: true,
     });
+  });
+
+  it('bounds a stalled HTTP error body while preserving quota classification', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const backend = new CodexHelperBuddyBackend(
+      {
+        getCodexAuth: () => ({
+          accessToken: 'secret',
+          accountId: 'acct',
+          planType: 'pro',
+          expiresAt: Date.now() + 60_000,
+        }),
+        getBearer: async () => 'secret',
+      },
+      (async () => new Response(body, { status: 429 })) as typeof fetch,
+      { responseStartTimeoutMs: 20, streamIdleTimeoutMs: 10 },
+    );
+
+    await expect(
+      backend.request({
+        model: 'gpt-5.6-sol',
+        instructions: 'test',
+        input: [],
+        tools: [],
+        effort: 'medium',
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorKind: 'helper_buddy_quota',
+      detail: expect.stringContaining('response body was idle for 10ms'),
+      retryable: false,
+    });
+    expect(cancelled).toBe(true);
   });
 
   it('rejects a stream that ends without a terminal event', async () => {

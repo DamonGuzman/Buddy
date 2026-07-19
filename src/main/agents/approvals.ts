@@ -1,4 +1,5 @@
 import type { ApprovalRequest } from '../../shared/types';
+import { requireCanonicalHelperBuddyId } from '../helper-buddy-id';
 import type {
   HelperBuddyApprovalPort,
   HelperBuddyApprovalResolution,
@@ -23,6 +24,8 @@ interface PendingApproval {
 export interface HelperBuddyApprovalCoordinatorOptions {
   /** Full immutable snapshot after every add/remove/atomic replacement. */
   onChanged(requests: ApprovalRequest[]): void;
+  /** Signal-driven cancellation cannot return callback failures to its caller. */
+  onCancellationError?(error: Error): void;
 }
 
 /**
@@ -36,6 +39,7 @@ export class HelperBuddyApprovalCoordinator implements HelperBuddyApprovalPort {
   constructor(private readonly options: HelperBuddyApprovalCoordinatorOptions) {}
 
   request(request: ApprovalRequest, signal: AbortSignal): Promise<HelperBuddyApprovalResolution> {
+    requireCanonicalHelperBuddyId(request.helperBuddyId);
     if (signal.aborted) return Promise.resolve(cancelledResolution());
     const existing = this.pending.get(request.approvalId);
     if (existing) {
@@ -85,13 +89,12 @@ export class HelperBuddyApprovalCoordinator implements HelperBuddyApprovalPort {
   }
 
   cancelHelperBuddy(helperBuddyId: string): void {
-    for (const pending of [...this.pending.values()]) {
-      if (pending.request.helperBuddyId === helperBuddyId) this.cancelPending(pending);
-    }
+    requireCanonicalHelperBuddyId(helperBuddyId);
+    this.cancelMatching((pending) => pending.request.helperBuddyId === helperBuddyId);
   }
 
   cancelAll(): void {
-    for (const pending of [...this.pending.values()]) this.cancelPending(pending);
+    this.cancelMatching(() => true);
   }
 
   hasPending(approvalId: string): boolean {
@@ -181,7 +184,17 @@ export class HelperBuddyApprovalCoordinator implements HelperBuddyApprovalPort {
       delivery: deferred<HelperBuddyApprovalResolution>(),
       acknowledgment: null,
       resolving: false,
-      onAbort: () => this.cancelPending(pending),
+      onAbort: () => {
+        try {
+          this.cancelPending(pending);
+        } catch (error) {
+          if (this.options.onCancellationError) {
+            this.options.onCancellationError(asError(error));
+            return;
+          }
+          throw error;
+        }
+      },
     };
     signal.addEventListener('abort', pending.onAbort, { once: true });
     return pending;
@@ -192,9 +205,36 @@ export class HelperBuddyApprovalCoordinator implements HelperBuddyApprovalPort {
     const acknowledgment = pending.acknowledgment;
     const delivery = pending.delivery;
     this.removePending(pending);
-    this.push();
+    let publicationFailure: unknown = null;
+    try {
+      this.push();
+    } catch (error) {
+      publicationFailure = error;
+    }
     acknowledgment?.reject(new Error('approval was cancelled'));
     if (!pending.resolving) delivery.resolve(cancelledResolution());
+    if (publicationFailure !== null) throw publicationFailure;
+  }
+
+  /**
+   * Cancellation is a safety boundary: every matching token is invalidated
+   * even if publishing an intermediate renderer snapshot fails. Surface every
+   * callback failure only after all pending transactions have been settled.
+   */
+  private cancelMatching(predicate: (pending: PendingApproval) => boolean): void {
+    const failures: Error[] = [];
+    for (const pending of [...this.pending.values()]) {
+      if (!predicate(pending)) continue;
+      try {
+        this.cancelPending(pending);
+      } catch (error) {
+        failures.push(asError(error));
+      }
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) {
+      throw new AggregateError(failures, 'approval cancellation publication failed');
+    }
   }
 
   private removePending(pending: PendingApproval): void {

@@ -224,7 +224,7 @@ describe('computer-use debug routes', () => {
   it('requires the exact helper-buddy id alongside the approval id', async () => {
     expect(await request('POST', '/approvals/current-approval/approve')).toEqual({
       status: 400,
-      json: { error: 'exact helperBuddyId is required' },
+      json: { error: 'exact valid helperBuddyId is required' },
     });
     expect(
       await request('POST', '/approvals/current-approval/approve', {

@@ -139,6 +139,35 @@ const CLICK: TriggerAction = {
 };
 
 describe('ActionGate mechanical enforcement', () => {
+  it.each([
+    [' padded-helper-buddy ', 'surrounding whitespace'],
+    ['\0helper-buddy', 'helper buddy id is invalid'],
+    ['x'.repeat(201), 'helper buddy id exceeds the size limit'],
+  ])('rejects noncanonical helper-buddy identity before gate evaluation', async (id, message) => {
+    const driver = new FakeDriver();
+    const { gate, reviewer } = setup([]);
+    const dispatch = vi.fn(async () => 'scrolled');
+    const invalid = request(driver, {
+      kind: 'scroll',
+      x: 1,
+      y: 2,
+      dy: 10,
+      justification: 'inspect lower content',
+    });
+    invalid.helperBuddyId = id;
+
+    await expect(gate.execute(invalid, dispatch)).rejects.toThrow(message);
+    expect(driver.captures).toBe(0);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(reviewer.review).not.toHaveBeenCalled();
+  });
+
+  it('rejects noncanonical helper-buddy identity at the cancellation boundary', () => {
+    const { gate } = setup([]);
+
+    expect(() => gate.cancelHelperBuddy(' padded-helper-buddy ')).toThrow('surrounding whitespace');
+  });
+
   it('dispatches an unflagged action without invoking the reviewer', async () => {
     const driver = new FakeDriver();
     const { gate, reviewer, entries } = setup([]);

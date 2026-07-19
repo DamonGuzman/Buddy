@@ -56,7 +56,7 @@ describe('error catalog (describeKind)', () => {
         // M17 (integration): the fail-closed ChatGPT plan-limit prompt is
         // actionable (try later / add a key), so it auto-shows once.
         'codex_plan_limit',
-        // M18 (integration): the two actionable agent-mode gates — connect
+        // M18 (integration): the two actionable helper-buddy gates — connect
         // chatgpt in settings / plan out of helper buddy runs — auto-show once.
         'helper_buddy_not_signed_in',
         'helper_buddy_quota',
@@ -121,7 +121,7 @@ describe('error catalog (describeKind)', () => {
       expect(describeKind(kind).surfaces).not.toContain('caption');
       expect(describeKind(kind).autoShowPanel).toBe(false);
     }
-    // M18: the actionable agent gates caption (they hit while the user is
+    // M18: the actionable helper-buddy gates caption (they hit while the user is
     // looking at the screen); the run-level failures stay transcript-only.
     expect(describeKind('helper_buddy_not_signed_in').surfaces).toEqual(['transcript', 'caption']);
     expect(describeKind('helper_buddy_quota').surfaces).toEqual(['transcript', 'caption']);

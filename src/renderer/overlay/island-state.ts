@@ -49,8 +49,8 @@ export function resolveIslandActivity(input: IslandActivityInput): IslandActivit
       kind: 'approval',
       label:
         approvals.length === 1
-          ? 'a helper needs your ok'
-          : `${approvals.length} helpers need your ok`,
+          ? 'a helper buddy needs your ok'
+          : `${approvals.length} helper buddies need your ok`,
       count: approvals.length,
     };
   }

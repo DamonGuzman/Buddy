@@ -1,7 +1,7 @@
 /**
  * The two helper-buddy tools the models call (voice and text paths share
  * them): `spawn_helper_buddy` builds a brief from the current turn (active-screen
- * screenshot + recent transcript) and starts a background worker;
+ * screenshot + recent transcript) and starts a helper buddy;
  * `check_helper_buddies` returns a compact, read-only foreground view of active and
  * recent helper-buddy work (never their full output or sources).
  */
@@ -10,7 +10,8 @@ import { randomUUID } from 'node:crypto';
 import type { HelperBuddyBrief, HelperBuddySpawnResult } from '../agents/types';
 import type { CaptureResult } from '../capture';
 import type { ErrorKind } from '../errors';
-import { asRecord, asString } from '../util/guards';
+import { requireCanonicalHelperBuddyId } from '../helper-buddy-id';
+import { asRecord, asString, errorMessage } from '../util/guards';
 import type { HelperBuddyContinuationMode } from './helper-buddy-continuations';
 import type { HelperBuddiesPort } from './ports';
 import type { TranscriptStore } from './transcript-store';
@@ -111,7 +112,7 @@ export class HelperBuddyTools {
     if (result.reason === 'filesystem_unavailable')
       return { error: 'filesystem use is unavailable for helper buddies right now' };
     if (result.reason === 'not_signed_in') return { error: 'helper buddies need chatgpt sign-in' };
-    return { error: 'helper buddy admission rejected an unsupported browser request' };
+    return { error: 'the helper buddy browser is unavailable' };
   }
 
   /** Release a prepared filesystem task without ever abandoning the model tool call. */
@@ -129,19 +130,24 @@ export class HelperBuddyTools {
     const { helperBuddies } = this.deps;
     if (helperBuddies === null) return { error: 'helper buddies are unavailable' };
     const args = asRecord(value) ?? {};
-    const helperBuddyId = asString(args['helper_buddy_id']).trim().slice(0, 200);
+    let helperBuddyId = '';
+    if (args['helper_buddy_id'] !== undefined) {
+      try {
+        helperBuddyId = requireCanonicalHelperBuddyId(args['helper_buddy_id']);
+      } catch (error) {
+        return { error: errorMessage(error) };
+      }
+    }
     const all = helperBuddies.list();
+    const isActive = (helperBuddy: (typeof all)[number]): boolean =>
+      helperBuddy.status === 'queued' ||
+      helperBuddy.status === 'running' ||
+      helperBuddy.status === 'waiting_approval';
     const selected = helperBuddyId
       ? all.filter((helperBuddy) => helperBuddy.id === helperBuddyId)
       : [
-          ...all.filter(
-            (helperBuddy) => helperBuddy.status === 'queued' || helperBuddy.status === 'running',
-          ),
-          ...all
-            .filter(
-              (helperBuddy) => helperBuddy.status !== 'queued' && helperBuddy.status !== 'running',
-            )
-            .slice(0, 5),
+          ...all.filter(isActive),
+          ...all.filter((helperBuddy) => !isActive(helperBuddy)).slice(0, 5),
         ];
     if (helperBuddyId && selected.length === 0) {
       return { error: 'helper buddy not found', helper_buddy_id: helperBuddyId };

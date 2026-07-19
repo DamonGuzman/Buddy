@@ -46,7 +46,9 @@ typed action** and is always signposted by a visible indicator.
   `spawn_helper_buddy`, checks progress with `check_helper_buddies`, and synthesizes completion
   results. Every helper buddy uses the same full capability surface: the ChatGPT subscription
   backend, Firecrawl, durable memory, picker-authorized transactional filesystem tools, and Buddy's
-  persistent browser profile through the shared ActionGate. See `docs/HELPER-BUDDY-MODE.md` and
+  persistent browser profile through the shared ActionGate. While a helper has an active browser,
+  its latest exact observation appears as a picture-in-picture frame only inside that helper's
+  hover or click-expanded overlay card. See `docs/HELPER-BUDDY-MODE.md` and
   `docs/HELPER-BUDDY-EXECUTION.md`.
 - **Mock Realtime server** (local WS, speaks the same protocol subset) + **debug harness** for QA.
 
@@ -113,7 +115,7 @@ src/
   shared/            types, ipc contract, settings schema, constants  (integration-owned)
   main/
     index.ts         app bootstrap, wiring only
-    agents/          background helper loop, capabilities, and owner-only Markdown memory store
+    agents/          helper-buddy loop, capabilities, and owner-only Markdown memory store
     tray.ts          tray icon + menu
     windows/         overlay + panel + whisper + rich Markdown window management (per-display
                      lifecycle, display hotplug; whisper.ts = M20 floating composer)
@@ -136,7 +138,7 @@ src/
                      read state, trigger pointer, dump last capture metadata
   renderer/
     overlay/         buddy canvas/DOM, bezier animation, caption bubble, indicators,
-                     helper-buddy sprites + hover card + click-to-expand full status
+                     helper-buddy sprites + hover card + click-to-expand full status/browser PiP
                      (M19/M22, docs/HELPER-BUDDY-MODE.md §5.5)
     panel/           M21: settings-only React app + the hidden audio engines
                      (the chat panel UI — transcript/composer/helper-buddies — is deleted)
@@ -259,7 +261,7 @@ take down or stall shutdown of the tray app.
 Every production model transport is journaled to
 `<userData>/model-executions/YYYY-MM-DD/<timestamp>_<recorder-id>/model-executions.jsonl`:
 OpenAI Realtime WebSocket responses, shared ChatGPT Codex Responses sessions (typed turns,
-computer use, and reviewers), background-helper Codex requests, and both REST grounding arms.
+computer use, and reviewers), helper-buddy Codex requests, and both REST grounding arms.
 The append-only journal records the complete text request body, model/session configuration,
 parsed SSE/WebSocket events, response metadata, usage, errors/cancellation, and terminal status.
 Helper tool executions additionally record their exact function name, raw and parsed arguments,

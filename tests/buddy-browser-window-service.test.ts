@@ -77,6 +77,18 @@ function surfaceFixture(url = 'https://linear.app/acme') {
 }
 
 describe('BuddyBrowserWindowService', () => {
+  it('rejects helper buddy ids beyond the shared 200-character boundary', () => {
+    const { profile } = profileFixture();
+    const service = new BuddyBrowserWindowService({ profile });
+    const { surface } = surfaceFixture();
+
+    expect(() => service.registerSurface('h'.repeat(201), surface)).toThrow(
+      'helper buddy id exceeds the size limit',
+    );
+    expect(() => service.registerSurface(' helper-buddy-1', surface)).toThrow('canonical');
+    expect(() => service.registerSurface('helper-buddy-1\0', surface)).toThrow('invalid');
+  });
+
   it('uses one registered adapter for the offscreen driver lifecycle API', async () => {
     const { profile } = profileFixture();
     const service = new BuddyBrowserWindowService({ profile });
@@ -281,6 +293,56 @@ describe('BuddyBrowserWindowService', () => {
     expect(enrollment.destroyed).toBe(true);
     expect(sequence.slice(-1)).toEqual(['clear-all']);
     expect(sequence.slice(0, 2).sort()).toEqual(['dispose-1', 'dispose-2']);
+  });
+
+  it('joins and destroys a late enrollment window before clearing profile storage', async () => {
+    const { profile, enrollment, sequence } = profileFixture();
+    let releaseEnrollment!: () => void;
+    const enrollmentFactory = new Promise<void>((resolve) => {
+      releaseEnrollment = resolve;
+    });
+    profile.createEnrollmentWindow = vi.fn(async () => {
+      await enrollmentFactory;
+      return enrollment as never;
+    });
+    const service = new BuddyBrowserWindowService({ profile });
+
+    const opening = service.openEnrollment('https://linear.app');
+    await vi.waitFor(() => expect(profile.createEnrollmentWindow).toHaveBeenCalledOnce());
+    const clearing = service.clearAll();
+    await Promise.resolve();
+    expect(profile.clearAllData).not.toHaveBeenCalled();
+
+    releaseEnrollment();
+    await expect(opening).rejects.toThrow('cancelled by a lifecycle transition');
+    await clearing;
+
+    expect(enrollment.destroyed).toBe(true);
+    expect(sequence).toEqual(['clear-all']);
+  });
+
+  it('rejects new browser surfaces while a destructive profile mutation is in progress', async () => {
+    const { profile } = profileFixture();
+    let finishClear!: () => void;
+    profile.clearAllData = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishClear = resolve;
+        }),
+    );
+    const service = new BuddyBrowserWindowService({ profile });
+    const clearing = service.clearAll();
+    await vi.waitFor(() => expect(profile.clearAllData).toHaveBeenCalledOnce());
+
+    expect(() => service.registerSurface('helper-buddy-late', surfaceFixture().surface)).toThrow(
+      'profile mutation is already in progress',
+    );
+    await expect(service.openEnrollment('https://linear.app')).rejects.toThrow(
+      'profile mutation is already in progress',
+    );
+
+    finishClear();
+    await clearing;
   });
 
   it('cancels logged-in browser surfaces across lock and resumes only future work', async () => {

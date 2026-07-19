@@ -478,6 +478,7 @@ async function runComposedHelperBuddyFlow(
           name: 'browser_navigate',
           args: {
             url: `${origin}/helper-buddy-flow`,
+            description: 'opening the enrolled update page',
             justification: 'Open the enrolled page where the user asked me to send the update.',
           },
         });
@@ -487,6 +488,7 @@ async function runComposedHelperBuddyFlow(
           callId: 'observe-helper-buddy-flow',
           name: 'browser_screenshot',
           args: {
+            description: 'checking the page before sending',
             justification: 'Inspect the enrolled page before acting on the requested update.',
           },
         });
@@ -505,6 +507,7 @@ async function runComposedHelperBuddyFlow(
             x: target.x,
             y: target.y,
             label: 'Send update',
+            description: 'sending the requested update',
             justification: 'Submit the update the user explicitly asked me to send.',
           },
         });

@@ -1,5 +1,6 @@
 import type { ActionSignature } from './signature';
 import { signatureKey } from './signature';
+import { requireCanonicalHelperBuddyId } from '../../helper-buddy-id';
 
 export const DENIAL_HALT_COPY =
   "i kept proposing actions the reviewer wouldn't pass, so i stopped — the details are on my card.";
@@ -26,7 +27,6 @@ const DEFAULT_THRESHOLDS: DenialStrikeThresholds = {
   sameTargetEscalate: 3,
   totalHalt: 5,
 };
-const MAX_HELPER_BUDDY_ID_LENGTH = 200;
 const MAX_TARGET_KEY_LENGTH = 1_000;
 
 interface HelperBuddyStrikes {
@@ -46,10 +46,7 @@ export class DenialStrikeCounter {
   }
 
   recordDenial(helperBuddyId: string, target: ActionSignature | string): DenialStrikeResult {
-    const id = helperBuddyId.trim();
-    if (!id) throw new Error('helper buddy id is required');
-    if (id.length > MAX_HELPER_BUDDY_ID_LENGTH)
-      throw new Error('helper buddy id exceeds the size limit');
+    const id = requireCanonicalHelperBuddyId(helperBuddyId);
     const key = typeof target === 'string' ? target.trim() : signatureKey(target);
     if (!key) throw new Error('denial target signature is required');
     if (key.length > MAX_TARGET_KEY_LENGTH)
@@ -71,13 +68,13 @@ export class DenialStrikeCounter {
   }
 
   snapshot(helperBuddyId: string): DenialStrikeSnapshot {
-    const state = this.helperBuddies.get(helperBuddyId.trim());
+    const state = this.helperBuddies.get(requireCanonicalHelperBuddyId(helperBuddyId));
     if (!state) return { totalCount: 0, targets: {} };
     return { totalCount: state.total, targets: Object.fromEntries(state.targets) };
   }
 
   resetHelperBuddy(helperBuddyId: string): void {
-    this.helperBuddies.delete(helperBuddyId.trim());
+    this.helperBuddies.delete(requireCanonicalHelperBuddyId(helperBuddyId));
   }
 
   clear(): void {

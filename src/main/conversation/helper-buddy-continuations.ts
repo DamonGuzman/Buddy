@@ -1,7 +1,7 @@
 /**
  * Helper-buddy completion -> foreground continuation. Turns a terminal
- * worker event into a normal automated foreground inference — the local
- * equivalent of turing_agents' agent-chat auto-continue queue: idle
+ * helper-buddy event into a normal automated foreground inference — the local
+ * equivalent of a background-task auto-continue queue: idle
  * foregrounds run immediately; busy foregrounds drain after settling. The
  * continuation replays on the transport that delegated the helper buddy (voice
  * session injection vs Codex text turn).
@@ -12,6 +12,7 @@
 
 import type { HelperBuddySummary, TurnTimings } from '../../shared/types';
 import type { ChatGptCodexAuthSource } from '../auth/auth-source';
+import { requireCanonicalHelperBuddyId } from '../helper-buddy-id';
 
 export type HelperBuddyContinuationMode = 'voice' | 'text';
 
@@ -93,11 +94,20 @@ export class HelperBuddyContinuations {
 
   /** Remember which transport spawned this helper buddy (voice tool vs text tool). */
   noteOrigin(helperBuddyId: string, mode: HelperBuddyContinuationMode): void {
-    this.origins.set(helperBuddyId, mode);
+    this.origins.set(requireCanonicalHelperBuddyId(helperBuddyId), mode);
   }
 
   /** HelperBuddyManager completion hook: enqueue a normal automated foreground turn. */
   deliver(summary: HelperBuddySummary): void {
+    requireCanonicalHelperBuddyId(summary.id);
+    // A person-initiated cancellation is already its own acknowledgement. It
+    // must not wake the foreground model to announce that the work they just
+    // stopped has stopped. Forget the transport origin as part of the terminal
+    // transition so cancelled runs cannot retain queue bookkeeping either.
+    if (summary.status === 'cancelled') {
+      this.origins.delete(summary.id);
+      return;
+    }
     if (this.host.closed()) return;
     if (this.pending.has(summary.id)) return;
     if (this.inFlight?.summary.id === summary.id) return;
@@ -181,8 +191,8 @@ export class HelperBuddyContinuations {
         }
         // One attempt only: the error->idle recovery re-runs the drain, so a
         // still-queued continuation whose turn failed (no API key, connect
-        // refused) would retry — and fail — forever. Drop it; the panel/tray
-        // The helper buddy card remains the delivery path (`spoken` stays false).
+        // refused) would retry — and fail — forever. Drop it; the helper-buddy card
+        // remains the delivery path (`spoken` stays false).
         this.pending.delete(continuation.summary.id);
         this.inFlight = null;
         this.host.failTurn(error);

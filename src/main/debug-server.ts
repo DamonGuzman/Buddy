@@ -33,6 +33,7 @@ import {
   MOCK_HELPER_BUDDY_SCENARIOS,
 } from './agents/mock-helper-buddy-backend';
 import { debugPortOverride, isDebugEnabled } from './env';
+import { requireCanonicalHelperBuddyId } from './helper-buddy-id';
 import {
   checkDebugToken,
   checkHost,
@@ -138,12 +139,18 @@ const ROUTES: Record<string, RouteHandler> = {
         error:
           'expected {userRequest: string, action: object, helperBuddyId?: string, taskClaim?: string}',
       });
+    let helperBuddyId: string | undefined;
+    if (typeof body['helperBuddyId'] === 'string') {
+      try {
+        helperBuddyId = requireCanonicalHelperBuddyId(body['helperBuddyId']);
+      } catch {
+        return sendJson(res, 400, { error: 'helperBuddyId must be a valid helper buddy id' });
+      }
+    }
     const input: GateDebugAssessmentInput = {
       userRequest: body['userRequest'].trim(),
       action: actionRecord,
-      ...(typeof body['helperBuddyId'] === 'string'
-        ? { helperBuddyId: body['helperBuddyId'].trim() }
-        : {}),
+      ...(helperBuddyId === undefined ? {} : { helperBuddyId }),
       ...(typeof body['taskClaim'] === 'string' ? { taskClaim: body['taskClaim'] } : {}),
     };
     sendJson(res, 200, await computerUse.assessGate(input));
@@ -249,9 +256,12 @@ async function resolveDebugApproval(
   }
   if (!approvalId) return sendJson(res, 400, { error: 'approval id is required' });
   const body = asRecord(await readJsonBody(req));
-  const helperBuddyId =
-    typeof body?.['helperBuddyId'] === 'string' ? body['helperBuddyId'].trim() : '';
-  if (!helperBuddyId) return sendJson(res, 400, { error: 'exact helperBuddyId is required' });
+  let helperBuddyId: string;
+  try {
+    helperBuddyId = requireCanonicalHelperBuddyId(body?.['helperBuddyId']);
+  } catch {
+    return sendJson(res, 400, { error: 'exact valid helperBuddyId is required' });
+  }
   let verdict: 'once' | 'always' | 'deny' = 'deny';
   if (action === 'approve') {
     const requested = body?.['verdict'] ?? 'once';

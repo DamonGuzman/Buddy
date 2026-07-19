@@ -18,7 +18,7 @@ type FunctionToolDefinition = Extract<HelperBuddyToolDefinition, { type: 'functi
 
 /**
  * Add the user-facing activity field at the registry boundary so every current
- * and future helper function tool receives the same required contract.
+ * and future helper-buddy function tool receives the same required contract.
  */
 export function withActivityDescription(
   definition: FunctionToolDefinition,

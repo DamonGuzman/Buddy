@@ -23,6 +23,7 @@ import type {
   CodexUserTurn,
 } from '../codex/responses-session';
 import { asFiniteNumber, asRecord, errorMessage } from '../util/guards';
+import { requireCanonicalHelperBuddyId } from '../helper-buddy-id';
 import type { ComputerDriver, MouseButton } from './driver';
 import { VisualLiveDesktopEvidence, type LiveDesktopEvidencePort } from './live-desktop-evidence';
 
@@ -218,7 +219,7 @@ export class ComputerUseOperator {
   private finalText = '';
 
   constructor(private readonly options: ComputerUseOperatorOptions) {
-    if (!options.helperBuddyId.trim()) throw new Error('computer-use helperBuddyId is required');
+    requireCanonicalHelperBuddyId(options.helperBuddyId);
     if (!options.userRequest.trim())
       throw new Error('computer use requires the exact user request');
     this.captures = options.initialCaptures ?? [];

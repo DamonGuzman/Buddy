@@ -7,7 +7,7 @@ export const memoryTools: HelperBuddyToolSpec[] = [
       type: 'function',
       name: 'memory_save',
       description:
-        'Save or replace one durable helper memory as a Markdown file. Use this only for reusable knowledge that will help future helper buddies, not temporary task notes.',
+        'Save or replace one durable helper-buddy memory as a Markdown file. Use this only for reusable knowledge that will help future helper buddies, not temporary task notes.',
       parameters: {
         type: 'object',
         properties: {
@@ -22,7 +22,7 @@ export const memoryTools: HelperBuddyToolSpec[] = [
             minLength: 1,
             maxLength: 8000,
             description:
-              'Detailed description of exactly when a future helper should load and use this memory.',
+              'Detailed description of exactly when a future helper buddy should load and use this memory.',
           },
           content: {
             type: 'string',
@@ -50,7 +50,7 @@ export const memoryTools: HelperBuddyToolSpec[] = [
       type: 'function',
       name: 'memory_load',
       description:
-        'Load the full Markdown for one relevant helper memory. Use the metadata catalog first and load only memories whose usage matches the current task.',
+        'Load the full Markdown for one relevant helper-buddy memory. Use the metadata catalog first and load only memories whose usage matches the current task.',
       parameters: {
         type: 'object',
         properties: {
@@ -58,7 +58,7 @@ export const memoryTools: HelperBuddyToolSpec[] = [
             type: 'string',
             minLength: 1,
             maxLength: 120,
-            description: 'Exact memory name from the helper memory catalog.',
+            description: 'Exact memory name from the helper-buddy memory catalog.',
           },
         },
         required: ['name'],
@@ -77,7 +77,7 @@ export const memoryTools: HelperBuddyToolSpec[] = [
       type: 'function',
       name: 'memory_delete',
       description:
-        'Permanently delete one obsolete or incorrect helper memory. Delete only when the current task clearly establishes that the memory must no longer be used.',
+        'Permanently delete one obsolete or incorrect helper-buddy memory. Delete only when the current task clearly establishes that the memory must no longer be used.',
       parameters: {
         type: 'object',
         properties: {

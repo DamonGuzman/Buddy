@@ -176,7 +176,7 @@ export class ErrorSurfacer {
   }
 
   /** A completed helper-buddy run proves sign-in and helper-buddy quota are usable. */
-  noteAgentSucceeded(): void {
+  noteHelperBuddySucceeded(): void {
     const expected = currentPanelActionableError([
       'helper_buddy_not_signed_in',
       'helper_buddy_quota',

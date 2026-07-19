@@ -88,7 +88,7 @@ export function BuddyBrowserCard({ grantsRevision }: BuddyBrowserCardProps): Rea
     try {
       await clicky.openBuddyBrowserEnrollment(url);
       setMessage(
-        "buddy's browser is open. sign in to the sites you want helpers to use, then close it.",
+        "buddy's browser is open. sign in to the sites you want helper buddies to use, then close it.",
       );
     } catch {
       setMessage("buddy couldn't open its browser. please try again.");
@@ -103,8 +103,8 @@ export function BuddyBrowserCard({ grantsRevision }: BuddyBrowserCardProps): Rea
   return (
     <SettingsCard title="buddy's browser">
       <p className="text-[11px] leading-relaxed text-muted-foreground/85">
-        helpers use their own browser profile, separate from your everyday browser. only sign in to
-        accounts you want buddy to act in.
+        helper buddies use their own browser profile, separate from your everyday browser. only sign
+        in to accounts you want buddy to act in.
       </p>
       <form
         className="flex flex-col gap-1.5"

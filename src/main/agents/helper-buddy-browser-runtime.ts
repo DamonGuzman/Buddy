@@ -3,6 +3,7 @@ import type { HelperBuddyStep, ApprovalRequest } from '../../shared/types';
 import type { CaptureResult } from '../capture';
 import type { ComputerDriver, DriverPoint } from '../computer/driver';
 import { errorMessage } from '../util/guards';
+import { requireCanonicalHelperBuddyId } from '../helper-buddy-id';
 import {
   HELPER_BUDDY_BROWSER_SETTLE_MS,
   HELPER_BUDDY_BROWSER_TOOL_TIMEOUT_MS,
@@ -30,6 +31,13 @@ interface UserVisibleDriver extends ComputerDriver, GateDriverPort {
   authorizeNextNavigation?(destination: string): Promise<void>;
 }
 
+interface DriverOpening {
+  /** Finite caller-facing acquisition result shared by every concurrent consumer. */
+  result: Promise<UserVisibleDriver>;
+  /** Full factory lifetime, including disposal when acquisition cannot be adopted. */
+  settlement: Promise<void>;
+}
+
 const MAX_APPROVAL_REPLACEMENTS = 3;
 
 export interface HelperBuddyBrowserRuntimeOptions {
@@ -45,6 +53,7 @@ export interface HelperBuddyBrowserRuntimeOptions {
 /** Per-run browser state; owns exactly one lazily-created driver. */
 export class HelperBuddyBrowserRuntime implements HelperBuddyBrowserToolPort {
   private driver: UserVisibleDriver | null = null;
+  private driverOpening: DriverOpening | null = null;
   private captures: CaptureResult[] = [];
   private readonly seenDomains = new Set<string>();
   private capabilityGranted = false;
@@ -54,6 +63,7 @@ export class HelperBuddyBrowserRuntime implements HelperBuddyBrowserToolPort {
   private readonly settleMs: number;
 
   constructor(private readonly options: HelperBuddyBrowserRuntimeOptions) {
+    requireCanonicalHelperBuddyId(options.brief.id);
     this.settleMs = options.deps.settleMs ?? HELPER_BUDDY_BROWSER_SETTLE_MS;
   }
 
@@ -183,12 +193,31 @@ export class HelperBuddyBrowserRuntime implements HelperBuddyBrowserToolPort {
     if (this.disposePromise) return this.disposePromise;
     this.disposed = true;
     this.disposePromise = (async () => {
-      this.options.deps.approvals.cancelHelperBuddy(this.options.brief.id);
-      this.options.deps.gate.cancelHelperBuddy(this.options.brief.id);
+      const failures: Error[] = [];
+      try {
+        this.options.deps.approvals.cancelHelperBuddy(this.options.brief.id);
+      } catch (error) {
+        failures.push(asError(error));
+      }
+      try {
+        this.options.deps.gate.cancelHelperBuddy(this.options.brief.id);
+      } catch (error) {
+        failures.push(asError(error));
+      }
+      const opening = this.driverOpening;
       const driver = this.driver;
       this.driver = null;
       this.captures = [];
-      if (driver) await driver.dispose();
+      const results = await Promise.allSettled([
+        ...(opening ? [opening.settlement] : []),
+        ...(driver ? [driver.dispose()] : []),
+      ]);
+      for (const result of results) {
+        if (result.status === 'rejected') failures.push(asError(result.reason));
+      }
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1)
+        throw new AggregateError(failures, 'buddy browser runtime disposal failed');
     })();
     return this.disposePromise;
   }
@@ -408,19 +437,56 @@ export class HelperBuddyBrowserRuntime implements HelperBuddyBrowserToolPort {
   private async ensureDriver(): Promise<UserVisibleDriver> {
     this.assertUsable();
     if (this.driver) return this.driver;
-    const pending = this.options.deps.createDriver(this.options.brief.id);
-    try {
-      this.driver = await withTimeout(
-        pending,
+    if (this.driverOpening) return this.driverOpening.result;
+
+    // Keep one raw factory lifetime separate from the finite tool-facing
+    // acquisition. A timeout must stop the tool promptly, but disposal and
+    // destructive profile operations still need a promise they can join until
+    // a late driver has been safely released.
+    const factory = Promise.resolve().then(() =>
+      this.options.deps.createDriver(this.options.brief.id),
+    );
+    let adopted = false;
+    const result = (async (): Promise<UserVisibleDriver> => {
+      const acquired = await withTimeout(
+        factory,
         HELPER_BUDDY_BROWSER_TOOL_TIMEOUT_MS,
         'create buddy browser',
       );
-      return this.driver;
-    } catch (error) {
-      void pending.then((driver) => driver.dispose()).catch(() => undefined);
+      if (this.disposed || this.options.signal.aborted) {
+        throw new Error('helper buddy run was cancelled during browser creation');
+      }
+      this.driver = acquired;
+      adopted = true;
+      return acquired;
+    })().catch((error: unknown) => {
       this.poisonedReason = errorMessage(error);
       throw error;
-    }
+    });
+    const settlement = factory.then(
+      async (created) => {
+        await result.then(
+          () => undefined,
+          () => undefined,
+        );
+        if (!adopted) await created.dispose();
+      },
+      () => undefined,
+    );
+    const opening: DriverOpening = { result, settlement };
+    this.driverOpening = opening;
+    void settlement.then(
+      () => this.clearDriverOpening(opening),
+      (error: unknown) => {
+        this.poisonedReason = `browser driver cleanup failed: ${errorMessage(error)}`;
+        this.clearDriverOpening(opening);
+      },
+    );
+    return result;
+  }
+
+  private clearDriverOpening(opening: DriverOpening): void {
+    if (this.driverOpening === opening) this.driverOpening = null;
   }
 
   private screenIndex(): number {

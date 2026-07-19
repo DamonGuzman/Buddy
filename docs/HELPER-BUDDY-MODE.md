@@ -12,14 +12,14 @@
 > Firecrawl v2 function tools; Firecrawl Agent/Extract modes are excluded.
 
 > Historical scope note: this document retains the original read-only M18 design below. The current
-> runtime has one helper type only. Every helper receives Firecrawl, durable memory, the
+> runtime has one helper-buddy type only. Every helper buddy receives Firecrawl, durable memory, the
 > picker-authorized transactional filesystem, and Buddy's persistent browser through ActionGate.
 > References below to “v1 is read-only” are design history, not the current capability contract.
 
 > Current naming contract: foreground tools are `spawn_helper_buddy` and
 > `check_helper_buddies`; foreground-delegated run IDs use `helper_buddy_<uuid>`; renderer and debug
 > channels use `helper-buddies:*`, `overlay:helper-buddy-*`, and `/helper-buddies`. There is no
-> transcript-intent fallback or legacy helper-mode API.
+> transcript-intent fallback or legacy helper-buddy-mode API.
 
 ---
 
@@ -158,13 +158,15 @@ helper buddy mode:
   spawning it, tell the person what you delegated, stay available, and never duplicate the work.
 - check live helper buddy status instead of guessing, then evaluate and synthesize completed results for
   the person rather than relaying raw output.
+- when a status is waiting_approval, explain that the helper buddy is paused for their choice and
+  direct them to its raised-hand sprite instead of implying that it is still working.
 ```
 
 `getToolDefinitions()` returns `[POINT_AT_TOOL, SPAWN_HELPER_BUDDY_TOOL, CHECK_HELPER_BUDDIES_TOOL]` **only when
 helper buddy mode is available** (signed in — see §5.4). `check_helper_buddies` can inspect one run by id, or
 return all active runs plus a bounded set of recent terminal runs. Its output intentionally omits
-full findings, sources, screenshots, and the complete step log; those stay on the expanded overlay
-card. When ChatGPT is not connected, both helper buddy tools are omitted and the persona gets a one-line
+full findings, sources, browser preview frames, and the complete step log; those stay out of the
+foreground-model status payload. When ChatGPT is not connected, both helper buddy tools are omitted and the persona gets a one-line
 "if they ask for a helper buddy, tell them it needs their chatgpt sign-in in settings, then
 offer to help by hand right now." That keeps the model from promising work it cannot start.
 
@@ -236,7 +238,7 @@ src/main/agents/
     memory.ts    durable memory_save / memory_load / memory_delete tools
     scratchpad.ts
     read-screen.ts
-  types.ts       internal helper-buddy types (HelperBuddyBrief, HelperBuddyStep, HelperBuddyRecord — NON-shared)
+  types.ts       internal helper-buddy types (HelperBuddyBrief and the runtime ports — NON-shared)
 src/main/firecrawl/
   client.ts      abort-aware Firecrawl v2 transport; encrypted-key callback; bounded JSON
 ```
@@ -287,8 +289,8 @@ Model choice (from `docs/COORD-STUDY.md` §8–§9, the model sweep — the subs
 > **Plan-quota caveat (carry into build):** the `gpt-5.6-*` ids are subscription-pool routed and
 > their limits/pricing are TBD (`COORD-STUDY` §8.2). Helper buddies spend from the user's ChatGPT plan
 > (comparable products cap this at roughly 150 helper buddy messages/month). §7 covers quota exhaustion as a
-> first-class error, and the manager counts helper-buddy runs so the panel can show remaining budget once
-> the backend exposes it.
+> first-class error, and the backend records plan-usage telemetry for a future renderer-safe budget
+> surface.
 
 ### 2.2 The tool loop
 
@@ -345,11 +347,14 @@ or the app shuts down. These deadlines detect one stalled operation; they never 
   failed, or undoable helper never blocks admission of another.
 - **Cancellation**: each helper buddy holds one `AbortController`; `manager.cancel(id)` aborts the
   in-flight backend request and any running tool, flips status to `cancelled`, and the loop's
-  `this.cancelled` check bails at the next boundary. The overlay card has a "stop" affordance.
+  cancellation check bails at the next boundary. Every active overlay card (`queued`, `running`, or
+  `waiting_approval`) has a "stop" affordance. Cancellation removes the sprite, clears any private
+  filesystem staging task, and does not generate a redundant completion notification or foreground
+  continuation.
 - **Survives tray idle**: helper buddies live in the **main process**, wholly independent of any
   `BrowserWindow`. The panel can be closed (it hides on blur already), the overlays idle, the
   realtime socket keep-warm-closed after 5 min — none of that touches a running helper buddy. The only
-  hard dependency is the `AuthSource` token, which `CodexHelperBuddyBackend` refreshes per request. An helper buddy
+  hard dependency is the `AuthSource` token, which `CodexHelperBuddyBackend` refreshes per request. A helper buddy
   started during a voice session keeps running long after that session closes.
 - **App quit**: `manager.dispose()` aborts all helper buddies (best-effort), persists finished summaries
   (§4.3), and drops in-flight ones — no attempt to resume across restarts in phase 1 (documented
@@ -396,16 +401,16 @@ Notes per tool:
   cancel actions. The model chooses when to poll; Firecrawl never owns the helper's reasoning loop.
 - **`scratchpad_write`** — lets a multi-step research task accumulate its findings so the final
   answer is coherent rather than reconstructed from the last step. It is the helper buddy's own private
-  notepad, persisted into the `HelperBuddyRecord` so the panel can show the full working, not just the
+  notepad, persisted into the `HelperBuddySummary` so the panel can show the full working, not just the
   one-paragraph summary. Not a user-file write — no path, no filesystem.
 - **`read_screen`** — cheap and safe: it hands back the image already in the brief (captured under
   the hotkey the user held), enabling "summarize what's on my screen" / "compare this listing to
   what you find." No fresh capture, so no new privacy surface. (If a task truly needs a _fresh_
   look, that is deferred — see §3.2 — because it would capture the screen without a hotkey hold.)
 
-#### Durable helper memory and progressive disclosure
+#### Durable helper-buddy memory and progressive disclosure
 
-Every helper receives a metadata-only, skill-style catalog in its initial task message. Each entry
+Every helper buddy receives a metadata-only, skill-style catalog in its initial task message. Each entry
 contains `<memory_name>`, `<memory_usage>`, and `<memory_file>`; the catalog also names the absolute
 `<userData>/memories` directory. Full memory content is deliberately omitted. The helper uses the
 detailed usage text to select relevant memories and calls `memory_load` only for those entries.
@@ -478,7 +483,7 @@ Aligning with the app's consent posture (`docs/ARCHITECTURE.md`; the instruction
 
 ## 4. Result delivery
 
-An helper buddy can finish while (a) the same voice session is still open, (b) the app is idle with the
+A helper buddy can finish while (a) the same voice session is still open, (b) the app is idle with the
 panel closed, or (c) much later. All three are handled.
 
 ### 4.1 Voice summary (session live)
@@ -497,37 +502,29 @@ one seed for what they could do next): <2–4 sentence summary>` → `response.c
   `holding`) — a helper buddy result must never interrupt the user mid-sentence or barge into a live
   answer. If the user is mid-turn, delivery **queues** and fires on the next idle settle
   (`scheduleIdle` path), or degrades to §4.3 if the session closes first.
-- The spoken recap is capped (the summary is short by construction); the _full_ output lives in the
-  panel. Buddy says something like: _"ok, back — for a 27-inch under $400 the dell s2725qc keeps
-  coming up as the best all-rounder, with the koorui 27e6qc as the budget pick. i dropped the full
-  rundown in the panel. want me to compare those two head to head?"_
+- The spoken recap is capped (the summary is short by construction); the helper buddy's expandable overlay
+  card carries its full result while it is visible. Buddy says something like: _"ok, back — for a
+  27-inch under $400 the dell s2725qc keeps coming up as the best all-rounder, with the koorui 27e6qc
+  as the budget pick. want me to compare those two head to head?"_
 
-### 4.2 Historical panel helper-buddy surface
+### 4.2 Overlay status and retained results
 
-Independent of voice, every helper buddy state change mirrors to the panel via IPC (§6.2). The Card moves
-`running → done/failed`, the activity log fills in, and the final summary + expandable
-full output render. This is the durable record — it is there whether or not the voice recap
-happened. Detailed UX in §5.
+Independent of voice, every helper-buddy state change broadcasts a renderer-safe snapshot to the
+overlay via IPC (§6.2). The card moves through `queued → running/waiting_approval →
+done/failed/cancelled`, fills its activity log, and exposes the final summary plus expandable full
+output. A terminal sprite celebrates briefly and then leaves the overlay; the manager retains its
+record for the current app run, `check_helper_buddies` exposes a bounded recent subset, and only a
+bounded set of terminal summaries is persisted across restarts. No historical helper-buddy list
+lives in the settings panel.
 
-### 4.3 Voice session closed by the time it finishes
+### 4.3 Foreground session closed or busy when a helper finishes
 
-Very common (helper buddy outlives the 5-min keep-warm, or the user walked away). Layered fallback:
-
-1. **Tray balloon notification** (Windows `Tray.displayBalloon` / a `Notification`): _"buddy
-   finished: <short task>"_ — clicking it opens the panel to that helper buddy's Card. This is the primary
-   "ping you when it's done" for the closed-session case.
-2. **Panel badge**: the tray icon / panel header shows an unseen-results count; the helper buddys tab
-   shows a dot. Cleared when the user views the Card.
-3. **Next-time-you-talk spoken recap**: the finished-but-unspoken summary is stashed on the
-   `HelperBuddyRecord` with `spoken: false`. On the **next** voice turn, before/after answering, Buddy
-   can mention it — `conversation.ts` checks for undelivered results at turn settle and, if any,
-   injects the §4.1 context so the model weaves in _"oh — that monitor research finished while you
-   were away, by the way…"_. Capped to avoid nagging (only the most recent 1–2 undelivered, then
-   they're marked spoken).
-
-We deliberately do **not** force the panel open or speak unprompted into a silent room (the app is
-non-intrusive by default). The balloon is the one proactive nudge; everything else waits for the
-user to look or talk.
+The manager emits the terminal overlay snapshot and a native completion notification, then queues one
+automated foreground continuation on the transport that delegated the helper buddy. A busy foreground
+drains it after settling; the voice path may lazily reconnect, and the text path starts a fresh Codex
+episode. Successful delivery marks the record `spoken`; a failed or superseded one-attempt continuation
+does not loop forever. The expandable overlay card and `check_helper_buddies` remain the read-only status
+paths when proactive delivery cannot run.
 
 ---
 
@@ -611,8 +608,8 @@ gated empty state (reusing `showPanelOnce`-style discoverability).
 
 ### 5.5 Overlay helper sprites (M19 — the non-technical face of helper buddies)
 
-The panel list is the full record; the **overlay** is where a non-technical user actually _sees_
-helper buddies. Each visible helper buddy is a tiny pastel "helper buddy" (22px triangle with eyes, stable
+The **overlay** is where a non-technical user sees and inspects helper buddies. Each visible helper
+buddy is a tiny pastel triangle (22px with eyes, stable
 per-helper buddy tint) that pops out of the mascot and settles into a small arc anchored at the buddy's
 REST spot (the arc mirrors toward the roomy side of the screen). Implementation:
 `src/renderer/overlay/helper-buddies-ui.ts` (pure view-model, unit-tested), `HelperBuddies.tsx`
@@ -625,15 +622,17 @@ REST spot (the arc mirrors toward the roomy side of the screen). Implementation:
   badge + a sparkle burst; failed/timed-out = desaturated + amber "!"; queued = dimmed.
 - **Self-dismissing:** helpers exist to help the buddy, not to be managed. A finished helper
   celebrates, lingers ~10s (`FINISHED_LINGER_MS`), then shrinks back INTO the buddy (reverse of
-  its birth glide, `HELPER_DEPART_MS` tail) and is gone — no click required; the panel keeps the
-  record and the header Bot badge still counts unseen results. The hovered helper is exempt
+  its birth glide, `HELPER_DEPART_MS` tail) and is gone — no click required; the manager keeps the
+  terminal record for the current run and persists a bounded subset across restarts;
+  `check_helper_buddies` exposes active runs plus a bounded recent subset. The hovered helper buddy is exempt
   (`helperPhase` keepId) so a card never vanishes under the cursor; phase boundaries drive
   one-shot recompute timers (`nextHelperTransition`), no polling.
 - **Hover → helper buddy card:** the overlay already receives mousemove while click-through (M15
   forwarding), so hovering a sprite (140ms) opens a warm card — the task in quotes, a friendly
   activity line derived from the last step ('reading rtings.com…'), "working for 2 minutes ·
   checked 3 places on the web", and a click cta. Hovering the pebble lists the folded helpers.
-  The M15 hint bubble is suppressed while a card shows.
+  The M15 hint bubble is suppressed while a card shows. If that helper has an active hidden
+  browser, the same hover card includes a picture-in-picture view of its latest exact observation.
 - **Clicks ride the M15 dwell flip:** the hover machine's interactive region grows to a merged
   bounding box (buddy footprint + sprites + measured card rect, clamped under main's 400×400
   region cap) via `HoverMachine.setAux`; the safety property (instant click-through restore on
@@ -646,13 +645,17 @@ REST spot (the arc mirrors toward the roomy side of the screen). Implementation:
   hostnames). The expanded card is wider/taller but still under the region cap, scrolls when
   long, and a second click (or leaving it) tucks it away. The expanded helper is pinned exempt
   from the linger clock (`HelperHoverController.setPinned`) so it never vanishes mid-read; card
-  lifetime is still owned by the hover machine. Normal result expansion stays in the overlay. A
+  lifetime is still owned by the hover machine. The browser picture-in-picture remains visible in
+  this detail view while the helper's browser surface is active. Normal result expansion stays in the overlay. A
   helper waiting for approval still sends `overlay:helper-buddy-click` so main can reveal the
   approval surface.
-- **IPC (integration-approved M19):** `overlay:helper-buddies` mirrors the same renderer-safe
+- **IPC (integration-approved M19/M22):** `overlay:helper-buddies` mirrors the same renderer-safe
   `HelperBuddySummary[]` snapshot (broadcast to all overlays; only the buddy-hosting overlay
-  renders), `overlay:helper-buddy-click` / `overlay:helper-buddy-cancel` sends, and overlay-preload
-  `getHelperBuddies()` bootstrap (reuses the `helper-buddies:list` invoke).
+  renders). The separate `overlay:helper-buddy-browser-preview` channel carries ordered ephemeral
+  latest-frame updates; `helper-buddies:list-browser-previews` provides a race-safe bootstrap.
+  Frames are removed when the browser closes, never added to persisted summaries, and never cause
+  extra captures. `overlay:helper-buddy-click` / `overlay:helper-buddy-cancel` remain the user-action
+  sends, and overlay preload exposes both summary and preview subscriptions/bootstrap calls.
 
 ---
 
@@ -663,7 +666,7 @@ REST spot (the arc mirrors toward the roomy side of the screen). Implementation:
 **`persona.ts`**
 
 - Replace the "coming soon" honesty clause with the helper buddy-mode clause (§1.2).
-- Add `SPAWN_HELPER_BUDDY_TOOL`; make `getToolDefinitions()` take an `helperBuddyModeAvailable: boolean` and
+- Add `SPAWN_HELPER_BUDDY_TOOL`; make `getToolDefinitions()` take a `helperBuddyModeAvailable: boolean` and
   include `spawn_helper_buddy` only when true. `conversation.buildSession()` passes
   `authSource.isReady()`. Session rebuilds on sign-in/out (see below) so the tool set tracks
   connection state.
@@ -678,17 +681,19 @@ REST spot (the arc mirrors toward the roomy side of the screen). Implementation:
   uses `conversation.item.create` with `role: user` followed by `response.create`; typed chat runs
   the same reminder through its existing client-side-history session. Turn settlement drains the
   queue so no new human input is required.
-- Hold an `HelperBuddyManager` (constructed in `index.ts`, injected via `ConversationDeps`), and forward
+- Hold a `HelperBuddyManager` (constructed in `index.ts`, injected via `ConversationDeps`), and forward
   its completion events to voice delivery.
 - Rebuild the realtime session on `AuthSource.onChanged` (so `spawn_helper_buddy` appears/disappears) —
   reuse the existing `onSettingsChanged` rebuild machinery (model/voice change already rebuilds).
 
 **`index.ts` (wiring only)**
 
-- Construct `AuthSource` (from `src/main/auth`, parallel implementation), `HelperBuddyManager({ backend, panel,
-onComplete })`, pass both into `Conversation`.
-- Wire new IPC: `helper-buddies:list` (invoke), `helper-buddies:cancel` / `helper-buddies:cancel-all` (send), and the
-  main→panel `panel:helper-buddies` push. Tray balloon click → open panel to Helper buddies tab.
+- Construct the Codex auth provider and `HelperBuddyManager({ backend, browser, filesystem,
+onHelperBuddiesChanged, onFinished })`, then pass the manager into `Conversation`.
+- Wire `helper-buddies:list`, `helper-buddies:cancel`, `helper-buddies:cancel-all`, and
+  `helper-buddies:mark-seen` invokes plus the main→overlay `overlay:helper-buddies` snapshot push.
+  Helper-card clicks expand locally; only a parked helper buddy emits the main-process click event
+  that reveals the approval panel.
 
 **`AuthSource` dependency (parallel implementation)** — this design assumes: `isReady()`, `onChanged()`, and
 a `fetchResponses(body, signal)` that POSTs to `chatgpt.com/backend-api/codex/responses` with a
@@ -699,10 +704,11 @@ tools, delivery, and UX are backend-agnostic.
 
 ### 6.2 New shared types + IPC channels
 
-`src/shared/types.ts` (additions):
+`src/shared/types/helper-buddies.ts` owns:
 
 ```ts
-export type HelperBuddyStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+export type HelperBuddyStatus =
+  'queued' | 'running' | 'waiting_approval' | 'done' | 'failed' | 'cancelled';
 
 export interface HelperBuddyStep {
   // one loop iteration, for the activity log
@@ -712,7 +718,7 @@ export interface HelperBuddyStep {
 }
 
 export interface HelperBuddySummary {
-  // renderer-safe helper buddy record (NO screenshot bytes)
+  // renderer-safe persisted helper buddy record (NO screenshot bytes)
   id: string;
   task: string;
   status: HelperBuddyStatus;
@@ -725,7 +731,16 @@ export interface HelperBuddySummary {
   sources?: string[]; // fetched urls
   error?: string; // lowercase, catalog-classified
   spoken: boolean; // has voice delivered it yet
-  unseen: boolean; // panel badge
+  unseen: boolean; // overlay result marker and linger eligibility
+}
+
+// Separate, ephemeral latest frame for an active hidden browser. Never persisted.
+export interface HelperBuddyBrowserPreview {
+  helperBuddyId: string;
+  imageDataUrl: string;
+  width: number;
+  height: number;
+  capturedAt: number;
 }
 
 // Settings gains the connection flag (renderer-safe; never the token):
@@ -737,32 +752,39 @@ interface Settings {
 `src/shared/ipc.ts` (additions):
 
 ```ts
-// Main → Panel
-interface MainToPanelEvents {
-  /* … */ 'panel:helper-buddies': HelperBuddySummary[];
-} // full list upsert
+// Main → Overlay
+interface MainToOverlayEvents {
+  /* … */ 'overlay:helper-buddies': HelperBuddySummary[];
+  /* … */ 'overlay:helper-buddy-browser-preview': HelperBuddyBrowserPreviewUpdate;
+} // full-list snapshot
 // Renderer → Main (invoke)
 interface InvokeChannels {
   /* … */
   'helper-buddies:list': { args: []; result: HelperBuddySummary[] };
+  'helper-buddies:list-browser-previews': {
+    args: [];
+    result: HelperBuddyBrowserPreviewSnapshot;
+  };
   'helper-buddies:cancel': { args: [id: string]; result: void };
   'helper-buddies:cancel-all': { args: []; result: void };
   'helper-buddies:mark-seen': { args: [id: string]; result: void };
 }
 ```
 
-`OverlayApi` exposes `onHelperBuddies(cb)`, `getHelperBuddies()`,
-`sendHelperBuddyClick(id)`, and `sendHelperBuddyCancel(id)`. Screenshot bytes and the raw brief
-**never** cross to the ordinary helper card — only `HelperBuddySummary`.
+`OverlayApi` exposes `onHelperBuddies(cb)`, `getHelperBuddies()`, the corresponding browser-preview
+subscription/bootstrap pair, `sendHelperBuddyClick(id)`, and `sendHelperBuddyCancel(id)`. The raw
+handoff brief never crosses. Browser pixels cross only through the ephemeral PiP contract while a
+surface is active; they never enter `HelperBuddySummary`, disk persistence, or session history.
 
 ### 6.3 Mock backend for QA
 
-Mirror the existing `tools/mock-realtime/` discipline: a `tools/mock-codex/` (or a
-`CLICKY_HELPER_BUDDY_MOCK=1` in-process fake `CodexHelperBuddyBackend`) that speaks the Responses-API subset with
+Mirror the existing `tools/mock-realtime/` discipline with the shipped
+`CLICKY_HELPER_BUDDY_MOCK=1` in-process `MockHelperBuddyBackend` plus
+`tools/mock-helper-buddy-browser/`. Together they speak the Responses-API subset and provide
 scripted scenarios — a clean research run (search→fetch→summary), a tool timeout, a run that
 continues beyond the former round/time ceilings,
 a high-concurrency spawn burst, a backend quota error, and a page that tries prompt injection (asserts the
-helper buddy ignores it). Drives the whole loop + panel + voice-delivery with no plan spend, exactly as
+helper buddy ignores it). Drives the whole loop + overlay + voice delivery with no plan spend, exactly as
 the mock realtime server enables E2E today (`docs/ARCHITECTURE.md` §8). Debug-server routes
 (`CLICKY_DEBUG=1`): `POST /helper-buddies/spawn`, `GET /helper-buddies`, `POST /helper-buddies/cancel`.
 
@@ -798,8 +820,9 @@ the mock realtime server enables E2E today (`docs/ARCHITECTURE.md` §8). Debug-s
    network blips, and OS sleep without wedging or double-delivering.
    _Mitigation_: helper buddies live in the main process, fully decoupled from windows and the realtime
    socket; operation-health deadlines (§2.3); one bounded retry per backend step; idempotent
-   delivery keyed on `HelperBuddyRecord.spoken`/`unseen` so a result is spoken
-   at most once and always lands in the panel even if voice delivery is missed. `AbortController`
+   delivery keyed on `HelperBuddySummary.spoken`/`unseen` so a result is spoken
+   at most once while the overlay status and retained manager record remain available if voice
+   delivery is missed. `AbortController`
    per helper buddy makes cancellation and quit clean.
 
 2. **Tool safety / blast radius** — a helper buddy doing "real work" is where an assistant can do real
@@ -855,4 +878,4 @@ this document and in `docs/ARCHITECTURE.md`.
 4. **Responses API streaming shape on this backend** — needed for the phase-2 live Card; phase 1
    deliberately avoids it.
 5. **System-role vs `context:` framing for voice delivery** — pick whichever the realtime model
-speaks most naturally from (§4.1); a small eval like the M8.6 framing work will settle it.
+   speaks most naturally from (§4.1); a small eval like the M8.6 framing work will settle it.

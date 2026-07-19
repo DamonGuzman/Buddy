@@ -90,3 +90,32 @@ export interface HelperBuddySummary {
   /** Overlay badge: finished but not yet viewed. */
   unseen: boolean;
 }
+
+/**
+ * Ephemeral renderer-safe frame from one helper buddy's active hidden browser.
+ * Frames are never persisted with HelperBuddySummary; main retains only the
+ * latest frame per live browser and removes it when that surface closes.
+ */
+export interface HelperBuddyBrowserPreview {
+  helperBuddyId: string;
+  /** JPEG data URL produced from the exact observation used by the helper. */
+  imageDataUrl: string;
+  width: number;
+  height: number;
+  /** Epoch ms when main published this observation. */
+  capturedAt: number;
+}
+
+/** Ordered incremental update for renderer preview caches. */
+export interface HelperBuddyBrowserPreviewUpdate {
+  revision: number;
+  helperBuddyId: string;
+  /** null means this helper's browser surface has closed. */
+  preview: HelperBuddyBrowserPreview | null;
+}
+
+/** Race-safe bootstrap for a newly loaded or recreated overlay renderer. */
+export interface HelperBuddyBrowserPreviewSnapshot {
+  revision: number;
+  previews: HelperBuddyBrowserPreview[];
+}

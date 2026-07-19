@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HelperBuddyRunner } from '../src/main/agents/helper-buddy';
+import { HelperBuddyBrowserRuntime } from '../src/main/agents/helper-buddy-browser-runtime';
 import { HelperBuddyApprovalCoordinator } from '../src/main/agents/approvals';
 import { HELPER_BUDDY_BROWSER_TOOL_TIMEOUT_MS } from '../src/main/agents/helper-buddy-config';
 import { helperBuddyToolDefinitions } from '../src/main/agents/tools';
@@ -20,7 +21,7 @@ import type {
   GateEscalation,
   GateExecutionResult,
 } from '../src/main/agents/gate/action-gate';
-import { createTestAgentMemory } from './support/helper-buddy-memory';
+import { createTestHelperBuddyMemory } from './support/helper-buddy-memory';
 import { createTestHelperBuddyFilesystem } from './support/helper-buddy-capabilities';
 
 vi.mock('electron', () => ({
@@ -29,7 +30,7 @@ vi.mock('electron', () => ({
   },
 }));
 
-const memory = createTestAgentMemory();
+const memory = createTestHelperBuddyMemory();
 const filesystem = createTestHelperBuddyFilesystem();
 
 function brief(id: string, task: string): HelperBuddyBrief {
@@ -99,6 +100,8 @@ function fakeDriver() {
     inspect: vi.fn(async () => null),
     readPendingPayload: vi.fn(async () => []),
     authorizeNextNavigation: vi.fn(async () => undefined),
+    showForTakeover: vi.fn(async () => undefined),
+    hideAfterTakeover: vi.fn(async () => undefined),
     inspectDetailed: vi.fn(async () => ({
       facts: null,
       payloadFields: [],
@@ -181,6 +184,35 @@ afterEach(() => {
 });
 
 describe('unified-capability HelperBuddyRunner integration', () => {
+  it('rejects noncanonical run identities before constructing runtime state', () => {
+    const driver = fakeDriver();
+    const deps = browserDeps(driver);
+    const options = {
+      brief: brief(' helper-buddy', 'inspect example.com'),
+      deps,
+      signal: new AbortController().signal,
+      getSteps: () => [],
+      onPark: vi.fn(),
+      onResume: vi.fn(),
+      onActivity: vi.fn(),
+    };
+
+    expect(() => new HelperBuddyBrowserRuntime(options)).toThrow('canonical');
+    expect(
+      () =>
+        new HelperBuddyRunner({
+          memory,
+          filesystem,
+          browser: deps,
+          brief: options.brief,
+          backend: scriptedBackend(() => success([], 'unused')),
+          onUpdate: vi.fn(),
+        }),
+    ).toThrow('canonical');
+    expect(deps.createDriver).not.toHaveBeenCalled();
+    expect(deps.approvals.request).not.toHaveBeenCalled();
+  });
+
   it('grants browser and filesystem tools to every helper and requires browser justification', async () => {
     const researchBackend = scriptedBackend(() => success([], 'research complete'));
     const researchRunner = new HelperBuddyRunner({
@@ -444,6 +476,123 @@ describe('unified-capability HelperBuddyRunner integration', () => {
     );
     expect(inputJson(backend.requests[1]!)).toContain('data:image/jpeg;base64,fresh-1');
     expect(driver.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('disposes a driver that arrives after the helper buddy was cancelled', async () => {
+    const driver = fakeDriver();
+    const deps = browserDeps(driver);
+    type CreatedDriver = Awaited<ReturnType<HelperBuddyBrowserDeps['createDriver']>>;
+    let finishDriver!: (driver: CreatedDriver) => void;
+    deps.createDriver = vi.fn(
+      () =>
+        new Promise<CreatedDriver>((resolve) => {
+          finishDriver = resolve;
+        }),
+    );
+    const backend = scriptedBackend((_request, round) =>
+      round === 1
+        ? success([
+            {
+              callId: 'late-driver',
+              name: 'browser_screenshot',
+              args: { justification: 'Inspect the current browser page.' },
+            },
+          ])
+        : success([], 'should not continue'),
+    );
+    const runner = new HelperBuddyRunner({
+      memory,
+      filesystem,
+      brief: brief('cancelled-driver-helper', 'inspect the browser'),
+      backend,
+      browser: deps,
+      onUpdate: () => undefined,
+    });
+    const running = runner.run();
+    await vi.waitFor(() => expect(deps.createDriver).toHaveBeenCalledOnce());
+
+    runner.cancel();
+    finishDriver(driver as CreatedDriver);
+
+    await expect(running).resolves.toMatchObject({ status: 'cancelled' });
+    expect(driver.dispose).toHaveBeenCalledOnce();
+    expect(driver.capture).not.toHaveBeenCalled();
+  });
+
+  it('shares one in-flight driver factory between a browser tool and takeover request', async () => {
+    const driver = fakeDriver();
+    const deps = browserDeps(driver);
+    type CreatedDriver = Awaited<ReturnType<HelperBuddyBrowserDeps['createDriver']>>;
+    let finishDriver!: (driver: CreatedDriver) => void;
+    const opening = new Promise<CreatedDriver>((resolve) => {
+      finishDriver = resolve;
+    });
+    deps.createDriver = vi.fn(() => opening);
+    const runtime = new HelperBuddyBrowserRuntime({
+      brief: brief('shared-driver-opening', 'inspect the browser'),
+      deps,
+      signal: new AbortController().signal,
+      getSteps: () => [],
+      onPark: () => undefined,
+      onResume: () => undefined,
+      onActivity: () => undefined,
+    });
+
+    const screenshot = runtime.execute('browser_screenshot', {
+      justification: 'Inspect the current browser page.',
+    });
+    await vi.waitFor(() => expect(deps.createDriver).toHaveBeenCalledOnce());
+    const takeover = runtime.showForUser();
+    await Promise.resolve();
+    expect(deps.createDriver).toHaveBeenCalledOnce();
+
+    finishDriver(driver as CreatedDriver);
+    await expect(screenshot).resolves.toMatchObject({ observation: expect.any(Array) });
+    await expect(takeover).resolves.toBeUndefined();
+    expect(driver.capture).toHaveBeenCalledOnce();
+    expect(driver.showForTakeover).toHaveBeenCalledOnce();
+    await runtime.dispose();
+    expect(driver.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('joins a late driver factory and disposes its result before runtime disposal settles', async () => {
+    const driver = fakeDriver();
+    const deps = browserDeps(driver);
+    type CreatedDriver = Awaited<ReturnType<HelperBuddyBrowserDeps['createDriver']>>;
+    let finishDriver!: (driver: CreatedDriver) => void;
+    deps.createDriver = vi.fn(
+      () =>
+        new Promise<CreatedDriver>((resolve) => {
+          finishDriver = resolve;
+        }),
+    );
+    const runtime = new HelperBuddyBrowserRuntime({
+      brief: brief('joined-driver-opening', 'inspect the browser'),
+      deps,
+      signal: new AbortController().signal,
+      getSteps: () => [],
+      onPark: () => undefined,
+      onResume: () => undefined,
+      onActivity: () => undefined,
+    });
+    const execution = runtime.execute('browser_screenshot', {
+      justification: 'Inspect the current browser page.',
+    });
+    const executionFailure = expect(execution).rejects.toThrow('cancelled during browser creation');
+    await vi.waitFor(() => expect(deps.createDriver).toHaveBeenCalledOnce());
+
+    let disposalSettled = false;
+    const disposal = runtime.dispose().finally(() => {
+      disposalSettled = true;
+    });
+    await Promise.resolve();
+    expect(disposalSettled).toBe(false);
+
+    finishDriver(driver as CreatedDriver);
+    await executionFailure;
+    await disposal;
+    expect(driver.dispose).toHaveBeenCalledOnce();
+    expect(driver.capture).not.toHaveBeenCalled();
   });
 
   it('approves first-navigation capability before creating or capturing an unpainted driver', async () => {

@@ -35,11 +35,13 @@ import type { HintBubbleState } from './hover-controller';
 import { TimerBag } from './timer-bag';
 import { parseOverlayParams } from './query-params';
 import { HelperBuddyCluster } from './HelperBuddies';
+import { applyBrowserPreviewUpdate } from './helper-buddies-ui';
 import type { HelperView } from './helper-buddies-ui';
 import { TriangleSvg } from './TriangleSvg';
 import { BuddyIsland } from './BuddyIsland';
 import type {
   HelperBuddySummary,
+  HelperBuddyBrowserPreview,
   AssistantState,
   OverlayDisplaySurface,
   OverlayHoverConfig,
@@ -129,6 +131,9 @@ function App(): React.JSX.Element {
   const [cluster, setCluster] = useState<ClusterGeom | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [helperBuddies, setHelperBuddies] = useState<HelperBuddySummary[]>([]);
+  const [browserPreviews, setBrowserPreviews] = useState<HelperBuddyBrowserPreview[]>([]);
+  const browserPreviewsRef = useRef<HelperBuddyBrowserPreview[]>([]);
+  const browserPreviewRevisionRef = useRef(0);
   const [displaySurface, setDisplaySurface] = useState<OverlayDisplaySurface>({
     kind: 'off',
     notchWidth: 0,
@@ -428,6 +433,24 @@ function App(): React.JSX.Element {
       setHelperBuddies(list);
       helpers.setHelperBuddies(list);
     });
+    let browserPreviewsBootstrapped = false;
+    const pendingBrowserPreviewUpdates: Parameters<typeof applyBrowserPreviewUpdate>[1][] = [];
+    // Advance the revision before scheduling React state. This cache lives outside
+    // the updater itself because StrictMode may invoke updater functions twice.
+    const applyBrowserPreview = (update: Parameters<typeof applyBrowserPreviewUpdate>[1]): void => {
+      if (update.revision <= browserPreviewRevisionRef.current) return;
+      browserPreviewRevisionRef.current = update.revision;
+      const next = applyBrowserPreviewUpdate(browserPreviewsRef.current, update);
+      browserPreviewsRef.current = next;
+      setBrowserPreviews(next);
+    };
+    const offBrowserPreview = clicky.onHelperBuddyBrowserPreview((update) => {
+      if (!browserPreviewsBootstrapped) {
+        pendingBrowserPreviewUpdates.push(update);
+        return;
+      }
+      applyBrowserPreview(update);
+    });
     let displaySurfacePushed = false;
     const offDisplaySurface = clicky.onDisplaySurface((surface) => {
       displaySurfacePushed = true;
@@ -446,6 +469,31 @@ function App(): React.JSX.Element {
         if (!disposed && helpers.bootstrap(list)) setHelperBuddies(list);
       })
       .catch(() => {});
+    void clicky
+      .getHelperBuddyBrowserPreviews()
+      .then((snapshot) => {
+        if (disposed) return;
+        const buffered = [...pendingBrowserPreviewUpdates].sort(
+          (left, right) => left.revision - right.revision,
+        );
+        pendingBrowserPreviewUpdates.length = 0;
+        browserPreviewsBootstrapped = true;
+        if (snapshot.revision >= browserPreviewRevisionRef.current) {
+          browserPreviewRevisionRef.current = snapshot.revision;
+          browserPreviewsRef.current = snapshot.previews;
+          setBrowserPreviews(snapshot.previews);
+        }
+        for (const update of buffered) applyBrowserPreview(update);
+      })
+      .catch(() => {
+        if (disposed) return;
+        const buffered = [...pendingBrowserPreviewUpdates].sort(
+          (left, right) => left.revision - right.revision,
+        );
+        pendingBrowserPreviewUpdates.length = 0;
+        browserPreviewsBootstrapped = true;
+        for (const update of buffered) applyBrowserPreview(update);
+      });
     helpersRef.current = helpers;
     // ---------------------------------------- end M19 helper-buddy helper wiring --
 
@@ -472,6 +520,7 @@ function App(): React.JSX.Element {
       offCursor(); // M20 cursor feed
       // M19 helper-buddy teardown.
       offHelperBuddies();
+      offBrowserPreview();
       offDisplaySurface();
       helpersRef.current = null;
       window.removeEventListener('resize', onResize);
@@ -496,7 +545,7 @@ function App(): React.JSX.Element {
       cardRectRef.current = null;
     }
     helpersRef.current?.syncAux();
-  }, [helperHover, helperExpanded, helperView, cluster]);
+  }, [helperHover, helperExpanded, helperView, cluster, browserPreviews]);
 
   // M19: tick the card's elapsed/time-ago phrases while one is open.
   useEffect(() => {
@@ -611,16 +660,27 @@ function App(): React.JSX.Element {
           hoveredKey={helperHover}
           expandedKey={helperExpanded}
           now={nowTick}
+          browserPreviews={browserPreviews}
           cardRef={cardRef}
           onHelperBuddyClick={(id) => {
-            if (
-              helperBuddies.find((helperBuddy) => helperBuddy.id === id)?.status ===
-              'waiting_approval'
-            ) {
+            const helperBuddy = helperBuddies.find((candidate) => candidate.id === id);
+            if (helperBuddy?.status === 'waiting_approval') {
               clicky.sendHelperBuddyClick(id);
               return;
             }
+            const expanding = helperExpandedRef.current !== id;
             toggleHelperExpanded(id);
+            if (
+              expanding &&
+              helperBuddy?.unseen === true &&
+              (helperBuddy.status === 'done' || helperBuddy.status === 'failed')
+            ) {
+              void clicky
+                .markHelperBuddySeen(id)
+                .catch((error: unknown) =>
+                  console.error('[overlay] failed to mark helper buddy as seen', error),
+                );
+            }
           }}
           onHelperBuddyCancel={(id) => clicky.sendHelperBuddyCancel(id)}
         />

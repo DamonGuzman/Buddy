@@ -49,7 +49,7 @@ describe('resolveIslandActivity', () => {
         ],
         revealNewResult: false,
       }),
-    ).toEqual({ kind: 'approval', label: 'a helper needs your ok', count: 1 });
+    ).toEqual({ kind: 'approval', label: 'a helper buddy needs your ok', count: 1 });
   });
 
   it('collapses unseen results to a persistent dot after the reveal', () => {

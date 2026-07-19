@@ -51,6 +51,9 @@ const api: OverlayApi = {
   // M19 additions: helper buddies on the overlay.
   onHelperBuddies: (cb) => subscribe('overlay:helper-buddies', cb),
   getHelperBuddies: () => ipcRenderer.invoke('helper-buddies:list'),
+  onHelperBuddyBrowserPreview: (cb) => subscribe('overlay:helper-buddy-browser-preview', cb),
+  getHelperBuddyBrowserPreviews: () => ipcRenderer.invoke('helper-buddies:list-browser-previews'),
+  markHelperBuddySeen: (id) => ipcRenderer.invoke('helper-buddies:mark-seen', id),
   sendHelperBuddyClick: (id) => ipcRenderer.send('overlay:helper-buddy-click', { id }),
   sendHelperBuddyCancel: (id) => ipcRenderer.send('overlay:helper-buddy-cancel', { id }),
 };

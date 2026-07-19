@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import type { ApprovalGrant } from '../../../shared/types';
 import type { ActionSignature } from './signature';
+import { requireCanonicalHelperBuddyId } from '../../helper-buddy-id';
 import { matchesApprovalGrant, normalizeDomain, normalizeTargetDescriptor } from './signature';
 
 export interface ApprovalGrantPersistencePort {
@@ -280,7 +281,7 @@ export class ApprovalFollowThroughTracker {
   }
 
   deactivate(helperBuddyId: string): void {
-    this.active.delete(helperBuddyId.trim());
+    this.active.delete(checkedHelperBuddyId(helperBuddyId));
   }
 
   clear(): void {
@@ -361,10 +362,7 @@ function publicCoverage(coverage: ActiveCoverage): FollowThroughCoverage {
 }
 
 function checkedHelperBuddyId(value: string): string {
-  const id = value.trim();
-  if (!id) throw new Error('helper buddy id is required');
-  if (id.length > MAX_GRANT_ID_LENGTH) throw new Error('helper buddy id exceeds the size limit');
-  return id;
+  return requireCanonicalHelperBuddyId(value);
 }
 
 function checkedTimestamp(value: number): number {

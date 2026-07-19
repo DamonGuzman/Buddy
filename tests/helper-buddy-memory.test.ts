@@ -47,7 +47,9 @@ function brief(): HelperBuddyBrief {
 }
 
 describe('helper buddy memory', () => {
-  it('gives helpers explicit durable-memory save and exclusion policy', () => {
+  it('gives helper buddies an explicitly named durable-memory save and exclusion policy', () => {
+    expect(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS).toContain('helper-buddy memory policy');
+    expect(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS).toContain('future helper buddies');
     expect(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS).toContain('explicit user preferences');
     expect(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS).toContain(
       'exact names, terminology, capitalization, or framing',

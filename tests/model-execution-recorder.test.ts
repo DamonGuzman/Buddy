@@ -44,7 +44,7 @@ describe('ModelExecutionRecorder', () => {
       arguments: '{"script":"python build_deck.py"}',
     });
     recorder.recordToolExecution({
-      helperBuddyId: 'agent_5',
+      helperBuddyId: 'helper_buddy_5',
       tool: 'run_staged_shell',
       parsedArguments: { script: 'python build_deck.py' },
       result: { output: 'created 23 slides and 8 charts' },

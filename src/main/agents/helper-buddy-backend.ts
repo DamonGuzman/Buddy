@@ -10,6 +10,7 @@ import {
   readSseLines,
 } from '../codex/transport';
 import { beginModelExecution, type ModelExecutionTrace } from '../model-execution-recorder';
+import { requireCanonicalHelperBuddyId } from '../helper-buddy-id';
 import { HELPER_BUDDY_BACKEND_IDLE_TIMEOUT_MS } from './helper-buddy-config';
 import type {
   HelperBuddyBackend,
@@ -55,12 +56,32 @@ export class CodexHelperBuddyBackend implements HelperBuddyBackend {
   }
 
   isReady(): boolean {
-    return this.provider.getCodexAuth() !== null;
+    try {
+      return this.provider.getCodexAuth() !== null;
+    } catch {
+      return false;
+    }
   }
 
   async request(req: HelperBuddyBackendRequest): Promise<HelperBuddyBackendResult> {
-    const auth = this.provider.getCodexAuth();
-    if (auth === null) {
+    if (req.runContext) {
+      try {
+        requireCanonicalHelperBuddyId(req.runContext.helperBuddyId);
+      } catch (error) {
+        return invalidRequestBackendResult(error);
+      }
+    }
+    // Cancellation is an admission boundary. In particular, do not inspect
+    // auth or start telemetry/timers for work that was cancelled before this
+    // method received it.
+    if (req.signal.aborted) return cancelledBackendResult(req.signal.reason);
+    let authAtAdmission: ReturnType<CodexProvider['getCodexAuth']>;
+    try {
+      authAtAdmission = this.provider.getCodexAuth();
+    } catch (error) {
+      return signedOutBackendResult(error);
+    }
+    if (authAtAdmission === null) {
       return {
         ok: false,
         errorKind: 'helper_buddy_not_signed_in',
@@ -70,8 +91,9 @@ export class CodexHelperBuddyBackend implements HelperBuddyBackend {
     }
     let bearer: string;
     try {
-      bearer = await this.provider.getBearer();
+      bearer = await withAbort(this.provider.getBearer(), req.signal);
     } catch (error) {
+      if (req.signal.aborted) return cancelledBackendResult(req.signal.reason);
       return {
         ok: false,
         errorKind: 'helper_buddy_not_signed_in',
@@ -79,6 +101,19 @@ export class CodexHelperBuddyBackend implements HelperBuddyBackend {
         retryable: false,
       };
     }
+    if (!bearer.trim()) return signedOutBackendResult('codex bearer is unavailable');
+    // Credential refresh is asynchronous. Cancellation can overtake it even
+    // though the request was live at admission.
+    if (req.signal.aborted) return cancelledBackendResult(req.signal.reason);
+    let auth: ReturnType<CodexProvider['getCodexAuth']>;
+    try {
+      auth = this.provider.getCodexAuth();
+    } catch (error) {
+      return signedOutBackendResult(error);
+    }
+    // getBearer() may refresh credentials or overlap an account/sign-out
+    // transition. Never pair the returned bearer with stale account metadata.
+    if (auth === null) return signedOutBackendResult('codex sign-in unavailable');
     const responseStartTimeout = new AbortController();
     const timer = setTimeout(() => responseStartTimeout.abort(), this.responseStartTimeoutMs);
     timer.unref?.();
@@ -107,20 +142,33 @@ export class CodexHelperBuddyBackend implements HelperBuddyBackend {
         },
       });
       trace?.request(body);
-      const response = await this.fetchImpl(CODEX_RESPONSES_URL, {
-        method: 'POST',
-        headers: buildCodexHeaders(bearer, auth.accountId),
-        signal: AbortSignal.any([req.signal, responseStartTimeout.signal]),
-        body: JSON.stringify(body),
-      });
+      const transportSignal = AbortSignal.any([req.signal, responseStartTimeout.signal]);
+      const response = await withAbort(
+        this.fetchImpl(CODEX_RESPONSES_URL, {
+          method: 'POST',
+          headers: buildCodexHeaders(bearer, auth.accountId),
+          signal: transportSignal,
+          body: JSON.stringify(body),
+        }),
+        transportSignal,
+      );
       clearTimeout(timer);
       trace?.response({
         httpStatus: response.status,
         headers: Object.fromEntries(response.headers.entries()),
       });
       if (!response.ok) {
-        const detail = (await response.text()).slice(0, 500);
         const quota = isQuotaStatus(response.status);
+        let detail: string;
+        try {
+          detail = await readResponseSnippet(response, 500, this.streamIdleTimeoutMs, req.signal);
+        } catch (error) {
+          if (req.signal.aborted) {
+            trace?.cancel('helper buddy request cancelled while reading the error response');
+            return cancelledBackendResult(req.signal.reason);
+          }
+          detail = `response body unavailable: ${errorMessage(error)}`;
+        }
         trace?.fail(new Error(`http ${response.status}: ${detail}`), {
           quotaExhausted: quota,
         });
@@ -131,14 +179,22 @@ export class CodexHelperBuddyBackend implements HelperBuddyBackend {
           retryable: !quota && response.status >= 500,
         };
       }
-      const result = await parseAgentStream(response, this.streamIdleTimeoutMs, trace);
+      const result = await parseHelperBuddyStream(
+        response,
+        this.streamIdleTimeoutMs,
+        req.signal,
+        trace,
+      );
       if (result.ok) trace?.complete(result);
       else trace?.fail(new Error(result.detail), result);
       return result;
     } catch (error) {
       const responseStartTimedOut = responseStartTimeout.signal.aborted && !req.signal.aborted;
-      if (req.signal.aborted) trace?.cancel('helper buddy request cancelled');
-      else trace?.fail(error, { responseStartTimedOut });
+      if (req.signal.aborted) {
+        trace?.cancel('helper buddy request cancelled');
+        return cancelledBackendResult(error);
+      }
+      trace?.fail(error, { responseStartTimedOut });
       return {
         ok: false,
         errorKind: 'helper_buddy_backend_down',
@@ -153,9 +209,124 @@ export class CodexHelperBuddyBackend implements HelperBuddyBackend {
   }
 }
 
-async function parseAgentStream(
+function cancelledBackendResult(reason: unknown): HelperBuddyBackendResult {
+  return {
+    ok: false,
+    errorKind: 'helper_buddy_backend_down',
+    detail: errorMessage(reason),
+    retryable: false,
+  };
+}
+
+function signedOutBackendResult(reason: unknown): HelperBuddyBackendResult {
+  return {
+    ok: false,
+    errorKind: 'helper_buddy_not_signed_in',
+    detail: errorMessage(reason),
+    retryable: false,
+  };
+}
+
+function invalidRequestBackendResult(reason: unknown): HelperBuddyBackendResult {
+  return {
+    ok: false,
+    errorKind: 'helper_buddy_backend_down',
+    detail: errorMessage(reason),
+    retryable: false,
+  };
+}
+
+function withAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      signal.removeEventListener('abort', onAbort);
+      reject(signal.reason);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    operation.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function readResponseSnippet(
+  response: Response,
+  maxCharacters: number,
+  idleTimeoutMs: number,
+  signal: AbortSignal,
+): Promise<string> {
+  const body = response.body;
+  if (!body || typeof body.getReader !== 'function') {
+    return (await withAbortAndIdleTimeout(response.text(), signal, idleTimeoutMs)).slice(
+      0,
+      maxCharacters,
+    );
+  }
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  try {
+    while (text.length < maxCharacters) {
+      const { done, value } = await withAbortAndIdleTimeout(reader.read(), signal, idleTimeoutMs);
+      if (done) {
+        text += decoder.decode();
+        break;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    if (text.length >= maxCharacters) {
+      await withAbortAndIdleTimeout(reader.cancel(), signal, idleTimeoutMs);
+    }
+    return text.slice(0, maxCharacters);
+  } catch (error) {
+    try {
+      await withAbortAndIdleTimeout(reader.cancel(error), signal, idleTimeoutMs);
+    } catch {
+      // Preserve the admission cancellation or idle-timeout failure.
+    }
+    throw error;
+  }
+}
+
+function withAbortAndIdleTimeout<T>(
+  operation: Promise<T>,
+  signal: AbortSignal,
+  idleTimeoutMs: number,
+): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const finish = (callback: () => void): void => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      callback();
+    };
+    const onAbort = (): void => finish(() => reject(signal.reason));
+    const timer = setTimeout(
+      () =>
+        finish(() => reject(new Error(`backend response body was idle for ${idleTimeoutMs}ms`))),
+      idleTimeoutMs,
+    );
+    timer.unref?.();
+    signal.addEventListener('abort', onAbort, { once: true });
+    operation.then(
+      (value) => finish(() => resolve(value)),
+      (error: unknown) => finish(() => reject(error)),
+    );
+  });
+}
+
+async function parseHelperBuddyStream(
   response: Response,
   streamIdleTimeoutMs: number,
+  signal: AbortSignal,
   trace: ModelExecutionTrace | null,
 ): Promise<HelperBuddyBackendResult> {
   const state = new HelperBuddyStreamState();
@@ -173,6 +344,7 @@ async function parseAgentStream(
     {
       shouldStop: () => state.isTerminal(),
       idleTimeoutMs: streamIdleTimeoutMs,
+      signal,
     },
   );
   return state.result(response.headers);

@@ -11,6 +11,7 @@
 import type { BrowserWindow } from 'electron';
 import type { ApprovalGrant, ApprovalRequest, EnrolledSite } from '../../shared/types';
 import type { OffscreenBrowserDriver } from '../computer/browser-driver';
+import { requireCanonicalHelperBuddyId } from '../helper-buddy-id';
 import {
   getBuddyBrowserProfile,
   normalizeBrowserUrl,
@@ -82,6 +83,10 @@ export class BuddyBrowserWindowService {
   private readonly approvals = new Map<string, ApprovalBinding>();
   private enrollmentWindow: BrowserWindow | null = null;
   private enrollmentOpening: Promise<void> | null = null;
+  /** Invalidates an enrollment window factory admitted before destructive profile work. */
+  private enrollmentEpoch = 0;
+  /** Prevents a new surface from racing storage mutation after the initial destruction pass. */
+  private profileMutationInProgress = false;
   private disposed = false;
 
   constructor(options: BuddyBrowserWindowServiceOptions = {}) {
@@ -101,6 +106,7 @@ export class BuddyBrowserWindowService {
    */
   async openEnrollment(url: string): Promise<void> {
     this.assertAlive();
+    this.assertProfileAdmissionOpen();
     const normalizedUrl = normalizeBrowserUrl(url);
     if (this.enrollmentOpening) return this.enrollmentOpening;
     if (this.enrollmentWindow && !this.enrollmentWindow.isDestroyed()) {
@@ -110,7 +116,8 @@ export class BuddyBrowserWindowService {
       return;
     }
 
-    this.enrollmentOpening = this.openNewEnrollmentWindow(normalizedUrl).finally(() => {
+    const epoch = this.enrollmentEpoch;
+    this.enrollmentOpening = this.openNewEnrollmentWindow(normalizedUrl, epoch).finally(() => {
       this.enrollmentOpening = null;
     });
     return this.enrollmentOpening;
@@ -119,7 +126,8 @@ export class BuddyBrowserWindowService {
   /** Register one active offscreen browser. Duplicate helper buddy IDs fail fast. */
   registerSurface(helperBuddyId: string, surface: BuddyBrowserSurface): () => void {
     this.assertAlive();
-    assertOpaqueId(helperBuddyId, 'helper buddy');
+    this.assertProfileAdmissionOpen();
+    assertCanonicalHelperBuddyId(helperBuddyId);
     if (this.surfaces.has(helperBuddyId)) {
       throw new Error(
         `buddy browser surface already registered for helper buddy: ${helperBuddyId}`,
@@ -161,7 +169,7 @@ export class BuddyBrowserWindowService {
   /** Bind one concrete pending approval to the helper buddy's current browser. */
   bindApproval(helperBuddyId: string, approvalId: string): () => Promise<void> {
     this.assertAlive();
-    assertOpaqueId(helperBuddyId, 'helper buddy');
+    assertCanonicalHelperBuddyId(helperBuddyId);
     assertOpaqueId(approvalId, 'approval');
     if (this.approvals.has(approvalId)) {
       throw new Error(`buddy browser approval is already bound: ${approvalId}`);
@@ -241,13 +249,16 @@ export class BuddyBrowserWindowService {
 
   async signOutSite(domain: string): Promise<void> {
     this.assertAlive();
-    const normalized = normalizeRequestedDomain(domain);
-    const enrolled = await this.profile.listEnrolledSites();
-    if (!enrolled.includes(normalized)) {
-      throw new Error(`buddy browser site is not enrolled: ${normalized}`);
-    }
-    await this.disposeSurfacesOnDomain(normalized);
-    await this.profile.clearEnrolledSite(normalized);
+    return this.withProfileMutation(async () => {
+      const normalized = normalizeRequestedDomain(domain);
+      const enrolled = await this.profile.listEnrolledSites();
+      if (!enrolled.includes(normalized)) {
+        throw new Error(`buddy browser site is not enrolled: ${normalized}`);
+      }
+      await this.invalidateAndJoinEnrollment();
+      await this.disposeSurfacesOnDomain(normalized);
+      await this.profile.clearEnrolledSite(normalized);
+    });
   }
 
   /**
@@ -256,13 +267,17 @@ export class BuddyBrowserWindowService {
    */
   async clearAll(): Promise<void> {
     this.assertAlive();
-    await this.destroyAllWindows();
-    await this.profile.clearAllData();
+    return this.withProfileMutation(async () => {
+      await this.destroyAllWindows();
+      await this.profile.clearAllData();
+    });
   }
 
   /** Machine lock/suspend seam: logged-in browser work is cancelled, not parked. */
   async suspend(): Promise<void> {
     this.assertAlive();
+    if (this.profileMutationInProgress)
+      throw new Error('buddy browser profile mutation is already in progress');
     this.profile.setSuspended(true);
     await this.destroyAllWindows();
   }
@@ -279,11 +294,16 @@ export class BuddyBrowserWindowService {
     await this.destroyAllWindows();
   }
 
-  private async openNewEnrollmentWindow(url: string): Promise<void> {
+  private async openNewEnrollmentWindow(url: string, epoch: number): Promise<void> {
     const win = await this.profile.createEnrollmentWindow(url);
-    if (this.disposed) {
+    if (
+      this.disposed ||
+      this.profile.isSuspended() ||
+      this.profileMutationInProgress ||
+      epoch !== this.enrollmentEpoch
+    ) {
       if (!win.isDestroyed()) win.destroy();
-      throw new Error('buddy browser window service was disposed during enrollment');
+      throw new Error('buddy browser enrollment was cancelled by a lifecycle transition');
     }
     this.enrollmentWindow = win;
     win.once('closed', () => {
@@ -297,7 +317,7 @@ export class BuddyBrowserWindowService {
 
   private requireApproval(helperBuddyId: string, approvalId: string): ApprovalBinding {
     this.assertAlive();
-    assertOpaqueId(helperBuddyId, 'helper buddy');
+    assertCanonicalHelperBuddyId(helperBuddyId);
     assertOpaqueId(approvalId, 'approval');
     const binding = this.approvals.get(approvalId);
     if (!binding || binding.helperBuddyId !== helperBuddyId) {
@@ -338,6 +358,7 @@ export class BuddyBrowserWindowService {
   }
 
   private async destroyAllWindows(): Promise<void> {
+    const enrollmentOpening = this.invalidateEnrollment();
     const enrollment = this.enrollmentWindow;
     this.enrollmentWindow = null;
     if (enrollment && !enrollment.isDestroyed()) enrollment.destroy();
@@ -347,10 +368,45 @@ export class BuddyBrowserWindowService {
     this.surfaces.clear();
     for (const record of records) record.approvalIds.clear();
     const results = await Promise.allSettled(records.map((record) => record.surface.dispose()));
+    if (enrollmentOpening) {
+      // The factory owns destruction of a window returned after invalidation.
+      // Join it before profile storage can be suspended, cleared, or disposed.
+      await enrollmentOpening.catch(() => undefined);
+    }
     const rejected = results.find(
       (result): result is PromiseRejectedResult => result.status === 'rejected',
     );
     if (rejected) throw rejected.reason;
+  }
+
+  private invalidateEnrollment(): Promise<void> | null {
+    this.enrollmentEpoch += 1;
+    return this.enrollmentOpening;
+  }
+
+  private async invalidateAndJoinEnrollment(): Promise<void> {
+    const opening = this.invalidateEnrollment();
+    const enrollment = this.enrollmentWindow;
+    this.enrollmentWindow = null;
+    if (enrollment && !enrollment.isDestroyed()) enrollment.destroy();
+    await opening?.catch(() => undefined);
+  }
+
+  private async withProfileMutation<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.profileMutationInProgress)
+      throw new Error('buddy browser profile mutation is already in progress');
+    this.profileMutationInProgress = true;
+    try {
+      return await operation();
+    } finally {
+      this.profileMutationInProgress = false;
+    }
+  }
+
+  private assertProfileAdmissionOpen(): void {
+    if (this.profileMutationInProgress)
+      throw new Error('buddy browser profile mutation is already in progress');
+    if (this.profile.isSuspended()) throw new Error('buddy browser profile is suspended');
   }
 
   private async disposeSurfacesOnDomain(domain: string): Promise<void> {
@@ -469,9 +525,13 @@ function normalizeRequestedDomain(domain: string): string {
 }
 
 function assertOpaqueId(value: string, label: string): void {
-  if (typeof value !== 'string' || value.trim().length === 0 || value.length > 256) {
+  if (typeof value !== 'string' || value.trim().length === 0 || value.length > 200) {
     throw new Error(`invalid ${label} id`);
   }
+}
+
+function assertCanonicalHelperBuddyId(value: string): void {
+  requireCanonicalHelperBuddyId(value);
 }
 
 function assertApprovalResolution(value: string): asserts value is ApprovalResolution {

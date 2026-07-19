@@ -17,9 +17,9 @@
 
 ## 0. Executive summary
 
-Every helper receives the complete Firecrawl, durable memory, transactional filesystem, and browser
+Every helper buddy receives the complete Firecrawl, durable memory, transactional filesystem, and browser
 tool sets in one model request. There are no capability-selected helper profiles. The implementation
-gives each helper a **hidden
+gives each helper buddy a **hidden
 `BrowserWindow`** on a persistent "buddy work profile" partition, driven entirely through
 synthetic input.
 
@@ -187,10 +187,16 @@ Window created lazily on the buddy's first browser tool call; destroyed on termi
 step ceiling: real web tasks may take arbitrarily many observe/act rounds. They remain explicitly
 cancellable at every operation boundary, and stalled individual operations still fail fast.
 
+Every successful driver capture also replaces that helper's main-memory-only picture-in-picture
+frame. The overlay renders this frame only while the user is hovering that helper or has clicked
+open its details. Driver disposal emits an ordered close tombstone immediately, so stale browser
+pixels cannot survive the browser session. The PiP reuses observations already required by the
+one-action-per-observation loop; it does not introduce polling or additional capture.
+
 ## 3. Browser tools for helper buddies
 
-Registered in the existing `HelperBuddyToolSpec` registry — no sub-delegation to Sol; the buddy's own
-Codex loop drives its own window. The browser surface is registered for every helper and created
+Registered in the existing `HelperBuddyToolSpec` registry — the helper buddy's own Codex loop drives
+its own window without handing the run to Sol. The browser surface is registered for every helper and created
 lazily only if a browser tool is called. Every acting
 tool carries a **required `justification`** parameter (product decision: always present, evidence
 for the gate) plus the shared required **`description`** parameter: a 3–12 word, non-technical
@@ -426,7 +432,8 @@ are approving); everything else stays `HelperBuddySummary`-shaped.
   `native-receiver.ts`, `browser-driver.ts`, `browser-profile.ts`, and `browser-proxy.ts`: shared
   actuation contract, native AX/UIA receiver freshness, two surfaces, persistent profile,
   authenticated exact-IP network proxy, and window policy.
-- `src/main/agents/helper-buddy-browser-runtime.ts`, `tools/browser.ts`, `helper-buddy-history.ts`, and `run-budget.ts`:
+- `src/main/agents/helper-buddy-browser-runtime.ts`, `src/main/agents/tools/browser.ts`, and
+  `src/main/agents/helper-buddy-history.ts`:
   unified helper loop, one action per observation, bounded replay, cancellation, and
   approval parking.
 - `src/main/agents/gate/`: mechanical trigger, independent reviewer, immutable ActionGate,

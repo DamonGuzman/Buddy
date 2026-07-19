@@ -1,6 +1,6 @@
 /**
  * Whisper styling: the caption bubble's visual language (same ink, border,
- * radius, lowercase voice as overlay.css .caption / .agent-card), plus a
+ * radius, lowercase voice as overlay.css .caption / .helper-buddy-card), plus a
  * tail pointing toward the buddy (the window sits above-left of the rest
  * spot). The window itself is transparent; the bubble carries the chrome.
  */

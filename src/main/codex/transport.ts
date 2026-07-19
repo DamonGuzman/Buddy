@@ -77,7 +77,7 @@ export function parseUsedPercent(headers: Headers): CodexUsedPercent {
  * NOTE: `agents/helper-buddy-backend.ts` keeps its OWN, intentionally different classifier
  * (`/quota|usage.?limit|rate.?limit/i` over the JSON-serialized error
  * record). That matcher scans nested fields this one ignores but does NOT
- * treat "too many requests" / "insufficient..." as quota — and the agent
+ * treat "too many requests" / "insufficient..." as quota — and the helper buddy
  * loop's retry semantics were tuned against exactly that behavior, so the
  * two are deliberately not merged.
  */
@@ -142,6 +142,8 @@ export function forEachSseEvent(
 export interface ReadSseLinesOptions {
   shouldStop?: () => boolean;
   idleTimeoutMs?: number;
+  /** Optional caller lifetime. Abort settles the read even if the source ignores transport aborts. */
+  signal?: AbortSignal;
 }
 
 export class SseIdleTimeoutError extends Error {
@@ -156,9 +158,10 @@ export async function readSseLines(
   onLine: (line: string) => void,
   options: ReadSseLinesOptions = {},
 ): Promise<void> {
-  const { shouldStop, idleTimeoutMs } = options;
+  const { shouldStop, idleTimeoutMs, signal } = options;
   if (idleTimeoutMs !== undefined && (!Number.isFinite(idleTimeoutMs) || idleTimeoutMs <= 0))
     throw new Error('SSE idle timeout must be a positive finite number');
+  if (signal?.aborted) throw signal.reason;
   const body = res.body as ReadableStream<Uint8Array> | null | undefined;
   if (body !== null && body !== undefined && typeof body.getReader === 'function') {
     const reader = body.getReader();
@@ -166,7 +169,7 @@ export async function readSseLines(
     let buf = '';
     try {
       for (;;) {
-        const { done, value } = await readWithIdleTimeout(reader, idleTimeoutMs);
+        const { done, value } = await readWithIdleTimeout(reader, idleTimeoutMs, signal);
         if (done) break;
         buf += decoder.decode(value, { stream: true });
         let nl: number;
@@ -182,7 +185,11 @@ export async function readSseLines(
         }
         if (!stopped && !shouldStop?.()) continue;
         try {
-          await reader.cancel();
+          // A terminal event owns the result; a misbehaving stream source must
+          // not keep the caller parked forever while its cancellation hook
+          // stalls. Consumers that request an idle deadline get the same finite
+          // boundary for reader cleanup.
+          await withIdleTimeout(reader.cancel(), idleTimeoutMs);
         } catch {
           /* ignore */
         }
@@ -190,7 +197,7 @@ export async function readSseLines(
       }
     } catch (error) {
       try {
-        await reader.cancel(error);
+        await withIdleTimeout(reader.cancel(error), idleTimeoutMs);
       } catch {
         /* preserve the read/timeout error */
       }
@@ -199,7 +206,7 @@ export async function readSseLines(
     buf += decoder.decode();
     if (buf.length > 0) onLine(buf);
   } else {
-    const text = await withIdleTimeout(res.text(), idleTimeoutMs);
+    const text = await withIdleTimeout(res.text(), idleTimeoutMs, signal);
     for (const line of text.split(/\r?\n/)) {
       onLine(line);
       if (shouldStop?.()) break;
@@ -210,23 +217,37 @@ export async function readSseLines(
 function readWithIdleTimeout(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   timeoutMs: number | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<ReadableStreamReadResult<Uint8Array>> {
-  return withIdleTimeout(reader.read(), timeoutMs);
+  return withIdleTimeout(reader.read(), timeoutMs, signal);
 }
 
-function withIdleTimeout<T>(operation: Promise<T>, timeoutMs: number | undefined): Promise<T> {
-  if (timeoutMs === undefined) return operation;
+function withIdleTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number | undefined,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (timeoutMs === undefined && signal === undefined) return operation;
+  if (signal?.aborted) return Promise.reject(signal.reason);
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new SseIdleTimeoutError(timeoutMs)), timeoutMs);
+    let settled = false;
+    const finish = (callback: () => void): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      callback();
+    };
+    const onAbort = (): void => finish(() => reject(signal?.reason));
+    const timer =
+      timeoutMs === undefined
+        ? null
+        : setTimeout(() => finish(() => reject(new SseIdleTimeoutError(timeoutMs))), timeoutMs);
+    timer?.unref?.();
+    signal?.addEventListener('abort', onAbort, { once: true });
     operation.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error);
-      },
+      (value) => finish(() => resolve(value)),
+      (error: unknown) => finish(() => reject(error)),
     );
   });
 }

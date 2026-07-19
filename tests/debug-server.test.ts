@@ -19,6 +19,17 @@ import type { DebugState } from '../src/shared/types';
 const control = vi.hoisted(() => ({
   isPackaged: false,
   userDataPath: '',
+  gateAssessments: [] as Array<{
+    helperBuddyId?: string;
+    userRequest: string;
+    taskClaim?: string;
+    action: Record<string, unknown>;
+  }>,
+  approvalResolutions: [] as Array<{
+    helperBuddyId: string;
+    approvalId: string;
+    verdict: 'once' | 'always' | 'deny';
+  }>,
   groundingQueries: [] as Array<{
     x: number;
     y: number;
@@ -118,6 +129,17 @@ beforeAll(async () => {
           timedOut: false,
           candidates: [],
         };
+      },
+    },
+    computerUse: {
+      assessGate: async (input) => {
+        control.gateAssessments.push(input);
+        return { verdict: 'approve' };
+      },
+      listGrants: () => [],
+      resolveHelperBuddyApproval: async (helperBuddyId, approvalId, verdict) => {
+        control.approvalResolutions.push({ helperBuddyId, approvalId, verdict });
+        return true;
       },
     },
   });
@@ -253,6 +275,72 @@ describe('debug server routing', () => {
       error:
         'expected {x: number, y: number, label: string, radiusDip?: positive number} (global DIP)',
     });
+  });
+
+  it('preserves exact canonical helper-buddy identity at debug gate and approval boundaries', async () => {
+    control.gateAssessments.length = 0;
+    control.approvalResolutions.length = 0;
+    const gate = await request({
+      method: 'POST',
+      path: '/gate/assess',
+      headers: { 'x-debug-token': TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        helperBuddyId: 'helper-buddy-debug',
+        userRequest: 'send the update',
+        action: { kind: 'screenshot' },
+      }),
+    });
+    const approval = await request({
+      method: 'POST',
+      path: '/approvals/approval-debug/approve',
+      headers: { 'x-debug-token': TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({ helperBuddyId: 'helper-buddy-debug', verdict: 'once' }),
+    });
+
+    expect(gate.status).toBe(200);
+    expect(approval.status).toBe(200);
+    expect(control.gateAssessments).toEqual([
+      expect.objectContaining({ helperBuddyId: 'helper-buddy-debug' }),
+    ]);
+    expect(control.approvalResolutions).toEqual([
+      {
+        helperBuddyId: 'helper-buddy-debug',
+        approvalId: 'approval-debug',
+        verdict: 'once',
+      },
+    ]);
+  });
+
+  it('rejects invalid helper-buddy identity before debug gate or approval dispatch', async () => {
+    control.gateAssessments.length = 0;
+    control.approvalResolutions.length = 0;
+    const gate = await request({
+      method: 'POST',
+      path: '/gate/assess',
+      headers: { 'x-debug-token': TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        helperBuddyId: '  helper-buddy-debug  ',
+        userRequest: 'send the update',
+        action: { kind: 'screenshot' },
+      }),
+    });
+    const approval = await request({
+      method: 'POST',
+      path: '/approvals/approval-debug/deny',
+      headers: { 'x-debug-token': TOKEN, 'content-type': 'application/json' },
+      body: JSON.stringify({ helperBuddyId: '\0helper-buddy-debug' }),
+    });
+
+    expect(gate).toEqual({
+      status: 400,
+      json: { error: 'helperBuddyId must be a valid helper buddy id' },
+    });
+    expect(approval).toEqual({
+      status: 400,
+      json: { error: 'exact valid helperBuddyId is required' },
+    });
+    expect(control.gateAssessments).toEqual([]);
+    expect(control.approvalResolutions).toEqual([]);
   });
 });
 

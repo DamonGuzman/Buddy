@@ -22,7 +22,7 @@ const CONCISE_MIN_SENTENCE_END = 180;
 /** Mid-sentence fallback cut, leaving room for the trailing ellipsis. */
 const CONCISE_HARD_CUT = 497;
 
-/** Trim a finished-helper-buddy recap to a speakable length, preferring a sentence boundary. */
+/** Trim a finished helper buddy recap to a speakable length, preferring a sentence boundary. */
 export function concise(text: string): string {
   const clean = text.trim();
   if (clean.length <= CONCISE_MAX_CHARS) return clean;

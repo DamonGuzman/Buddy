@@ -214,7 +214,7 @@ function App(): React.JSX.Element {
             type="button"
             disabled={filesystemBusy}
             onClick={() => void clearFolder()}
-            aria-label="remove helper folder"
+            aria-label="remove helper buddy folder"
           >
             ×
           </button>
@@ -249,7 +249,7 @@ function App(): React.JSX.Element {
           disabled={filesystemBusy}
           onClick={() => void chooseFolder()}
         >
-          {filesystemBusy ? 'opening…' : folder ? 'change helper folder' : 'work in a folder'}
+          {filesystemBusy ? 'opening…' : folder ? 'change helper buddy folder' : 'work in a folder'}
         </button>
         <button
           type="button"
@@ -307,12 +307,14 @@ function FilesystemCard({
         </span>
       </div>
       {working ? (
-        <p>this helper runs independently; verified staged edits publish automatically.</p>
+        <p>this helper buddy runs independently; verified staged edits publish automatically.</p>
       ) : null}
       {task.summary && task.status === 'published' ? <p>{task.summary}</p> : null}
       {task.error ? <p className="filesystem-error">{task.error}</p> : null}
       {task.status === 'failed' ? (
-        <p>your folder is unchanged. open the safe copy to inspect whatever the helper staged.</p>
+        <p>
+          your folder is unchanged. open the safe copy to inspect whatever the helper buddy staged.
+        </p>
       ) : null}
       {task.status === 'published' && task.changes.length > 0 ? (
         <div className="change-list">

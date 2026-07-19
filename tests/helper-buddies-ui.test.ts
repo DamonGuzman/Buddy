@@ -18,6 +18,7 @@ import {
   HELPER_TINTS,
   MAX_HELPER_SPRITES,
   OVERFLOW_KEY,
+  canCancelHelperBuddy,
   clip,
   desiredHelperHover,
   elapsedPhrase,
@@ -160,7 +161,7 @@ describe('helperPhase / nextHelperTransition (celebrate, then leave)', () => {
     expect(helperPhase(done, FIN + FINISHED_LINGER_MS)).toBe('gone');
   });
 
-  it('viewed-in-panel and cancelled helpers are gone immediately', () => {
+  it('seen and cancelled helper buddies are gone immediately', () => {
     expect(helperPhase({ ...done, unseen: false }, NOW)).toBe('gone');
     expect(
       helperPhase(helperBuddy({ status: 'cancelled', unseen: true, finishedAt: FIN }), NOW),
@@ -169,6 +170,7 @@ describe('helperPhase / nextHelperTransition (celebrate, then leave)', () => {
 
   it('keepId freezes the hovered helper at settled', () => {
     expect(helperPhase(done, FIN + FINISHED_LINGER_MS + 60_000, 'd')).toBe('settled');
+    expect(helperPhase({ ...done, unseen: false }, NOW, 'd')).toBe('settled');
   });
 
   it('nextHelperTransition returns the soonest future boundary', () => {
@@ -319,6 +321,15 @@ describe('helperTint', () => {
 });
 
 describe('helperStatus (non-technical copy)', () => {
+  it('keeps stop available for every active state and removes it at terminal states', () => {
+    expect(canCancelHelperBuddy(helperBuddy({ status: 'queued' }))).toBe(true);
+    expect(canCancelHelperBuddy(helperBuddy({ status: 'running' }))).toBe(true);
+    expect(canCancelHelperBuddy(helperBuddy({ status: 'waiting_approval' }))).toBe(true);
+    expect(canCancelHelperBuddy(helperBuddy({ status: 'done' }))).toBe(false);
+    expect(canCancelHelperBuddy(helperBuddy({ status: 'failed' }))).toBe(false);
+    expect(canCancelHelperBuddy(helperBuddy({ status: 'cancelled' }))).toBe(false);
+  });
+
   it('running: derives the activity line from the last step', () => {
     const search = helperStatus(
       helperBuddy({ steps: [{ kind: 'search', label: 'checking affordable monitors', at: NOW }] }),

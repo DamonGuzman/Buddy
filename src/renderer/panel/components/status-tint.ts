@@ -8,9 +8,9 @@ export const STATUS_TINT = {
   positive: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
   /** Attention: expired session, thinking, mock server. */
   warning: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
-  /** Failure: errors, unreadable key, failed/timed-out agents. */
+  /** Failure: errors, unreadable key, failed/timed-out helper buddies. */
   danger: 'border-destructive/40 bg-destructive/10 text-destructive',
-  /** Buddy-blue activity: listening, running agents. */
+  /** Buddy-blue activity: listening, running helper buddies. */
   accent: 'border-clicky/40 bg-clicky/10 text-clicky',
   /** Dev/QA flags. */
   dev: 'border-violet-400/40 bg-violet-400/10 text-violet-300',

@@ -7,6 +7,7 @@ import type {
   FilesystemTaskView,
 } from '../../shared/types';
 import type { HelperBuddyFilesystemToolPort } from '../agents/types';
+import { isCanonicalHelperBuddyId, requireCanonicalHelperBuddyId } from '../helper-buddy-id';
 import { hostFs, hostFsPromises } from './host-fs';
 import {
   applyManifest,
@@ -184,7 +185,7 @@ export class FilesystemTaskService implements HelperBuddyFilesystemToolPort {
     const record = this.requireTask(taskId);
     if (record.view.status !== 'running')
       throw new Error('filesystem task is not ready for a helper buddy');
-    const id = validateHelperBuddyId(helperBuddyId);
+    const id = requireCanonicalHelperBuddyId(helperBuddyId);
     if (record.view.helperBuddyId !== undefined)
       throw new Error('filesystem task already has a helper buddy');
     const assigned = [...this.records.values()].find(
@@ -756,11 +757,7 @@ function assertTaskRecord(raw: TaskRecord, taskId: string): void {
     typeof raw.rootPath !== 'string' ||
     raw.view.rootName !== basename(raw.rootPath) ||
     raw.view.displayPath !== raw.rootPath ||
-    !(
-      raw.view.helperBuddyId === undefined ||
-      (typeof raw.view.helperBuddyId === 'string' &&
-        validateHelperBuddyId(raw.view.helperBuddyId) === raw.view.helperBuddyId)
-    ) ||
+    !(raw.view.helperBuddyId === undefined || isCanonicalHelperBuddyId(raw.view.helperBuddyId)) ||
     !Array.isArray(raw.stagedRoots) ||
     !raw.stagedRoots.every(
       (value) => typeof value === 'string' && validateRelativePath(value) === value,
@@ -784,14 +781,6 @@ function validateRelativePath(value: string): string {
   if (normalized === '..' || normalized.startsWith('../'))
     throw new Error(`path escapes the selected folder: ${value}`);
   return normalized;
-}
-
-function validateHelperBuddyId(value: string): string {
-  if (typeof value !== 'string') throw new Error('helper buddy id must be a string');
-  const id = value.trim();
-  if (!id || id !== value || id.length > 200 || id.includes('\0'))
-    throw new Error('helper buddy id is invalid');
-  return id;
 }
 
 function minimalRelativeRoots(values: readonly string[]): string[] {

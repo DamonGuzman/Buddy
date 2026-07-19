@@ -115,7 +115,20 @@ function approval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
   };
 }
 
-function runtimeFixture(options: { sequence?: string[] } = {}) {
+function runtimeFixture(
+  options: {
+    sequence?: string[];
+    createProfile?: () => BuddyBrowserProfile | Promise<BuddyBrowserProfile>;
+    createOffscreenDriver?: (
+      profile: BuddyBrowserProfile,
+    ) => OffscreenBrowserDriver | Promise<OffscreenBrowserDriver>;
+    onApprovalsChanged?: (requests: ApprovalRequest[]) => void;
+    onBrowserPreviewChanged?: (update: {
+      helperBuddyId: string;
+      capture: CaptureResult | null;
+    }) => void;
+  } = {},
+) {
   const ready = vi.fn(async () => undefined);
   const profile = { dispose: vi.fn(async () => undefined) } as unknown as BuddyBrowserProfile;
   const windows = windowFixture(options.sequence);
@@ -140,7 +153,13 @@ function runtimeFixture(options: { sequence?: string[] } = {}) {
       }),
       getBearer: async () => 'token',
     }),
-    onApprovalsChanged: (requests) => queue.push(requests),
+    onApprovalsChanged: (requests) => {
+      queue.push(requests);
+      options.onApprovalsChanged?.(requests);
+    },
+    ...(options.onBrowserPreviewChanged
+      ? { onBrowserPreviewChanged: options.onBrowserPreviewChanged }
+      : {}),
     journal: {
       recordActionGateAssessment: vi.fn(),
       recordComputerActionOutcome: vi.fn(),
@@ -155,16 +174,18 @@ function runtimeFixture(options: { sequence?: string[] } = {}) {
       ({
         review: vi.fn(),
       }) as unknown as ActionReviewer,
-    createProfile: () => profile,
+    createProfile: options.createProfile ?? (() => profile),
     createWindowService: (_profile, callbacks) => {
       windows.setCallbacks(callbacks);
       return windows.service;
     },
-    createOffscreenDriver: () => {
-      const driver = driverFixture();
-      drivers.push(driver);
-      return driver;
-    },
+    createOffscreenDriver:
+      options.createOffscreenDriver ??
+      (() => {
+        const driver = driverFixture();
+        drivers.push(driver);
+        return driver;
+      }),
   });
   return {
     runtime,
@@ -180,6 +201,180 @@ function runtimeFixture(options: { sequence?: string[] } = {}) {
 }
 
 describe('ComputerUseRuntime composition', () => {
+  it('rejects noncanonical helper buddy ids before initializing browser resources', async () => {
+    const fixture = runtimeFixture();
+    const request = approval({ helperBuddyId: ' helper-buddy-1' });
+
+    await expect(fixture.runtime.browser.createDriver(' helper-buddy-1')).rejects.toThrow(
+      'canonical',
+    );
+    await expect(
+      fixture.runtime.approvals.request(request, new AbortController().signal),
+    ).rejects.toThrow('canonical');
+    await expect(
+      fixture.runtime.controller.showApprovalWindow('helper-buddy-1\0', 'approval-1'),
+    ).rejects.toThrow('invalid');
+    await expect(fixture.runtime.cancelHelperBuddy('helper-buddy-1 ')).rejects.toThrow('canonical');
+
+    expect(fixture.ready).not.toHaveBeenCalled();
+    expect(fixture.runtime.controller.listApprovals()).toEqual([]);
+    await fixture.runtime.dispose();
+  });
+
+  it('validates the gate facade identity before lazy runtime initialization', async () => {
+    const fixture = runtimeFixture();
+    const dispatch = vi.fn(async () => undefined);
+
+    await expect(
+      fixture.runtime.gate.execute(
+        {
+          helperBuddyId: ' helper-buddy-1',
+          origin: 'buddy-browser',
+          userRequest: 'inspect the page',
+          taskClaim: 'inspect the page',
+          action: { kind: 'screenshot' },
+          driver: driverFixture(),
+        },
+        dispatch,
+      ),
+    ).rejects.toThrow('canonical');
+
+    expect(fixture.ready).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+    await fixture.runtime.dispose();
+  });
+
+  it('rejects helper buddy ids beyond the shared 200-character boundary', async () => {
+    const fixture = runtimeFixture();
+
+    await expect(fixture.runtime.browser.createDriver('h'.repeat(201))).rejects.toThrow(
+      'helper buddy id exceeds the size limit',
+    );
+    expect(fixture.ready).not.toHaveBeenCalled();
+    await fixture.runtime.dispose();
+  });
+
+  it('does not initialize browser resources for an approval cancelled before admission', async () => {
+    const fixture = runtimeFixture();
+    const controller = new AbortController();
+    controller.abort();
+
+    const resolution = await fixture.runtime.approvals.request(
+      approval({ allowTakeover: false }),
+      controller.signal,
+    );
+
+    expect(resolution.verdict).toBe('deny');
+    expect(fixture.ready).not.toHaveBeenCalled();
+    expect(fixture.windows.service.bindApproval).not.toHaveBeenCalled();
+    await fixture.runtime.dispose();
+  });
+
+  it('invalidates approval admission when lazy initialization crosses suspend and resume', async () => {
+    let finishProfile!: (profile: BuddyBrowserProfile) => void;
+    const profileOpening = new Promise<BuddyBrowserProfile>((resolve) => {
+      finishProfile = resolve;
+    });
+    const fixture = runtimeFixture({ createProfile: () => profileOpening });
+    const pending = fixture.runtime.approvals.request(approval(), new AbortController().signal);
+    await vi.waitFor(() => expect(fixture.ready).toHaveBeenCalledOnce());
+
+    await fixture.runtime.suspend();
+    fixture.runtime.resume();
+    finishProfile(fixture.profile);
+
+    await expect(pending).resolves.toMatchObject({ verdict: 'deny' });
+    expect(fixture.windows.service.bindApproval).not.toHaveBeenCalled();
+    expect(fixture.runtime.controller.listApprovals()).toEqual([]);
+    expect(fixture.queue).toEqual([]);
+    await fixture.runtime.dispose();
+  });
+
+  it('reserves a helper id while driver creation is in flight', async () => {
+    let finishProfile!: (profile: BuddyBrowserProfile) => void;
+    const profileOpening = new Promise<BuddyBrowserProfile>((resolve) => {
+      finishProfile = resolve;
+    });
+    const fixture = runtimeFixture({ createProfile: () => profileOpening });
+
+    const first = fixture.runtime.browser.createDriver('helper-buddy-1');
+    await vi.waitFor(() => expect(fixture.ready).toHaveBeenCalledOnce());
+    await expect(fixture.runtime.browser.createDriver('helper-buddy-1')).rejects.toThrow(
+      'already exists',
+    );
+
+    finishProfile(fixture.profile);
+    await expect(first).resolves.toBeTruthy();
+    expect(fixture.windows.service.registerOffscreenDriver).toHaveBeenCalledOnce();
+    await fixture.runtime.dispose();
+  });
+
+  it('invalidates an in-flight driver across suspend and resume', async () => {
+    let finishProfile!: (profile: BuddyBrowserProfile) => void;
+    const profileOpening = new Promise<BuddyBrowserProfile>((resolve) => {
+      finishProfile = resolve;
+    });
+    const fixture = runtimeFixture({ createProfile: () => profileOpening });
+    const opening = fixture.runtime.browser.createDriver('helper-buddy-1');
+    await vi.waitFor(() => expect(fixture.ready).toHaveBeenCalledOnce());
+
+    await fixture.runtime.suspend();
+    fixture.runtime.resume();
+    finishProfile(fixture.profile);
+
+    await expect(opening).rejects.toThrow('driver creation was cancelled');
+    expect(fixture.windows.service.registerOffscreenDriver).not.toHaveBeenCalled();
+    await expect(fixture.runtime.browser.createDriver('helper-buddy-1')).resolves.toBeTruthy();
+    await fixture.runtime.dispose();
+  });
+
+  it('resumes state whose initial suspension finishes after resume', async () => {
+    let finishProfile!: (profile: BuddyBrowserProfile) => void;
+    const profileOpening = new Promise<BuddyBrowserProfile>((resolve) => {
+      finishProfile = resolve;
+    });
+    const fixture = runtimeFixture({ createProfile: () => profileOpening });
+    let finishWindowSuspend!: () => void;
+    fixture.windows.service.suspend = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishWindowSuspend = resolve;
+        }),
+    );
+    const opening = fixture.runtime.browser.createDriver('helper-buddy-1');
+    await vi.waitFor(() => expect(fixture.ready).toHaveBeenCalledOnce());
+
+    await fixture.runtime.suspend();
+    finishProfile(fixture.profile);
+    await vi.waitFor(() => expect(fixture.windows.service.suspend).toHaveBeenCalledOnce());
+    fixture.runtime.resume();
+    expect(fixture.windows.service.resume).not.toHaveBeenCalled();
+    finishWindowSuspend();
+
+    await expect(opening).rejects.toThrow('driver creation was cancelled');
+    expect(fixture.windows.service.resume).toHaveBeenCalledOnce();
+    await expect(fixture.runtime.browser.createDriver('helper-buddy-1')).resolves.toBeTruthy();
+    await fixture.runtime.dispose();
+  });
+
+  it('does not create a window service after disposal overtakes profile initialization', async () => {
+    let finishProfile!: (profile: BuddyBrowserProfile) => void;
+    const profileOpening = new Promise<BuddyBrowserProfile>((resolve) => {
+      finishProfile = resolve;
+    });
+    const fixture = runtimeFixture({ createProfile: () => profileOpening });
+    const opening = fixture.runtime.controller.listGrants();
+    await vi.waitFor(() => expect(fixture.ready).toHaveBeenCalledOnce());
+
+    const disposal = fixture.runtime.dispose();
+    finishProfile(fixture.profile);
+
+    await expect(opening).rejects.toThrow('disposed during profile initialization');
+    await expect(disposal).resolves.toBeUndefined();
+    expect(fixture.windows.service.dispose).not.toHaveBeenCalled();
+    expect(fixture.profile.dispose).toHaveBeenCalledOnce();
+  });
+
   it('does not create Electron/profile resources until the first operation reaches app-ready', async () => {
     const fixture = runtimeFixture();
     expect(fixture.ready).not.toHaveBeenCalled();
@@ -192,6 +387,27 @@ describe('ComputerUseRuntime composition', () => {
       expect.anything(),
     );
     expect(driver).toHaveProperty('inspectDetailed');
+    await fixture.runtime.dispose();
+  });
+
+  it('publishes exact helper browser observations and closes the PiP on driver disposal', async () => {
+    const updates: { helperBuddyId: string; capture: CaptureResult | null }[] = [];
+    const fixture = runtimeFixture({ onBrowserPreviewChanged: (update) => updates.push(update) });
+    const driver = await fixture.runtime.browser.createDriver('helper-buddy-1');
+
+    const observations = await driver.capture();
+
+    expect(updates).toEqual([
+      { helperBuddyId: 'helper-buddy-1', capture: observations[0] ?? null },
+    ]);
+
+    await driver.dispose();
+    await driver.dispose();
+
+    expect(updates).toEqual([
+      { helperBuddyId: 'helper-buddy-1', capture: observations[0] ?? null },
+      { helperBuddyId: 'helper-buddy-1', capture: null },
+    ]);
     await fixture.runtime.dispose();
   });
 
@@ -241,6 +457,7 @@ describe('ComputerUseRuntime composition', () => {
     await retryDone;
 
     expect(fixture.runtime.controller.listApprovals()).toEqual([]);
+    expect(fixture.windows.service.bindApproval).toHaveBeenCalledOnce();
     expect(fixture.errors).toEqual([]);
     await fixture.runtime.dispose();
   });
@@ -316,6 +533,38 @@ describe('ComputerUseRuntime composition', () => {
     await fixture.runtime.dispose();
   });
 
+  it('rejects a concurrent controller resolution without releasing the first resolution early', async () => {
+    const fixture = runtimeFixture();
+    await fixture.runtime.browser.createDriver('helper-buddy-1');
+    const pending = fixture.runtime.approvals.request(approval(), new AbortController().signal);
+    await vi.waitFor(() => expect(fixture.runtime.controller.listApprovals()).toHaveLength(1));
+    let finishFreeze!: () => void;
+    fixture.windows.service.freezeApproval = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishFreeze = resolve;
+        }),
+    );
+
+    const first = fixture.runtime.controller.resolveApproval(
+      'helper-buddy-1',
+      'approval-1',
+      'once',
+    );
+    await vi.waitFor(() => expect(fixture.windows.service.freezeApproval).toHaveBeenCalledOnce());
+    await expect(
+      fixture.runtime.controller.resolveApproval('helper-buddy-1', 'approval-1', 'deny'),
+    ).rejects.toThrow('already resolving through the window controller');
+    expect(fixture.windows.releases.get('approval-1')).not.toHaveBeenCalled();
+
+    finishFreeze();
+    const resolution = await pending;
+    resolution.acknowledge();
+    await first;
+    expect(fixture.windows.releases.get('approval-1')).toHaveBeenCalledOnce();
+    await fixture.runtime.dispose();
+  });
+
   it('binds a stale replacement before publication and keeps its takeover/approval usable', async () => {
     const fixture = runtimeFixture();
     await fixture.runtime.browser.createDriver('helper-buddy-1');
@@ -341,6 +590,9 @@ describe('ComputerUseRuntime composition', () => {
       'helper-buddy-1',
       'approval-2',
     );
+    await vi.waitFor(() =>
+      expect(fixture.windows.releases.get('approval-1')).toHaveBeenCalledOnce(),
+    );
     await resolvingInitial;
 
     await fixture.runtime.controller.showApprovalWindow('helper-buddy-1', 'approval-2');
@@ -358,6 +610,38 @@ describe('ComputerUseRuntime composition', () => {
       'helper-buddy-1',
       'approval-2',
     );
+    expect(fixture.runtime.controller.listApprovals()).toEqual([]);
+    expect(fixture.windows.releases.get('approval-2')).toHaveBeenCalledOnce();
+    await fixture.runtime.dispose();
+  });
+
+  it('releases a takeover binding when the parked request is cancelled by its signal', async () => {
+    const fixture = runtimeFixture();
+    await fixture.runtime.browser.createDriver('helper-buddy-1');
+    const controller = new AbortController();
+    const pending = fixture.runtime.approvals.request(approval(), controller.signal);
+    await vi.waitFor(() => expect(fixture.runtime.controller.listApprovals()).toHaveLength(1));
+
+    controller.abort();
+
+    expect((await pending).verdict).toBe('deny');
+    await vi.waitFor(() =>
+      expect(fixture.windows.releases.get('approval-1')).toHaveBeenCalledOnce(),
+    );
+    expect(fixture.runtime.controller.listApprovals()).toEqual([]);
+    await fixture.runtime.dispose();
+  });
+
+  it('does not bind a takeover surface for a request cancelled before admission', async () => {
+    const fixture = runtimeFixture();
+    await fixture.runtime.browser.createDriver('helper-buddy-1');
+    const controller = new AbortController();
+    controller.abort();
+
+    const resolution = await fixture.runtime.approvals.request(approval(), controller.signal);
+
+    expect(resolution.verdict).toBe('deny');
+    expect(fixture.windows.service.bindApproval).not.toHaveBeenCalled();
     expect(fixture.runtime.controller.listApprovals()).toEqual([]);
     await fixture.runtime.dispose();
   });
@@ -452,6 +736,21 @@ describe('ComputerUseRuntime composition', () => {
     await fixture.runtime.dispose();
   });
 
+  it('keeps browser admission suspended when profile resume fails', async () => {
+    const fixture = runtimeFixture();
+    await fixture.runtime.browser.createDriver('helper-buddy-1');
+    await fixture.runtime.suspend();
+    fixture.windows.service.resume = vi.fn(() => {
+      throw new Error('profile resume failed');
+    });
+
+    expect(() => fixture.runtime.resume()).toThrow('profile resume failed');
+    await expect(fixture.runtime.browser.createDriver('helper-buddy-2')).rejects.toThrow(
+      'suspended',
+    );
+    await fixture.runtime.dispose();
+  });
+
   it('does not let a stale asynchronous suspend overwrite a newer resume', async () => {
     const fixture = runtimeFixture();
     await fixture.runtime.browser.createDriver('helper-buddy-1');
@@ -497,5 +796,75 @@ describe('ComputerUseRuntime composition', () => {
 
     await fixture.runtime.dispose();
     expect(fixture.profile.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('joins a cancelled driver opening before mutating shared site data', async () => {
+    const driver = driverFixture();
+    let finishDriver!: (driver: OffscreenBrowserDriver) => void;
+    const driverOpening = new Promise<OffscreenBrowserDriver>((resolve) => {
+      finishDriver = resolve;
+    });
+    const fixture = runtimeFixture({ createOffscreenDriver: () => driverOpening });
+    const opening = fixture.runtime.browser.createDriver('helper-buddy-opening');
+    await vi.waitFor(() => expect(fixture.ready).toHaveBeenCalledOnce());
+
+    const clearing = fixture.runtime.controller.clearAll();
+    await Promise.resolve();
+    expect(fixture.windows.service.clearAll).not.toHaveBeenCalled();
+
+    finishDriver(driver);
+    await expect(opening).rejects.toThrow('driver creation was cancelled');
+    await clearing;
+
+    expect(driver.dispose).toHaveBeenCalledOnce();
+    expect(fixture.windows.service.registerOffscreenDriver).not.toHaveBeenCalled();
+    expect(fixture.windows.service.clearAll).toHaveBeenCalledOnce();
+    await fixture.runtime.dispose();
+  });
+
+  it('shares concurrent disposal and closes windows before their profile', async () => {
+    const fixture = runtimeFixture();
+    await fixture.runtime.controller.listGrants();
+    let finishWindows!: () => void;
+    fixture.windows.service.dispose = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishWindows = resolve;
+        }),
+    );
+
+    const first = fixture.runtime.dispose();
+    const second = fixture.runtime.dispose();
+    expect(second).toBe(first);
+    await vi.waitFor(() => expect(fixture.windows.service.dispose).toHaveBeenCalledOnce());
+    expect(fixture.profile.dispose).not.toHaveBeenCalled();
+
+    finishWindows();
+    await first;
+    expect(fixture.profile.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('settles approvals and completes disposal when queue publication fails during cancellation', async () => {
+    let rejectEmptySnapshot = false;
+    const fixture = runtimeFixture({
+      onApprovalsChanged: (requests) => {
+        if (rejectEmptySnapshot && requests.length === 0) {
+          throw new Error('approval renderer is unavailable');
+        }
+      },
+    });
+    await fixture.runtime.browser.createDriver('helper-buddy-1');
+    const pending = fixture.runtime.approvals.request(approval(), new AbortController().signal);
+    await vi.waitFor(() => expect(fixture.runtime.controller.listApprovals()).toHaveLength(1));
+    rejectEmptySnapshot = true;
+
+    await expect(fixture.runtime.dispose()).resolves.toBeUndefined();
+    await expect(pending).resolves.toMatchObject({ verdict: 'deny' });
+    expect(fixture.drivers[0]?.dispose).toHaveBeenCalled();
+    expect(fixture.windows.service.dispose).toHaveBeenCalledOnce();
+    expect(fixture.profile.dispose).toHaveBeenCalledOnce();
+    expect(fixture.errors).toEqual([
+      expect.objectContaining({ message: 'approval renderer is unavailable' }),
+    ]);
   });
 });

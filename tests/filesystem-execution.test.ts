@@ -228,6 +228,12 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
     await expect(service.attachHelperBuddy(first.taskId, ' ')).rejects.toThrow(
       'helper buddy id is invalid',
     );
+    await expect(service.attachHelperBuddy(second.taskId, 'x'.repeat(201))).rejects.toThrow(
+      'helper buddy id exceeds the size limit',
+    );
+    await expect(
+      service.attachHelperBuddy(first.taskId, '  helper-buddy-filesystem-owner  '),
+    ).rejects.toThrow('canonical');
     await service.attachHelperBuddy(first.taskId, 'helper-buddy-filesystem-owner');
     await expect(
       service.attachHelperBuddy(first.taskId, 'replacement-helper-buddy'),
@@ -237,6 +243,46 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
     ).rejects.toThrow('already attached to another filesystem task');
     expect(service.state(first.taskId)?.helperBuddyId).toBe('helper-buddy-filesystem-owner');
     expect(service.state(second.taskId)?.helperBuddyId).toBeUndefined();
+  });
+
+  it('rejects noncanonical or invalid helper-buddy ids from persisted task records', async () => {
+    const outer = await realpath(
+      await mkdtemp(join(homedir(), '.buddy-filesystem-persisted-identity-test-')),
+    );
+    cleanup.push(outer);
+    const root = join(outer, 'selected');
+    const privateData = join(outer, 'private');
+    await mkdir(root);
+    const service = new FilesystemTaskService({
+      basePath: privateData,
+      onState: () => {},
+      onSelection: () => {},
+    });
+    await service.initialize();
+    const grant = await service.grant(root);
+    const invalidIds = [' ', ' padded-helper-buddy ', 'x'.repeat(201)];
+    const taskIds: string[] = [];
+
+    for (const [index, invalidId] of invalidIds.entries()) {
+      const task = await service.prepare(grant.id, `persisted identity ${index}`);
+      await service.attachHelperBuddy(task.taskId, `valid-helper-buddy-${index}`);
+      const recordPath = join(privateData, 'tasks', task.taskId, 'task.json');
+      const record = JSON.parse(await readFile(recordPath, 'utf8')) as {
+        view: { helperBuddyId?: string };
+      };
+      record.view.helperBuddyId = invalidId;
+      await writeFile(recordPath, JSON.stringify(record));
+      taskIds.push(task.taskId);
+    }
+
+    const restarted = new FilesystemTaskService({
+      basePath: privateData,
+      onState: () => {},
+      onSelection: () => {},
+    });
+    await restarted.initialize();
+
+    for (const taskId of taskIds) expect(restarted.state(taskId)).toBeNull();
   });
 
   it('fails closed and retains the safe copy when a persisted task root becomes unsafe', async () => {

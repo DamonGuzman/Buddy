@@ -5,7 +5,7 @@ import type {
 } from '../../src/main/agents/types';
 
 /** Lightweight isolated-test implementation; persistence is covered by HelperBuddyMemoryStore tests. */
-export function createTestAgentMemory(): HelperBuddyMemoryToolPort {
+export function createTestHelperBuddyMemory(): HelperBuddyMemoryToolPort {
   const values = new Map<
     string,
     { input: HelperBuddyMemorySaveInput; metadata: HelperBuddyMemoryMetadata }

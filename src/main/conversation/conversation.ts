@@ -13,7 +13,7 @@
  *   (timings/playback stats), TurnGuard (turn tokens + playback epochs),
  *   ErrorSurfacer (M11 catalog surfacing), PointerPipeline (M9/M10 layered
  *   grounding), CodexTextTurnRunner (M18 text path), HelperBuddyContinuations
- *   (background-agent handoff), and the AudioTransport seam (panel vs the
+ *   (background helper-buddy handoff), and the AudioTransport seam (panel vs the
  *   QA phone bridge).
  *
  * F1 fixes (review findings) concentrated here:
@@ -991,7 +991,7 @@ export class Conversation {
   /** HelperBuddyManager completion hook: enqueue a normal automated foreground turn. */
   deliverHelperBuddyResult(summary: HelperBuddySummary): void {
     if (summary.status === 'done') {
-      this.errors.noteAgentSucceeded();
+      this.errors.noteHelperBuddySucceeded();
     } else if (summary.status === 'failed') {
       for (const kind of ['helper_buddy_not_signed_in', 'helper_buddy_quota'] as const) {
         if (summary.error === describeKind(kind).message) {

@@ -52,7 +52,7 @@ interface HeaderProps {
 }
 
 /** M21: settings-window header — title, live status, session dot. The old
- *  panel's view switcher and agents button retired with the panel. */
+ *  panel's view switcher and helper-buddies button retired with the panel. */
 export function Header(props: HeaderProps): React.JSX.Element {
   const { assistantState, session, devFlags = [] } = props;
   const sessionState = session?.state ?? 'disconnected';

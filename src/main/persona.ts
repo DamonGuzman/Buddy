@@ -57,11 +57,12 @@ helper buddy mode:
 - delegate almost every substantive task to a helper buddy by calling spawn_helper_buddy as soon as you understand the work. this includes research, comparisons, analysis, planning, investigation, and other multi-step work — do not try to complete that work yourself first.
 - handle only lightweight conversation, immediate observations from the current screen, genuinely necessary clarification, and the communication or synthesis of helper buddy work yourself.
 - give each helper buddy a clear self-contained task plus the relevant screen and conversation context it needs. do not make the person repeat context you already have.
-- if the person explicitly says helper, helper buddy, delegate, background, or asks to create, edit, inspect, or organize files, you MUST call spawn_helper_buddy. background helpers run independently of whatever app or disabled control is visible on screen; never treat visible foreground ui state as a reason not to delegate.
+- if the person explicitly says helper, helper buddy, delegate, background, or asks to create, edit, inspect, or organize files, you MUST call spawn_helper_buddy. helper buddies run independently of whatever app or disabled control is visible on screen; never treat visible foreground ui state as a reason not to delegate.
 - every helper buddy gets both immediate shell access to the person's picker-authorized folder and Buddy's persistent browser. filesystem edits use lazy path staging and verified automatic publication with Undo; browser actions stay behind Buddy's ActionGate and human approval policy.
 - use spawn_helper_buddy for substantive background browser, filesystem, research, or mixed work. use use_computer only for an immediate foreground software action that Buddy should finish before replying.
 - after spawn_helper_buddy succeeds, briefly tell the person what you delegated and that you'll ping them when it finishes. do not duplicate the work or wait for it; stay available to the person.
 - when they ask how background work is going, call check_helper_buddies and answer from its current status instead of guessing.
+- if check_helper_buddies reports waiting_approval, explain that the helper buddy is paused for their choice and ask them to click its raised-hand sprite to review the action. do not describe it as still working.
 - when a helper buddy finishes, evaluate and synthesize its result into a usable business deliverable or decision. be the accountable interface, not a raw output relay.`;
 
 const HELPER_BUDDY_UNAVAILABLE_PROMPT = `
@@ -161,7 +162,8 @@ export const CHECK_HELPER_BUDDIES_TOOL: RealtimeFunctionTool = {
   name: 'check_helper_buddies',
   description:
     'Check the current status of helper buddies you started. Omit helper_buddy_id to see all active ' +
-    'helper buddies plus a few recent finished runs. This is read-only.',
+    'helper buddies plus a few recent finished runs. A waiting_approval status means that helper buddy ' +
+    'is paused until the person reviews its raised-hand sprite. This is read-only.',
   parameters: {
     type: 'object',
     properties: {

@@ -1,6 +1,6 @@
 /**
- * M19 helper buddies: presentational components for the overlay's background
- * helpers. Each running helper buddy is a tiny pastel triangle
+ * M19 helper buddies: presentational components for the overlay. Each running
+ * helper buddy is a tiny pastel triangle
  * that pops out of the mascot into a small arc beside it; hovering one shows
  * a warm, plain-language card, and clicking it (M22) expands the card
  * into the helper's full status — activity log, findings, places checked.
@@ -19,6 +19,7 @@ import {
   HELPER_BUDDY_CARD_GAP,
   HELPER_BUDDY_CARD_W,
   OVERFLOW_KEY,
+  canCancelHelperBuddy,
   elapsedPhrase,
   expandedFindings,
   helperPhase,
@@ -34,7 +35,7 @@ import {
 import type { HelperView } from './helper-buddies-ui';
 import type { Vec } from './hover';
 import { TriangleSvg } from './TriangleSvg';
-import type { HelperBuddySummary } from '../../shared/types';
+import type { HelperBuddyBrowserPreview, HelperBuddySummary } from '../../shared/types';
 
 export interface HelperBuddyClusterProps {
   view: HelperView;
@@ -54,6 +55,8 @@ export interface HelperBuddyClusterProps {
   expandedKey: string | null;
   /** Clock for elapsed phrases (ticked by main.tsx while a card is open). */
   now: number;
+  /** Latest ephemeral frame for each helper with an active browser surface. */
+  browserPreviews: readonly HelperBuddyBrowserPreview[];
   /** Measured by main.tsx to grow the interactive hover region. */
   cardRef: React.RefObject<HTMLDivElement | null>;
   onHelperBuddyClick: (id: string) => void;
@@ -70,6 +73,7 @@ export function HelperBuddyCluster({
   hoveredKey,
   expandedKey,
   now,
+  browserPreviews,
   cardRef,
   onHelperBuddyClick,
   onHelperBuddyCancel,
@@ -86,6 +90,10 @@ export function HelperBuddyCluster({
       ? (all.find((a) => a.id === hoveredKey) ?? null)
       : null;
   const cardHelperBuddy = expandedHelperBuddy ?? hoveredHelperBuddy;
+  const browserPreview =
+    cardHelperBuddy === null
+      ? null
+      : (browserPreviews.find((preview) => preview.helperBuddyId === cardHelperBuddy.id) ?? null);
   const keepKey = expandedKey ?? hoveredKey ?? undefined;
 
   return (
@@ -120,6 +128,7 @@ export function HelperBuddyCluster({
           dir={dir}
           vdir={vdir}
           now={now}
+          browserPreview={browserPreview}
           interactive={interactive}
           cardRef={cardRef}
           onClick={onHelperBuddyClick}
@@ -264,6 +273,7 @@ function HelperBuddyCard({
   dir,
   vdir,
   now,
+  browserPreview,
   interactive,
   cardRef,
   onClick,
@@ -275,6 +285,7 @@ function HelperBuddyCard({
   dir: 1 | -1;
   vdir: 1 | -1;
   now: number;
+  browserPreview: HelperBuddyBrowserPreview | null;
   interactive: boolean;
   cardRef: React.RefObject<HTMLDivElement | null>;
   onClick: (id: string) => void;
@@ -305,6 +316,7 @@ function HelperBuddyCard({
       <div className="helper-buddy-card-task">
         “{truncate(helperBuddy.task, expanded ? 200 : 110)}”
       </div>
+      {browserPreview !== null && <BrowserPreview preview={browserPreview} />}
       {showLine && (
         <div className="helper-buddy-card-line">
           {status.kind === 'working' && (
@@ -322,10 +334,10 @@ function HelperBuddyCard({
         {elapsedPhrase(helperBuddy, now)}
         {!expanded && sources !== null && ` · ${sources}`}
       </div>
-      {(cta !== null || helperBuddy.status === 'running') && (
+      {(cta !== null || canCancelHelperBuddy(helperBuddy)) && (
         <div className="helper-buddy-card-actions">
           {cta !== null && <span className="helper-buddy-card-cta">{cta}</span>}
-          {helperBuddy.status === 'running' && interactive && (
+          {canCancelHelperBuddy(helperBuddy) && interactive && (
             <span
               className="helper-buddy-card-stop"
               onClick={(e) => {
@@ -338,6 +350,25 @@ function HelperBuddyCard({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** The latest exact observation from this helper's still-active hidden browser. */
+function BrowserPreview({ preview }: { preview: HelperBuddyBrowserPreview }): React.JSX.Element {
+  return (
+    <div className="helper-buddy-browser-preview" aria-label="live browser preview">
+      <div className="helper-buddy-browser-preview-head">
+        <span className="helper-buddy-browser-preview-live" />
+        <span>browser</span>
+        <span className="helper-buddy-browser-preview-state">live</span>
+      </div>
+      <div
+        className="helper-buddy-browser-preview-frame"
+        style={{ aspectRatio: `${preview.width} / ${preview.height}` }}
+      >
+        <img src={preview.imageDataUrl} alt="" draggable={false} />
+      </div>
     </div>
   );
 }

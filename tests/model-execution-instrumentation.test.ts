@@ -77,7 +77,7 @@ describe('model transport instrumentation', () => {
           planType: 'pro',
           expiresAt: Date.now() + 60_000,
         }),
-        getBearer: async () => 'agent-secret-bearer',
+        getBearer: async () => 'helper-buddy-secret-bearer',
       },
       (async () =>
         new Response(
@@ -105,16 +105,16 @@ describe('model transport instrumentation', () => {
           { status: 200 },
         )) as typeof fetch,
     );
-    const agentRequest: HelperBuddyBackendRequest = {
+    const helperBuddyRequest: HelperBuddyBackendRequest = {
       model: 'gpt-5.6-sol',
       instructions: 'helper buddy instructions',
       input: [],
       tools: [],
       effort: 'medium',
       signal: new AbortController().signal,
-      runContext: { helperBuddyId: 'agent-observability-test', requestAttempt: 1 },
+      runContext: { helperBuddyId: 'helper-buddy-observability-test', requestAttempt: 1 },
     };
-    await helperBuddyBackend.request(agentRequest);
+    await helperBuddyBackend.request(helperBuddyRequest);
 
     const apiPayload = {
       id: 'resp_ground',
@@ -202,13 +202,13 @@ describe('model transport instrumentation', () => {
     }
     expect(journal).toContain('codex user prompt');
     expect(journal).toContain('python build_real_charts.py');
-    expect(journal).toContain('agent-observability-test');
+    expect(journal).toContain('helper-buddy-observability-test');
     expect(journal).toContain('requestAttempt');
     expect(journal).toContain('realtime user prompt');
     expect(journal).toContain('response.completed');
     expect(journal).toContain('response.done');
     expect(journal).not.toContain('codex-secret-bearer');
-    expect(journal).not.toContain('agent-secret-bearer');
+    expect(journal).not.toContain('helper-buddy-secret-bearer');
     expect(journal).not.toContain('sk-api-secret');
   });
 });

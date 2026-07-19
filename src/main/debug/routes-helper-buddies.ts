@@ -4,6 +4,7 @@
  */
 
 import { asRecord, isNonBlankString, readJsonBody, sendJson } from './debug-http';
+import { requireCanonicalHelperBuddyId } from '../helper-buddy-id';
 import type { RouteTable } from './deps';
 
 export const HELPER_BUDDY_ROUTES: RouteTable = {
@@ -22,8 +23,12 @@ export const HELPER_BUDDY_ROUTES: RouteTable = {
   'POST /helper-buddies/cancel': async (deps, req, res) => {
     if (!deps.helperBuddies) return sendJson(res, 503, { error: 'helper buddy runtime not wired' });
     const body = asRecord(await readJsonBody(req));
-    const id = body?.['id'];
-    if (typeof id !== 'string') return sendJson(res, 400, { error: 'expected {id: string}' });
+    let id: string;
+    try {
+      id = requireCanonicalHelperBuddyId(body?.['id']);
+    } catch {
+      return sendJson(res, 400, { error: 'expected {id: valid helper buddy id}' });
+    }
     deps.helperBuddies.cancel(id);
     sendJson(res, 200, { ok: true });
   },

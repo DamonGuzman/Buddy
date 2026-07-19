@@ -21,6 +21,20 @@ function request(patch: Partial<ApprovalRequest> = {}): ApprovalRequest {
 }
 
 describe('HelperBuddyApprovalCoordinator transactions', () => {
+  it('rejects noncanonical helper buddy ids before publishing an approval', () => {
+    const onChanged = vi.fn();
+    const coordinator = new HelperBuddyApprovalCoordinator({ onChanged });
+
+    expect(() =>
+      coordinator.request(
+        request({ helperBuddyId: ' helper-buddy-1' }),
+        new AbortController().signal,
+      ),
+    ).toThrow('canonical');
+    expect(onChanged).not.toHaveBeenCalled();
+    expect(coordinator.list()).toEqual([]);
+  });
+
   it('rejects an untrusted runtime verdict outside the exact closed set', async () => {
     const coordinator = new HelperBuddyApprovalCoordinator({ onChanged: vi.fn() });
     void coordinator.request(request(), new AbortController().signal);
@@ -114,5 +128,47 @@ describe('HelperBuddyApprovalCoordinator transactions', () => {
     const second = await secondDelivery;
     second.acknowledge();
     await expect(secondUi).resolves.toBeUndefined();
+  });
+
+  it('cancels every transaction even when cancellation snapshots fail to publish', async () => {
+    let rejectSnapshots = false;
+    const coordinator = new HelperBuddyApprovalCoordinator({
+      onChanged: () => {
+        if (rejectSnapshots) throw new Error('renderer disconnected');
+      },
+    });
+    const first = coordinator.request(request(), new AbortController().signal);
+    const second = coordinator.request(
+      request({ helperBuddyId: 'helper-buddy-2', approvalId: 'approval-2' }),
+      new AbortController().signal,
+    );
+    rejectSnapshots = true;
+
+    expect(() => coordinator.cancelAll()).toThrow(AggregateError);
+    await expect(first).resolves.toMatchObject({ verdict: 'deny' });
+    await expect(second).resolves.toMatchObject({ verdict: 'deny' });
+    expect(coordinator.list()).toEqual([]);
+  });
+
+  it('reports signal-cancellation publication failures after settling the transaction', async () => {
+    const cancellationErrors: Error[] = [];
+    let rejectSnapshots = false;
+    const coordinator = new HelperBuddyApprovalCoordinator({
+      onChanged: () => {
+        if (rejectSnapshots) throw new Error('renderer disconnected');
+      },
+      onCancellationError: (error) => cancellationErrors.push(error),
+    });
+    const controller = new AbortController();
+    const pending = coordinator.request(request(), controller.signal);
+    rejectSnapshots = true;
+
+    controller.abort();
+
+    await expect(pending).resolves.toMatchObject({ verdict: 'deny' });
+    expect(coordinator.list()).toEqual([]);
+    expect(cancellationErrors).toEqual([
+      expect.objectContaining({ message: 'renderer disconnected' }),
+    ]);
   });
 });

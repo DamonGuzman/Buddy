@@ -1,6 +1,6 @@
 /**
- * M19 helper buddies: PURE view-model logic for representing background helpers
- * on the overlay as tiny "helper buddy" sprites beside the mascot, with a
+ * M19 helper buddies: PURE view-model logic for representing helper buddies on
+ * the overlay as tiny sprites beside the mascot, with a
  * friendly hover card. No DOM, no Electron — unit-tested as plain functions
  * (tests/helper-buddies-ui.test.ts). The DOM/IPC wiring lives in main.tsx and the
  * components in HelperBuddies.tsx.
@@ -9,7 +9,13 @@
  * "sources" or status codes. Lowercase, warm, matches the persona.
  */
 
-import type { HelperBuddyStep, HelperBuddySummary, Rect } from '../../shared/types';
+import type {
+  HelperBuddyBrowserPreview,
+  HelperBuddyBrowserPreviewUpdate,
+  HelperBuddyStep,
+  HelperBuddySummary,
+  Rect,
+} from '../../shared/types';
 import { AUX_PAD, dist, insideRect, padRect } from './hover';
 import type { Vec } from './hover';
 
@@ -28,7 +34,7 @@ export const MAX_HELPER_SPRITES = 3;
 /**
  * Finished helpers celebrate, then leave on their own — total time on screen
  * after finishing. They exist to help the buddy, not to be managed by the
- * user; the panel stays the permanent record.
+ * user; the manager retains the bounded terminal record for status checks.
  */
 export const FINISHED_LINGER_MS = 10_000;
 /** Tail of the linger window spent shrinking back into the buddy. */
@@ -54,6 +60,15 @@ export const CARD_SHOW_DELAY_MS = 140;
 /** Grace period to travel from a sprite into the card before it hides. */
 export const CARD_HIDE_DELAY_MS = 280;
 
+/** Apply one ordered main-process frame/tombstone to the renderer's tiny cache. */
+export function applyBrowserPreviewUpdate(
+  current: readonly HelperBuddyBrowserPreview[],
+  update: HelperBuddyBrowserPreviewUpdate,
+): HelperBuddyBrowserPreview[] {
+  const remaining = current.filter((preview) => preview.helperBuddyId !== update.helperBuddyId);
+  return update.preview === null ? remaining : [...remaining, update.preview];
+}
+
 // ---------------------------------------------------------------------------
 // Which helper buddies are visible, and where
 // ---------------------------------------------------------------------------
@@ -73,12 +88,17 @@ function isActive(helperBuddy: HelperBuddySummary): boolean {
   );
 }
 
+/** Every non-terminal helper buddy can be stopped from its overlay card. */
+export function canCancelHelperBuddy(helperBuddy: HelperBuddySummary): boolean {
+  return isActive(helperBuddy);
+}
+
 /**
  * Where a helper is in its on-screen life:
  * - 'active'    queued/running/waiting approval — stays until the runtime advances it
  * - 'settled'   finished — celebrating / available to hover
  * - 'departing' last HELPER_DEPART_MS of the linger — shrinking back home
- * - 'gone'      not shown (expired, viewed in the panel, or cancelled)
+ * - 'gone'      not shown (expired, viewed in the expanded card, or cancelled)
  *
  * `keepId` freezes that helper at 'settled' — the one being hovered must
  * never vanish under the cursor.
@@ -92,8 +112,10 @@ export function helperPhase(
 ): HelperPhase {
   if (isActive(helperBuddy)) return 'active';
   if (helperBuddy.status === 'cancelled') return 'gone';
-  if (!helperBuddy.unseen) return 'gone';
+  // Expansion marks a terminal result seen in main. Keep the pinned card
+  // mounted until the person closes it, then remove the now-seen sprite.
   if (helperBuddy.id === keepId) return 'settled';
+  if (!helperBuddy.unseen) return 'gone';
   const t = now - (helperBuddy.finishedAt ?? helperBuddy.createdAt);
   if (t >= FINISHED_LINGER_MS) return 'gone';
   if (t >= FINISHED_LINGER_MS - HELPER_DEPART_MS) return 'departing';

@@ -66,7 +66,7 @@ function setBuddyWindowsContentProtection(enabled: boolean, logger: CaptureLogge
   for (const win of BrowserWindow.getAllWindows()) {
     // Hidden offscreen browser surfaces cannot appear in a desktop grab. Do
     // not mutate their compositor/content-protection state: a concurrent
-    // webContents.capturePage() must keep producing the agent's page rather
+    // webContents.capturePage() must keep producing the helper buddy's page rather
     // than a protected blank frame.
     if (win.isDestroyed() || !win.isVisible() || captureVisibleWindows.has(win)) continue;
     try {

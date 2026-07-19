@@ -126,6 +126,27 @@ function operatorSafety(
 }
 
 describe('ComputerUseOperator', () => {
+  it.each([
+    [' live-run-1', 'canonical'],
+    ['live-run-1 ', 'canonical'],
+    ['x'.repeat(201), 'size limit'],
+  ])('rejects a noncanonical helper-buddy identity before constructing a session', (id, error) => {
+    const buildSession = vi.fn();
+
+    expect(
+      () =>
+        new ComputerUseOperator({
+          auth: AUTH,
+          driver: {} as ComputerDriver,
+          ...operatorSafety(),
+          helperBuddyId: id,
+          isAllowed: () => true,
+          buildSession,
+        }),
+    ).toThrow(error);
+    expect(buildSession).not.toHaveBeenCalled();
+  });
+
   it('lets Sol choose one click, captures again, and continues in priority fast mode', async () => {
     const bodies: Array<Record<string, unknown>> = [];
     const clicks: unknown[][] = [];

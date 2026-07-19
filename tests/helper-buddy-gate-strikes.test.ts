@@ -58,7 +58,17 @@ describe('DenialStrikeCounter', () => {
   it('fails fast on invalid thresholds and empty identifiers', () => {
     expect(() => new DenialStrikeCounter({ totalHalt: 0 })).toThrow('positive integer');
     const counter = new DenialStrikeCounter();
-    expect(() => counter.recordDenial('', 'x')).toThrow('helper buddy id is required');
+    expect(() => counter.recordDenial('', 'x')).toThrow('helper buddy id is invalid');
     expect(() => counter.recordDenial('a', '')).toThrow('signature is required');
+  });
+
+  it('rejects noncanonical identities before reading or mutating strike state', () => {
+    const counter = new DenialStrikeCounter();
+    counter.recordDenial('helper-buddy-a', 'target-a');
+
+    expect(() => counter.recordDenial(' helper-buddy-a', 'target-a')).toThrow('canonical');
+    expect(() => counter.snapshot('helper-buddy-a\0')).toThrow('invalid');
+    expect(() => counter.resetHelperBuddy('helper-buddy-a ')).toThrow('canonical');
+    expect(counter.snapshot('helper-buddy-a')).toMatchObject({ totalCount: 1 });
   });
 });

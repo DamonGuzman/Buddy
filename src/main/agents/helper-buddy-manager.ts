@@ -9,10 +9,12 @@ import type {
   HelperBuddySpawnResult,
 } from './types';
 import {
+  HELPER_BUDDY_STEP_LOG_CAP,
   HELPER_BUDDY_MANAGER_DISPOSE_TIMEOUT_MS,
   PERSISTED_SUMMARY_CAP,
 } from './helper-buddy-config';
 import { cloneHelperBuddySummary } from './helper-buddy-summary-text';
+import { isCanonicalHelperBuddyId, requireCanonicalHelperBuddyId } from '../helper-buddy-id';
 import { errorMessage } from '../util/guards';
 
 /**
@@ -65,8 +67,9 @@ export class HelperBuddyManager {
 
   spawn(brief: HelperBuddyBrief): HelperBuddySpawnResult {
     if (this.disposed) throw new Error('helper buddy manager is disposed');
-    if (this.records.has(brief.id) || this.runners.has(brief.id) || this.runPromises.has(brief.id))
-      throw new Error(`helper buddy id is already registered: ${brief.id}`);
+    const id = requireCanonicalHelperBuddyId(brief.id);
+    if (this.records.has(id) || this.runners.has(id) || this.runPromises.has(id))
+      throw new Error(`helper buddy id is already registered: ${id}`);
     if (!this.deps.isReady()) return { ok: false, reason: 'not_signed_in' };
     if (this.browserAdmissionBlocked || !this.deps.browser)
       return { ok: false, reason: 'browser_unavailable' };
@@ -84,7 +87,7 @@ export class HelperBuddyManager {
         this.push();
       },
     });
-    this.runners.set(brief.id, runner);
+    this.runners.set(id, runner);
     const completion = runner
       .run()
       .then((summary) => {
@@ -94,29 +97,34 @@ export class HelperBuddyManager {
         this.push();
         if (!this.disposed) {
           this.deps.onFinished(cloneHelperBuddySummary(summary));
-          this.deps.notify?.('buddy finished', summary.task);
+          if (summary.status === 'done') {
+            this.deps.notify?.('helper buddy finished', summary.task);
+          } else if (summary.status === 'failed') {
+            this.deps.notify?.('helper buddy stopped', summary.error ?? summary.task);
+          }
         }
       })
       .catch((error) => {
         const summary = runner.finishUnexpected(error);
-        this.runners.delete(brief.id);
+        this.runners.delete(id);
         this.records.set(summary.id, cloneHelperBuddySummary(summary));
         this.persist();
         this.push();
         if (!this.disposed) {
           this.deps.onFinished(cloneHelperBuddySummary(summary));
-          this.deps.notify?.('buddy stopped', errorMessage(error));
+          this.deps.notify?.('helper buddy stopped', errorMessage(error));
         }
       })
       .finally(() => {
-        this.runPromises.delete(brief.id);
+        this.runPromises.delete(id);
       });
-    this.runPromises.set(brief.id, completion);
-    return { ok: true, helperBuddyId: brief.id };
+    this.runPromises.set(id, completion);
+    return { ok: true, helperBuddyId: id };
   }
 
   cancel(id: string): void {
-    this.runners.get(id)?.cancel();
+    const helperBuddyId = requireCanonicalHelperBuddyId(id);
+    this.runners.get(helperBuddyId)?.cancel();
   }
   async resolveApproval(approvalId: string, verdict: 'once' | 'always' | 'deny'): Promise<void> {
     const approvals = this.deps.browser?.approvals;
@@ -185,14 +193,14 @@ export class HelperBuddyManager {
     }
   }
   markSeen(id: string): void {
-    const record = this.records.get(id);
+    const record = this.records.get(requireCanonicalHelperBuddyId(id));
     if (!record || !record.unseen) return;
     record.unseen = false;
     this.persist();
     this.push();
   }
   markSpoken(id: string): void {
-    const record = this.records.get(id);
+    const record = this.records.get(requireCanonicalHelperBuddyId(id));
     if (!record || record.spoken) return;
     record.spoken = true;
     this.persist();
@@ -235,8 +243,13 @@ export class HelperBuddyManager {
     try {
       const parsed = this.persistence.load();
       if (!Array.isArray(parsed)) return;
-      for (const value of parsed.slice(0, PERSISTED_SUMMARY_CAP)) {
-        if (isSummary(value)) this.records.set(value.id, { ...value, steps: [...value.steps] });
+      let accepted = 0;
+      for (const value of parsed) {
+        if (accepted >= PERSISTED_SUMMARY_CAP) break;
+        if (isPersistedSummary(value)) {
+          this.records.set(value.id, cloneHelperBuddySummary(value));
+          accepted += 1;
+        }
       }
     } catch {
       /* corrupt history is non-fatal */
@@ -298,22 +311,52 @@ function isStep(value: unknown): value is HelperBuddyStep {
     typeof step.kind === 'string' &&
     KNOWN_STEP_KINDS.includes(step.kind) &&
     typeof step.label === 'string' &&
-    typeof step.at === 'number'
+    typeof step.at === 'number' &&
+    Number.isFinite(step.at)
   );
 }
 
-function isSummary(value: unknown): value is HelperBuddySummary {
+function isPersistedSummary(value: unknown): value is HelperBuddySummary {
   if (value === null || typeof value !== 'object') return false;
   const item = value as Partial<HelperBuddySummary>;
   return (
-    typeof item.id === 'string' &&
+    isCanonicalHelperBuddyId(item.id) &&
     typeof item.task === 'string' &&
     typeof item.status === 'string' &&
     KNOWN_STATUSES.includes(item.status) &&
+    isTerminalStatus(item.status) &&
     typeof item.createdAt === 'number' &&
+    Number.isFinite(item.createdAt) &&
+    typeof item.finishedAt === 'number' &&
+    Number.isFinite(item.finishedAt) &&
+    item.finishedAt >= item.createdAt &&
     typeof item.spoken === 'boolean' &&
     typeof item.unseen === 'boolean' &&
+    (item.status !== 'cancelled' || item.unseen === false) &&
     Array.isArray(item.steps) &&
-    item.steps.every(isStep)
+    item.steps.length <= HELPER_BUDDY_STEP_LOG_CAP &&
+    item.steps.every(isStep) &&
+    optionalStep(item.step) &&
+    optionalString(item.summary) &&
+    optionalString(item.output) &&
+    optionalString(item.error) &&
+    (item.sources === undefined ||
+      (Array.isArray(item.sources) && item.sources.every((source) => typeof source === 'string')))
   );
+}
+
+function optionalString(value: unknown): boolean {
+  return value === undefined || typeof value === 'string';
+}
+
+function optionalStep(value: unknown): boolean {
+  return (
+    value === undefined || (typeof value === 'number' && Number.isInteger(value) && value >= 1)
+  );
+}
+
+function isTerminalStatus(
+  status: string,
+): status is Extract<HelperBuddyStatus, 'done' | 'failed' | 'cancelled'> {
+  return status === 'done' || status === 'failed' || status === 'cancelled';
 }

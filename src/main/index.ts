@@ -25,12 +25,15 @@ import { CodexHelperBuddyBackend } from './agents/helper-buddy-backend';
 import { ComputerUseRuntime } from './agents/computer-use-runtime';
 import { HelperBuddyManager } from './agents/helper-buddy-manager';
 import { HelperBuddyMemoryStore } from './agents/helper-buddy-memory-store';
+import { HelperBuddyBrowserPreviewStore } from './agents/helper-buddy-browser-previews';
 import { MockActionReviewer, MockHelperBuddyBackend } from './agents/mock-helper-buddy-backend';
 import type { HelperBuddyBackend, HelperBuddyBrief } from './agents/types';
 import { assertPublicBrowserDestination, BuddyBrowserProfile } from './computer/browser-profile';
 import { runCaptureSelfTest } from './capture-self-test';
 import { Conversation } from './conversation';
 import { startDebugServer } from './debug-server';
+import { requireCanonicalHelperBuddyId } from './helper-buddy-id';
+import { BrowserPowerLifecycle } from './computer/browser-power-lifecycle';
 import {
   devChipFlags,
   fakeMicWavPath,
@@ -136,6 +139,7 @@ interface Services {
   filesystem: FilesystemTaskService;
   markdown: MarkdownWindowManager;
   memories: HelperBuddyMemoryStore;
+  browserPreviews: HelperBuddyBrowserPreviewStore;
   helperBuddies: HelperBuddyManager;
   conversation: Conversation;
   phoneAudio: PhoneAudioBridgeClient | null;
@@ -300,6 +304,7 @@ function createServices(tray: TrayRef): Services {
   const helperBuddyBackend: HelperBuddyBackend = helperBuddyMock
     ? new MockHelperBuddyBackend()
     : codexHelperBuddyBackend;
+  const browserPreviews = new HelperBuddyBrowserPreviewStore();
   let visibleApprovalIds = new Set<string>();
   const computerUseRuntime = new ComputerUseRuntime({
     whenAppReady: () => app.whenReady(),
@@ -320,12 +325,16 @@ function createServices(tray: TrayRef): Services {
         try {
           tray.current?.displayBalloon({
             title: 'Buddy needs your approval',
-            content: added[0]?.actionText ?? 'A helper is waiting for your decision.',
+            content: added[0]?.actionText ?? 'A helper buddy is waiting for your decision.',
           });
         } catch {
           /* the persistent raised-hand helper remains the fallback surface */
         }
       }
+    },
+    onBrowserPreviewChanged: ({ helperBuddyId, capture }) => {
+      const update = browserPreviews.update(helperBuddyId, capture);
+      overlays.broadcast('overlay:helper-buddy-browser-preview', update);
     },
     journal: {
       recordActionGateAssessment: (entry) =>
@@ -405,7 +414,7 @@ function createServices(tray: TrayRef): Services {
     firecrawl,
     browser: computerUseRuntime.browser,
     filesystem,
-    // M19: the overlays mirror the same renderer-safe list (helper sprites).
+    // M19: overlays receive renderer-safe helper-buddy snapshots for sprites.
     // M21: the panel's helper-buddies view is gone — the overlay sprites are
     // the helper-buddy surface now.
     onHelperBuddiesChanged: (list) => {
@@ -416,6 +425,11 @@ function createServices(tray: TrayRef): Services {
       void filesystem
         .completeHelperBuddy(summary)
         .then(async (completion) => {
+          // Cancellation still comes through this hook so the filesystem
+          // service can discard its private staging task. Once that cleanup
+          // succeeds, the person's stop action is complete and must not be
+          // replayed as an automated foreground result.
+          if (summary.status === 'cancelled') return;
           if (!completion.handled) {
             conversationRef.current?.deliverHelperBuddyResult(summary);
             return;
@@ -504,10 +518,10 @@ function createServices(tray: TrayRef): Services {
       if (!selection) {
         const result = await dialog.showOpenDialog({
           title: 'Choose a folder for helper buddies',
-          buttonLabel: 'Give helpers this folder',
+          buttonLabel: 'Give helper buddies this folder',
           properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'],
           message:
-            'Helpers read this folder directly. Verified edits are applied automatically with Undo.',
+            'Helper buddies read this folder directly. Verified edits are applied automatically with Undo.',
         });
         if (result.canceled || !result.filePaths[0]) {
           throw new Error('choose a folder before starting a helper buddy');
@@ -602,6 +616,7 @@ function createServices(tray: TrayRef): Services {
     filesystem,
     markdown,
     memories,
+    browserPreviews,
     helperBuddies,
     conversation,
     phoneAudio,
@@ -739,6 +754,7 @@ function registerInvokeHandlers(
     settings,
     conversation,
     helperBuddies,
+    browserPreviews,
     permissions,
     panel,
     whisper,
@@ -757,7 +773,7 @@ function registerInvokeHandlers(
       buttonLabel: 'Work in this folder',
       properties: ['openDirectory', 'createDirectory', 'dontAddToRecent'],
       message:
-        'Helpers can read this folder immediately. Verified edits are applied automatically with Undo.',
+        'Helper buddies can read this folder immediately. Verified edits are applied automatically with Undo.',
     });
     if (result.canceled || !result.filePaths[0]) return null;
     const selection = await filesystem.grant(result.filePaths[0]);
@@ -825,23 +841,37 @@ function registerInvokeHandlers(
   handle('codex:signin-state', () => getCodexAuthProvider().codexSignInState());
   handle('codex:sign-in', () => codexOAuth.start());
   handle('helper-buddies:list', () => helperBuddies.list());
+  handle('helper-buddies:list-browser-previews', () => browserPreviews.snapshot());
   handle('helper-buddies:cancel', async (id) => {
-    helperBuddies.cancel(id);
-    await computerUseRuntime.cancelHelperBuddy(id);
+    const helperBuddyId = requireCanonicalHelperBuddyId(id);
+    helperBuddies.cancel(helperBuddyId);
+    await computerUseRuntime.cancelHelperBuddy(helperBuddyId);
   });
   handle('helper-buddies:cancel-all', async () => {
     helperBuddies.cancelAll();
     await computerUseRuntime.cancelAll();
   });
-  handle('helper-buddies:mark-seen', (id) => helperBuddies.markSeen(id));
+  handle('helper-buddies:mark-seen', (id) =>
+    helperBuddies.markSeen(requireCanonicalHelperBuddyId(id)),
+  );
   handle('approval:resolve', (helperBuddyId, approvalId, verdict) =>
-    computerUseRuntime.controller.resolveApproval(helperBuddyId, approvalId, verdict),
+    computerUseRuntime.controller.resolveApproval(
+      requireCanonicalHelperBuddyId(helperBuddyId),
+      approvalId,
+      verdict,
+    ),
   );
   handle('approval:show-window', (helperBuddyId, approvalId) =>
-    computerUseRuntime.controller.showApprovalWindow(helperBuddyId, approvalId),
+    computerUseRuntime.controller.showApprovalWindow(
+      requireCanonicalHelperBuddyId(helperBuddyId),
+      approvalId,
+    ),
   );
   handle('approval:hide-window', (helperBuddyId, approvalId) =>
-    computerUseRuntime.controller.hideApprovalWindow(helperBuddyId, approvalId),
+    computerUseRuntime.controller.hideApprovalWindow(
+      requireCanonicalHelperBuddyId(helperBuddyId),
+      approvalId,
+    ),
   );
   handle('approvals:list', () => computerUseRuntime.controller.listApprovals());
   handle('grants:list', () => computerUseRuntime.controller.listGrants());
@@ -876,7 +906,11 @@ function validAudioDeviceError(payload: AudioDeviceError): AudioDeviceError | nu
 
 /** IPC payloads are untrusted renderer input — validate before acting. */
 function validHelperBuddyId(payload: { id: string }): string | null {
-  return payload && typeof payload.id === 'string' ? payload.id : null;
+  try {
+    return requireCanonicalHelperBuddyId(payload?.id);
+  } catch {
+    return null;
+  }
 }
 
 function registerRendererEvents({
@@ -885,7 +919,6 @@ function registerRendererEvents({
   helperBuddies,
   panel,
   computerUseRuntime,
-  filesystem,
 }: Services): void {
   onRendererEvent('audio:chunk', (chunk) => {
     conversation.handleAudioChunk(chunk);
@@ -908,8 +941,9 @@ function registerRendererEvents({
     const id = validHelperBuddyId(payload);
     if (id === null) return;
     const helperBuddy = helperBuddies.list().find((item) => item.id === id);
-    if (filesystem.state()?.helperBuddyId === id) whisper.show();
-    else if (helperBuddy?.status === 'waiting_approval') panel.show();
+    // Normal helper-buddy cards expand entirely inside the overlay. Only a
+    // parked run emits this event, and only that state may reveal approvals.
+    if (helperBuddy?.status === 'waiting_approval') panel.show();
   });
   onRendererEvent('overlay:helper-buddy-cancel', (payload) => {
     const id = validHelperBuddyId(payload);
@@ -918,7 +952,7 @@ function registerRendererEvents({
       void computerUseRuntime
         .cancelHelperBuddy(id)
         .catch((error: unknown) =>
-          console.error('[computer-use] agent cancellation failed', error),
+          console.error('[computer-use] helper-buddy cancellation failed', error),
         );
     }
   });
@@ -1031,6 +1065,12 @@ function wirePowerMonitor({
   helperBuddies,
   computerUseRuntime,
 }: Services): void {
+  const browserPower = new BrowserPowerLifecycle({
+    cancelBrowserRuns: () => helperBuddies.cancelBrowserRuns(),
+    suspendBrowserRuntime: () => computerUseRuntime.suspend(),
+    resumeBrowserRuntime: () => computerUseRuntime.resume(),
+    onError: (label, error) => console.error(`[computer-use] ${label} transition failed`, error),
+  });
   // F1 fix (C1 + sleep/resume): the secure desktop (Ctrl+Alt+Del) and lock
   // screen swallow keyups — force-cancel any live hold and reset modifier
   // state so the mic can never stay hot on a locked machine. On resume, the
@@ -1039,24 +1079,18 @@ function wirePowerMonitor({
     sessionRecorder?.record('system_lock', null);
     hotkey.forceCancel();
     conversation.deactivateFullRealtime();
-    void helperBuddies
-      .cancelBrowserRuns()
-      .then(() => computerUseRuntime.suspend())
-      .catch((error: unknown) => console.error('[computer-use] lock shutdown failed', error));
+    browserPower.lock();
   });
   powerMonitor.on('suspend', () => {
     sessionRecorder?.record('system_suspend', null);
     sessionRecorder?.flush();
     hotkey.forceCancel();
     conversation.deactivateFullRealtime();
-    void helperBuddies
-      .cancelBrowserRuns()
-      .then(() => computerUseRuntime.suspend())
-      .catch((error: unknown) => console.error('[computer-use] suspend shutdown failed', error));
+    browserPower.suspend();
   });
   powerMonitor.on('resume', () => {
     sessionRecorder?.record('system_resume', null);
-    computerUseRuntime.resume();
+    browserPower.resume();
     conversation.onSystemResume();
     permissions.refresh();
   });
@@ -1131,7 +1165,7 @@ function buildDebugSurface({
     helperBuddies: {
       spawn: async (task) => {
         const selection = filesystem.activeSelection();
-        if (!selection) return { ok: false, reason: 'choose a helper folder first' };
+        if (!selection) return { ok: false, reason: 'choose a helper buddy folder first' };
         const id = `helper_buddy_debug_${Date.now()}`;
         const prepared = await filesystem.prepare(selection.id, task);
         await filesystem.attachHelperBuddy(prepared.taskId, id);

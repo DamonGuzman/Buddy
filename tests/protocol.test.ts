@@ -343,7 +343,12 @@ describe('persona tool definition', () => {
       );
       expect(instructions).toContain('delegate almost every substantive task');
       expect(instructions).toContain('do not try to complete that work yourself first');
+      expect(instructions).toContain('reports waiting_approval');
+      expect(instructions).toContain('click its raised-hand sprite');
       expect(instructions).toContain('evaluate and synthesize its result');
     }
+    const checkTool = getToolDefinitions(true).find((tool) => tool.name === 'check_helper_buddies');
+    expect(checkTool?.description).toContain('waiting_approval');
+    expect(checkTool?.description).toContain('paused');
   });
 });

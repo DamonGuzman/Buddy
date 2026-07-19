@@ -172,6 +172,16 @@ describe('ApprovalFollowThroughTracker', () => {
   it('fails fast on invalid configuration and identifiers', () => {
     expect(() => new ApprovalFollowThroughTracker({ ttlMs: 0 })).toThrow('positive integer');
     const tracker = new ApprovalFollowThroughTracker({ now: vi.fn(() => 1) });
-    expect(() => tracker.activate('', 'linear.app')).toThrow('helper buddy id is required');
+    expect(() => tracker.activate('', 'linear.app')).toThrow('helper buddy id is invalid');
+  });
+
+  it('rejects noncanonical identities before reading or mutating follow-through state', () => {
+    const tracker = new ApprovalFollowThroughTracker({ now: () => 1 });
+    tracker.activate('helper-buddy-1', 'linear.app');
+
+    expect(() => tracker.coverageFor(' helper-buddy-1', 'linear.app')).toThrow('canonical');
+    expect(() => tracker.recordExecutedAction('helper-buddy-1\0', 'linear.app')).toThrow('invalid');
+    expect(() => tracker.deactivate('helper-buddy-1 ')).toThrow('canonical');
+    expect(tracker.coverageFor('helper-buddy-1', 'linear.app')?.remainingActions).toBe(3);
   });
 });

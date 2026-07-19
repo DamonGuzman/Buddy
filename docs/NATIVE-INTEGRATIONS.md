@@ -107,7 +107,7 @@ succeeds, so removing the 30–40 point clamp does not shift pointing.
 
 Only the overlay currently hosting Buddy renders the Live Bar, so a
 multi-display setup never shows duplicate status. Activity priority is capture
-privacy → conversation → running agents → unseen result. Idle is hidden; a new
+privacy → conversation → running helper buddies → unseen result. Idle is hidden; a new
 result expands briefly and then collapses to a persistent dot until viewed.
 
 ## Native verification

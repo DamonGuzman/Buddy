@@ -89,7 +89,7 @@ export interface HelperBuddyMemorySaveInput {
   content: string;
 }
 
-/** Durable Markdown memory shared by every background helper. */
+/** Durable Markdown memory shared by every background helper buddy. */
 export interface HelperBuddyMemoryToolPort {
   /** Absolute owner-only directory exposed in the progressive-disclosure catalog. */
   readonly directory: string;
@@ -205,7 +205,7 @@ export interface HelperBuddyToolContext {
   scratchpad: { get(): string; set(text: string): void; append(text: string): void };
   addSource(url: string): void;
   memory: HelperBuddyMemoryToolPort;
-  /** Firecrawl v2 transport. Present for every helper in production. */
+  /** Firecrawl v2 transport. Present for every helper buddy in production. */
   firecrawl?: FirecrawlClientPort;
   /** Shared persistent-browser capability, guarded by ActionGate. */
   browser: HelperBuddyBrowserToolPort;

@@ -14,6 +14,8 @@ import type {
   ActionableErrorIdentity,
   ApprovalGrant,
   ApprovalRequest,
+  HelperBuddyBrowserPreviewSnapshot,
+  HelperBuddyBrowserPreviewUpdate,
   HelperBuddySummary,
   AssistantState,
   AudioDeviceError,
@@ -65,11 +67,13 @@ export interface MainToOverlayEvents {
   'overlay:interactive': OverlayInteractiveUpdate;
   /** Native top-of-display geometry for this overlay's display. */
   'overlay:display-surface': OverlayDisplaySurface;
-  // M19 addition: helper buddies on the overlay — the same renderer-safe list
-  // the panel gets (full-list upsert, broadcast on every helper-buddy state change;
-  // NEVER carries screenshot bytes). Every overlay receives it; only the
-  // buddy-hosting overlay renders the helper sprites.
+  // M19 addition: helper buddies on the overlay — a full-list renderer-safe
+  // snapshot broadcast on every helper-buddy state change. Browser frames use
+  // the separate ephemeral preview channel below and are never persisted.
+  // Every overlay receives both; only the buddy-hosting overlay renders them.
   'overlay:helper-buddies': HelperBuddySummary[];
+  /** Latest observed browser frame, or a close tombstone, for one helper buddy. */
+  'overlay:helper-buddy-browser-preview': HelperBuddyBrowserPreviewUpdate;
   // M20 addition: main-side cursor feed for the buddy-hosting overlay.
   // Electron's setIgnoreMouseEvents(true, {forward:true}) proved unreliable
   // on Windows (zero mousemove delivery on some setups), which silently
@@ -247,6 +251,11 @@ export interface InvokeChannels {
   // M18 additions: helper buddies (docs/HELPER-BUDDY-MODE.md §6.2).
   /** Renderer bootstrap: current helper-buddy list. */
   'helper-buddies:list': { args: []; result: HelperBuddySummary[] };
+  /** Race-safe bootstrap of active helper-buddy browser previews. */
+  'helper-buddies:list-browser-previews': {
+    args: [];
+    result: HelperBuddyBrowserPreviewSnapshot;
+  };
   /** Stop one helper buddy (card "stop" affordance). */
   'helper-buddies:cancel': { args: [id: string]; result: void };
   /** Stop every running helper buddy. */
@@ -340,7 +349,13 @@ export interface OverlayApi {
   onHelperBuddies(cb: (helperBuddies: HelperBuddySummary[]) => void): Unsubscribe;
   /** Helper-buddy list bootstrap (push updates ride on 'overlay:helper-buddies'). */
   getHelperBuddies(): Promise<HelperBuddySummary[]>;
-  /** A helper sprite/card was clicked after local expansion; main may reveal related UI. */
+  /** Ephemeral live-frame updates for helper buddies with an active browser surface. */
+  onHelperBuddyBrowserPreview(cb: (update: HelperBuddyBrowserPreviewUpdate) => void): Unsubscribe;
+  /** Bootstrap active preview frames without racing incremental updates. */
+  getHelperBuddyBrowserPreviews(): Promise<HelperBuddyBrowserPreviewSnapshot>;
+  /** Clear the unseen result indicator once a terminal card is expanded in place. */
+  markHelperBuddySeen(id: string): Promise<void>;
+  /** A waiting-approval helper buddy was clicked; main reveals its approval surface. */
   sendHelperBuddyClick(id: string): void;
   /** The helper buddy card's stop affordance was clicked. */
   sendHelperBuddyCancel(id: string): void;

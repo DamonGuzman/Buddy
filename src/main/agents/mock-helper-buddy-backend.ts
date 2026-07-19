@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { FunctionCallItem, ResponseItem } from '../codex/wire-types';
+import { requireCanonicalHelperBuddyId } from '../helper-buddy-id';
 import type {
   ActionReviewEvidence,
   ActionReviewer,
@@ -82,6 +83,18 @@ export class MockHelperBuddyBackend implements HelperBuddyBackend {
   }
 
   async request(req: HelperBuddyBackendRequest): Promise<HelperBuddyBackendResult> {
+    if (req.runContext) {
+      try {
+        requireCanonicalHelperBuddyId(req.runContext.helperBuddyId);
+      } catch (error) {
+        return {
+          ok: false,
+          errorKind: 'helper_buddy_backend_down',
+          detail: error instanceof Error ? error.message : String(error),
+          retryable: false,
+        };
+      }
+    }
     await abortableDelay(this.delayMs, req.signal);
     if (req.signal.aborted)
       return {
@@ -370,7 +383,7 @@ function mockActivityDescription(name: string): string {
     case 'needs_user':
       return 'asking for your help';
     default:
-      return 'continuing the helper task';
+      return 'continuing the helper buddy task';
   }
 }
 

@@ -25,7 +25,7 @@ import type {
 import type { ApprovalGrant, ApprovalRequest } from '../src/shared/types';
 import type { CaptureResult } from '../src/main/capture';
 import type { ComputerDriver, DriverPoint, MouseButton } from '../src/main/computer/driver';
-import { createTestAgentMemory } from './support/helper-buddy-memory';
+import { createTestHelperBuddyMemory } from './support/helper-buddy-memory';
 import { createTestHelperBuddyFilesystem } from './support/helper-buddy-capabilities';
 
 interface RuntimeResult {
@@ -97,7 +97,7 @@ async function runScenario(scenario: MockHelperBuddyScenario): Promise<RuntimeRe
     }),
     browser,
     filesystem: createTestHelperBuddyFilesystem(),
-    memory: createTestAgentMemory(),
+    memory: createTestHelperBuddyMemory(),
     onUpdate: () => undefined,
   }).run();
   expect(journal[0], `${scenario} must reviewer-approve its explicit navigation`).toMatchObject({

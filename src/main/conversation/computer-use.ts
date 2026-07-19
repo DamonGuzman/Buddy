@@ -26,7 +26,7 @@ import type { TurnGuard } from './turn-guard';
 export interface ComputerUseDeps {
   settings: SettingsPort;
   guard: TurnGuard;
-  /** Shared gate instance used by helper-browser actions. */
+  /** Shared gate instance used by helper-buddy browser actions. */
   gate?: HelperBuddyActionGatePort;
   /** Shared main-process approval queue; parks the operator without keeping a model request open. */
   approvals?: HelperBuddyApprovalPort;

@@ -92,7 +92,7 @@ export function FirecrawlCard({ settings, onPatch }: FirecrawlCardProps): React.
           </>
         ) : (
           <span className="text-xs text-muted-foreground">
-            add one key to give helpers complete web research
+            add one key to give helper buddies complete web research
           </span>
         )}
       </div>

@@ -12,6 +12,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { CaptureResult } from '../../capture';
 import type { DriverPoint } from '../../computer/driver';
 import type { ApprovalGrant } from '../../../shared/types';
+import { requireCanonicalHelperBuddyId } from '../../helper-buddy-id';
 import {
   actionTargetKey,
   buildActionSignature,
@@ -435,10 +436,11 @@ export class ActionGate<T = unknown> {
   }
 
   cancelHelperBuddy(helperBuddyId: string): void {
-    for (const [id, pending] of this.pending) {
-      if (pending.request.helperBuddyId === helperBuddyId) this.pending.delete(id);
+    const id = requireCanonicalHelperBuddyId(helperBuddyId);
+    for (const [pendingId, pending] of this.pending) {
+      if (pending.request.helperBuddyId === id) this.pending.delete(pendingId);
     }
-    this.followThrough.deactivate(helperBuddyId);
+    this.followThrough.deactivate(id);
   }
 
   private async assessAndMaybeExecute(
@@ -1096,7 +1098,7 @@ export class ActionGate<T = unknown> {
 }
 
 function validateRequest(request: GatedActionRequest): void {
-  if (!request.helperBuddyId.trim()) throw new Error('helperBuddyId is required');
+  requireCanonicalHelperBuddyId(request.helperBuddyId);
   if (!request.userRequest.trim()) throw new Error('userRequest is required');
   if (request.action.kind !== 'screenshot' && !request.action.justification.trim()) {
     throw new Error('every acting action requires a justification');

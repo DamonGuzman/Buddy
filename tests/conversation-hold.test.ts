@@ -417,7 +417,7 @@ describe('Conversation: quick barge-in tap commit guard (M9)', () => {
 
     const before = server.clientEvents.length;
     const completed: HelperBuddySummary = {
-      id: 'agent_open_mic',
+      id: 'helper_buddy_open_mic',
       task: 'compare the options',
       status: 'done',
       createdAt: Date.now() - 1_000,
@@ -435,11 +435,13 @@ describe('Conversation: quick barge-in tap commit guard (M9)', () => {
       const injected = events.find(
         (event) =>
           event.type === 'conversation.item.create' &&
-          JSON.stringify(event).includes('<helper_buddy_id>agent_open_mic</helper_buddy_id>'),
+          JSON.stringify(event).includes(
+            '<helper_buddy_id>helper_buddy_open_mic</helper_buddy_id>',
+          ),
       );
       expect(injected).toBeDefined();
       expect(events.some((event) => event.type === 'response.create')).toBe(true);
-      expect(markSpoken).toHaveBeenCalledWith('agent_open_mic');
+      expect(markSpoken).toHaveBeenCalledWith('helper_buddy_open_mic');
     });
     await vi.waitFor(() => expect(conversation.assistantState()).toBe('listening'), {
       timeout: 10_000,
