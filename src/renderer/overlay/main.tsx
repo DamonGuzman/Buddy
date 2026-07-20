@@ -654,12 +654,7 @@ function App(): React.JSX.Element {
           </div>
         )}
         {hint && (
-          <div
-            className="hint-bubble"
-            data-fading={hintState === 'fading' ? '' : undefined}
-            data-liquid-glass-region="hover-hint"
-            data-liquid-glass-radius="14"
-          >
+          <div className="hint-bubble" data-fading={hintState === 'fading' ? '' : undefined}>
             <div>{hint.text}</div>
             {hint.sub !== undefined && <div className="hint-sub">{hint.sub}</div>}
           </div>
