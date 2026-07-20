@@ -45,7 +45,7 @@ export interface ComputerUseRuntimeOptions {
   /** Lifecycle/callback failures are never discarded into an empty catch. */
   onError(error: Error): void;
   onEnrollmentClosed?(): void | Promise<void>;
-  /** Restore Settings/approval UI immediately after the takeover surface is hidden. */
+  /** Restore the standalone approval UI immediately after the takeover surface is hidden. */
   onTakeoverWindowHidden?(request: ApprovalRequest): void | Promise<void>;
   /** Hide Buddy surfaces before a live-desktop verdict can trigger reinspection/input. */
   beforeLiveApprovalResolution?(request: ApprovalRequest): void | Promise<void>;

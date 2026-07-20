@@ -122,18 +122,25 @@ export function HelperBuddyCluster({
         />
       )}
       {cardHelperBuddy !== null && (
-        <HelperBuddyCard
-          helperBuddy={cardHelperBuddy}
-          expanded={expandedHelperBuddy !== null}
-          dir={dir}
-          vdir={vdir}
-          now={now}
-          browserPreview={browserPreview}
-          interactive={interactive}
-          cardRef={cardRef}
-          onClick={onHelperBuddyClick}
-          onCancel={onHelperBuddyCancel}
-        />
+        <div
+          className="helper-buddy-surfaces"
+          data-direction={dir === 1 ? 'right' : 'left'}
+          data-vertical={vdir === -1 ? 'above' : 'below'}
+          style={surfaceStyle(dir, vdir)}
+        >
+          <HelperBuddyCard
+            helperBuddy={cardHelperBuddy}
+            expanded={expandedHelperBuddy !== null}
+            now={now}
+            interactive={interactive}
+            cardRef={cardRef}
+            onClick={onHelperBuddyClick}
+            onCancel={onHelperBuddyCancel}
+          />
+          {browserPreview !== null && (
+            <BrowserPreview preview={browserPreview} direction={dir === 1 ? 'right' : 'left'} />
+          )}
+        </div>
       )}
       {expandedHelperBuddy === null && hoveredKey === OVERFLOW_KEY && (
         <OverflowCard
@@ -267,13 +274,18 @@ function cardStyle(dir: 1 | -1, vdir: 1 | -1, expanded = false): React.CSSProper
   };
 }
 
+/** Anchor the detached card + browser companion on the roomy side of Buddy. */
+function surfaceStyle(dir: 1 | -1, vdir: 1 | -1): React.CSSProperties {
+  return {
+    ...(dir === 1 ? { left: HELPER_BUDDY_CARD_GAP } : { right: HELPER_BUDDY_CARD_GAP }),
+    ...(vdir === -1 ? { bottom: -14 } : { top: -14 }),
+  };
+}
+
 function HelperBuddyCard({
   helperBuddy,
   expanded,
-  dir,
-  vdir,
   now,
-  browserPreview,
   interactive,
   cardRef,
   onClick,
@@ -282,10 +294,7 @@ function HelperBuddyCard({
   helperBuddy: HelperBuddySummary;
   /** M22: full-status view (clicked) — activity log, findings, sources. */
   expanded: boolean;
-  dir: 1 | -1;
-  vdir: 1 | -1;
   now: number;
-  browserPreview: HelperBuddyBrowserPreview | null;
   interactive: boolean;
   cardRef: React.RefObject<HTMLDivElement | null>;
   onClick: (id: string) => void;
@@ -302,8 +311,10 @@ function HelperBuddyCard({
     <div
       ref={cardRef}
       className="helper-buddy-card"
+      data-liquid-glass-region="helper-card"
+      data-liquid-glass-radius="16"
       data-expanded={expanded ? '' : undefined}
-      style={cardStyle(dir, vdir, expanded)}
+      style={{ width: expanded ? HELPER_BUDDY_CARD_EXPANDED_W : HELPER_BUDDY_CARD_W }}
       onClick={() => onClick(helperBuddy.id)}
     >
       <div className="helper-buddy-card-head">
@@ -316,7 +327,6 @@ function HelperBuddyCard({
       <div className="helper-buddy-card-task">
         “{truncate(helperBuddy.task, expanded ? 200 : 110)}”
       </div>
-      {browserPreview !== null && <BrowserPreview preview={browserPreview} />}
       {showLine && (
         <div className="helper-buddy-card-line">
           {status.kind === 'working' && (
@@ -354,19 +364,43 @@ function HelperBuddyCard({
   );
 }
 
-/** The latest exact observation from this helper's still-active hidden browser. */
-function BrowserPreview({ preview }: { preview: HelperBuddyBrowserPreview }): React.JSX.Element {
+/** Detached companion window for the helper's still-active hidden browser. */
+function BrowserPreview({
+  preview,
+  direction,
+}: {
+  preview: HelperBuddyBrowserPreview;
+  /** Side of the buddy that holds the card; the connector points back toward it. */
+  direction: 'left' | 'right';
+}): React.JSX.Element {
+  const tint = helperTint(preview.helperBuddyId);
   return (
-    <div className="helper-buddy-browser-preview" aria-label="live browser preview">
+    <div
+      className="helper-buddy-browser-preview"
+      data-liquid-glass-region="helper-browser-preview"
+      data-liquid-glass-radius="15"
+      data-direction={direction}
+      aria-label="live browser preview"
+      style={
+        {
+          '--helper-browser-accent': tint.dark,
+          '--helper-browser-glow': tint.glow,
+        } as React.CSSProperties
+      }
+    >
       <div className="helper-buddy-browser-preview-head">
-        <span className="helper-buddy-browser-preview-live" />
+        <span className="helper-buddy-browser-preview-chrome" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
         <span>browser</span>
-        <span className="helper-buddy-browser-preview-state">live</span>
+        <span className="helper-buddy-browser-preview-state">
+          <span className="helper-buddy-browser-preview-live" />
+          live
+        </span>
       </div>
-      <div
-        className="helper-buddy-browser-preview-frame"
-        style={{ aspectRatio: `${preview.width} / ${preview.height}` }}
-      >
+      <div className="helper-buddy-browser-preview-frame">
         <img src={preview.imageDataUrl} alt="" draggable={false} />
       </div>
     </div>
@@ -432,7 +466,13 @@ function OverflowCard({
 }): React.JSX.Element {
   const rows = helperBuddies.slice(0, 5);
   return (
-    <div ref={cardRef} className="helper-buddy-card" style={cardStyle(dir, vdir)}>
+    <div
+      ref={cardRef}
+      className="helper-buddy-card"
+      data-liquid-glass-region="helper-card"
+      data-liquid-glass-radius="16"
+      style={cardStyle(dir, vdir)}
+    >
       <div className="helper-buddy-card-head">
         <span className="helper-buddy-card-name">the rest of my helper buddies</span>
       </div>

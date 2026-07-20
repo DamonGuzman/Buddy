@@ -33,7 +33,7 @@ const api: PanelApi = {
   onRuntime: (cb) => subscribe('panel:runtime', cb),
   onPermissions: (cb) => subscribe('panel:permissions', cb),
   onActionableError: (cb) => subscribe('panel:actionable-error', cb),
-  onApprovals: (cb) => subscribe('panel:approvals', cb),
+  onGrantsRevision: (cb) => subscribe('panel:grants-revision', cb),
   // M17 addition (integration-approved): Codex sign-in state push.
   onCodexSignin: (cb) => subscribe('panel:codex-signin', cb),
 
@@ -61,13 +61,6 @@ const api: PanelApi = {
   // M11 addition (orchestrator-approved): audio device failure reporting.
   reportAudioError: (payload) => ipcRenderer.send('audio:capture-error', payload),
 
-  resolveApproval: (helperBuddyId, approvalId, verdict) =>
-    ipcRenderer.invoke('approval:resolve', helperBuddyId, approvalId, verdict),
-  showApprovalWindow: (helperBuddyId, approvalId) =>
-    ipcRenderer.invoke('approval:show-window', helperBuddyId, approvalId),
-  hideApprovalWindow: (helperBuddyId, approvalId) =>
-    ipcRenderer.invoke('approval:hide-window', helperBuddyId, approvalId),
-  listApprovals: () => ipcRenderer.invoke('approvals:list'),
   listGrants: () => ipcRenderer.invoke('grants:list'),
   revokeGrant: (id) => ipcRenderer.invoke('grants:revoke', id),
   openBuddyBrowserEnrollment: (url) => ipcRenderer.invoke('buddy-browser:open-enroll', url),

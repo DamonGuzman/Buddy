@@ -76,6 +76,16 @@ export interface OverlayInteractiveUpdate {
   interactive: boolean;
 }
 
+/**
+ * Renderer-measured popup background mirrored by main with bounded native
+ * Liquid Glass on macOS 26+. Coordinates use overlay-local top-left DIP.
+ */
+export interface OverlayGlassRegion extends Rect {
+  id: string;
+  cornerRadius: number;
+  tintColor?: string;
+}
+
 /** Show/hide the "capture in progress" indicator (always signposted). */
 export interface CaptureIndicatorUpdate {
   active: boolean;

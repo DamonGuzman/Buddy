@@ -632,7 +632,9 @@ REST spot (the arc mirrors toward the roomy side of the screen). Implementation:
   activity line derived from the last step ('reading rtings.com…'), "working for 2 minutes ·
   checked 3 places on the web", and a click cta. Hovering the pebble lists the folded helpers.
   The M15 hint bubble is suppressed while a card shows. If that helper has an active hidden
-  browser, the same hover card includes a picture-in-picture view of its latest exact observation.
+  browser, a separate picture-in-picture window floats beside the hover card with its latest exact
+  observation. The helper-colored connector and mirrored placement keep the two surfaces visually
+  related without mixing browser pixels into the task/status panel.
 - **Clicks ride the M15 dwell flip:** the hover machine's interactive region grows to a merged
   bounding box (buddy footprint + sprites + measured card rect, clamped under main's 400×400
   region cap) via `HoverMachine.setAux`; the safety property (instant click-through restore on
@@ -645,8 +647,9 @@ REST spot (the arc mirrors toward the roomy side of the screen). Implementation:
   hostnames). The expanded card is wider/taller but still under the region cap, scrolls when
   long, and a second click (or leaving it) tucks it away. The expanded helper is pinned exempt
   from the linger clock (`HelperHoverController.setPinned`) so it never vanishes mid-read; card
-  lifetime is still owned by the hover machine. The browser picture-in-picture remains visible in
-  this detail view while the helper's browser surface is active. Normal result expansion stays in the overlay. A
+  lifetime is still owned by the hover machine. The detached 16:9 browser picture-in-picture
+  remains beside this detail view while the helper's browser surface is active. Normal result
+  expansion stays in the overlay. A
   helper waiting for approval still sends `overlay:helper-buddy-click` so main can reveal the
   approval surface.
 - **IPC (integration-approved M19/M22):** `overlay:helper-buddies` mirrors the same renderer-safe
@@ -693,7 +696,7 @@ onHelperBuddiesChanged, onFinished })`, then pass the manager into `Conversation
 - Wire `helper-buddies:list`, `helper-buddies:cancel`, `helper-buddies:cancel-all`, and
   `helper-buddies:mark-seen` invokes plus the main→overlay `overlay:helper-buddies` snapshot push.
   Helper-card clicks expand locally; only a parked helper buddy emits the main-process click event
-  that reveals the approval panel.
+  that reveals the standalone approval window.
 
 **`AuthSource` dependency (parallel implementation)** — this design assumes: `isReady()`, `onChanged()`, and
 a `fetchResponses(body, signal)` that POSTs to `chatgpt.com/backend-api/codex/responses` with a

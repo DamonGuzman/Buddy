@@ -66,6 +66,7 @@ import {
 } from './tray';
 import { OverlayManager } from './windows/overlay';
 import { PanelManager } from './windows/panel';
+import { ApprovalManager } from './windows/approval';
 import { WhisperManager } from './windows/whisper';
 import { PermissionController } from './windows/permission-controller';
 import { PhoneAudioBridgeClient } from './phone-audio-bridge';
@@ -132,6 +133,7 @@ interface Services {
   modelExecutionRecorder: ModelExecutionRecorder;
   overlays: OverlayManager;
   panel: PanelManager;
+  approvals: ApprovalManager;
   whisper: WhisperManager;
   hotkey: HotkeyManager;
   permissions: PermissionController;
@@ -279,6 +281,7 @@ function createServices(tray: TrayRef): Services {
       : null,
   });
   panel.start(); // pre-create the hidden window at app-ready (M5 mic capture)
+  const approvals = new ApprovalManager();
   // M20: the whisper composer, anchored beside the buddy's rest spot.
   const whisper = new WhisperManager({ getAnchor: () => overlays.restAnchor() });
   whisper.start(); // pre-create hidden so the first summon is instant
@@ -311,7 +314,7 @@ function createServices(tray: TrayRef): Services {
     userDataPath: () => app.getPath('userData'),
     codexProvider: () => getCodexAuthProvider(),
     onApprovalsChanged: (requests) => {
-      panel.send('panel:approvals', requests);
+      approvals.update(requests);
       const added = requests.filter((request) => !visibleApprovalIds.has(request.approvalId));
       visibleApprovalIds = new Set(requests.map((request) => request.approvalId));
       // Foreground live-desktop computer use has no helper sprite to click.
@@ -320,7 +323,7 @@ function createServices(tray: TrayRef): Services {
       // clicking a decision may focus it, and the runtime hides/restores the
       // target surface before any verdict can wake native input.
       if (added.some((request) => request.kind === 'live-action')) {
-        panel.showInactive();
+        approvals.showInactive();
       } else if (added.length > 0) {
         try {
           tray.current?.displayBalloon({
@@ -350,9 +353,9 @@ function createServices(tray: TrayRef): Services {
     },
     onError: (error) => console.error('[computer-use]', error),
     onEnrollmentClosed: () => panel.show(),
-    onTakeoverWindowHidden: () => panel.show(),
-    beforeLiveApprovalResolution: () => panel.prepareForLiveActionDispatch(),
-    onLiveApprovalResolutionFailed: () => panel.showInactive(),
+    onTakeoverWindowHidden: () => approvals.show(),
+    beforeLiveApprovalResolution: () => approvals.prepareForLiveActionDispatch(),
+    onLiveApprovalResolutionFailed: () => approvals.showInactive(),
     ...(helperBuddyMock ? { createReviewer: () => new MockActionReviewer() } : {}),
     ...(helperBuddyMock
       ? {
@@ -609,6 +612,7 @@ function createServices(tray: TrayRef): Services {
     modelExecutionRecorder,
     overlays,
     panel,
+    approvals,
     whisper,
     hotkey,
     permissions,
@@ -757,6 +761,7 @@ function registerInvokeHandlers(
     browserPreviews,
     permissions,
     panel,
+    approvals,
     whisper,
     computerUseRuntime,
     filesystem,
@@ -854,19 +859,21 @@ function registerInvokeHandlers(
   handle('helper-buddies:mark-seen', (id) =>
     helperBuddies.markSeen(requireCanonicalHelperBuddyId(id)),
   );
-  handle('approval:resolve', (helperBuddyId, approvalId, verdict) =>
-    computerUseRuntime.controller.resolveApproval(
+  handle('approval:resolve', async (helperBuddyId, approvalId, verdict) => {
+    await computerUseRuntime.controller.resolveApproval(
       requireCanonicalHelperBuddyId(helperBuddyId),
       approvalId,
       verdict,
-    ),
-  );
-  handle('approval:show-window', (helperBuddyId, approvalId) =>
-    computerUseRuntime.controller.showApprovalWindow(
+    );
+    if (verdict === 'always') panel.noteGrantsChanged();
+  });
+  handle('approval:show-window', async (helperBuddyId, approvalId) => {
+    await computerUseRuntime.controller.showApprovalWindow(
       requireCanonicalHelperBuddyId(helperBuddyId),
       approvalId,
-    ),
-  );
+    );
+    approvals.hide();
+  });
   handle('approval:hide-window', (helperBuddyId, approvalId) =>
     computerUseRuntime.controller.hideApprovalWindow(
       requireCanonicalHelperBuddyId(helperBuddyId),
@@ -917,7 +924,7 @@ function registerRendererEvents({
   conversation,
   whisper,
   helperBuddies,
-  panel,
+  approvals,
   computerUseRuntime,
 }: Services): void {
   onRendererEvent('audio:chunk', (chunk) => {
@@ -936,14 +943,17 @@ function registerRendererEvents({
   onRendererEvent('audio:playback-ring', (ring) => {
     conversation.handlePlaybackRing(ring);
   });
-  // Waiting helpers use their click to bring the approval queue into view.
+  onRendererEvent('approval:content-height', (height, event) => {
+    approvals.setContentHeight(height, event.sender.id);
+  });
+  // Waiting helpers use their click to bring the standalone approval queue into view.
   onRendererEvent('overlay:helper-buddy-click', (payload) => {
     const id = validHelperBuddyId(payload);
     if (id === null) return;
     const helperBuddy = helperBuddies.list().find((item) => item.id === id);
     // Normal helper-buddy cards expand entirely inside the overlay. Only a
     // parked run emits this event, and only that state may reveal approvals.
-    if (helperBuddy?.status === 'waiting_approval') panel.show();
+    if (helperBuddy?.status === 'waiting_approval') approvals.show();
   });
   onRendererEvent('overlay:helper-buddy-cancel', (payload) => {
     const id = validHelperBuddyId(payload);
@@ -1014,7 +1024,7 @@ function wireHotkey({ hotkey, settings, conversation, whisper, overlays }: Servi
 }
 
 function wirePanelLifecycle(
-  { panel, whisper, settings, conversation, permissions, computerUseRuntime, filesystem }: Services,
+  { panel, whisper, settings, conversation, permissions, filesystem }: Services,
   tray: TrayRef,
   runtime: RuntimeReporter,
   pushCodexSignin: (force: boolean) => void,
@@ -1040,7 +1050,6 @@ function wirePanelLifecycle(
     panel.send('panel:settings', settings.get());
     runtime.push();
     panel.send('panel:permissions', permissions.current());
-    panel.send('panel:approvals', computerUseRuntime.controller.listApprovals());
     // M17: hand the (re)loaded panel the current Codex sign-in snapshot.
     pushCodexSignin(true);
   });
@@ -1208,6 +1217,7 @@ function buildDebugSurface({
           request.approvalId,
           verdict,
         );
+        if (verdict === 'always') panel.noteGrantsChanged();
         return true;
       },
     },
@@ -1230,6 +1240,7 @@ function registerShutdown(
     modelExecutionRecorder,
     overlays,
     panel,
+    approvals,
     whisper,
     markdown,
   }: Services,
@@ -1272,6 +1283,7 @@ function registerShutdown(
       await attempt('session recorder', () => sessionRecorder?.close('app_quit'));
       await attempt('overlays', () => overlays.destroy());
       await attempt('panel', () => panel.destroy());
+      await attempt('approval window', () => approvals.destroy());
       await attempt('whisper', () => whisper.destroy());
       await attempt('markdown windows', () => markdown.destroy());
       shutdownFinished = true;

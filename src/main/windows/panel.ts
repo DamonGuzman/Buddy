@@ -42,6 +42,7 @@ import {
 import { wireCaptureTest } from './panel-capture-test';
 import type { PanelCaptureTestOptions } from './panel-capture-test';
 import { positionBuddyPanel } from './buddy-panel-position';
+import { applyMacLiquidGlass } from './mac-liquid-glass';
 
 const MARGIN = 12;
 
@@ -126,6 +127,8 @@ export class PanelManager {
   private readonly shownForReason = new Set<PanelShowReason>();
   /** Monotonic persistent repair state, replayed after panel renderer reloads. */
   private actionableErrorValue: ActionableErrorState = { revision: 0, notice: null };
+  /** Monotonic signal for the browser-grants settings card. */
+  private grantsRevisionValue = 0;
 
   constructor(private readonly options: PanelManagerOptions = {}) {
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- module-level singleton handle (see showPanelOnce/togglePanel)
@@ -271,6 +274,11 @@ export class PanelManager {
     return this.resolveActionableError(expected);
   }
 
+  noteGrantsChanged(): void {
+    this.grantsRevisionValue += 1;
+    this.send('panel:grants-revision', this.grantsRevisionValue);
+  }
+
   private matchesActionableError(expected: ActionableErrorIdentity): boolean {
     return (
       expected !== null &&
@@ -285,20 +293,6 @@ export class PanelManager {
   hide(): void {
     this.pendingInactiveShow = false;
     if (this.win && !this.win.isDestroyed()) this.win.hide();
-  }
-
-  /**
-   * Live-desktop approval is clicked inside this focusable window. Remove it
-   * before the action gate's fresh receiver inspection, then give the OS one
-   * compositor beat to restore the underlying application. A window that
-   * remains visible fails closed instead of receiving Buddy's own input.
-   */
-  async prepareForLiveActionDispatch(): Promise<void> {
-    this.hide();
-    await new Promise<void>((resolve) => setTimeout(resolve, 50));
-    if (this.win && !this.win.isDestroyed() && this.win.isVisible()) {
-      throw new Error('approval panel could not be hidden before desktop input');
-    }
   }
 
   /** Send a typed event to the panel (no-op if never opened). */
@@ -346,6 +340,7 @@ export class PanelManager {
       width: PANEL_WIDTH,
       height: PANEL_HEIGHT,
       frame: false,
+      ...(process.platform === 'darwin' ? { transparent: true } : {}),
       resizable: false,
       maximizable: false,
       minimizable: false,
@@ -358,6 +353,16 @@ export class PanelManager {
       // while the window is hidden — mic capture must work unseen.
       webPreferences: hardenedWebPreferences('panel.js'),
     });
+    let nativeGlass: boolean;
+    try {
+      nativeGlass = applyMacLiquidGlass(win, {
+        style: 'regular',
+        cornerRadius: 20,
+      });
+    } catch (error) {
+      win.destroy();
+      throw error;
+    }
 
     if (process.platform === 'darwin') {
       win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -398,6 +403,7 @@ export class PanelManager {
       if (this.win !== win) return;
       this.panelLoaded = true;
       this.send('panel:actionable-error', this.actionableErrorState());
+      this.send('panel:grants-revision', this.grantsRevisionValue);
       this.rendererReadyCb?.();
       if (this.pendingInactiveShow) {
         this.pendingInactiveShow = false;
@@ -427,7 +433,7 @@ export class PanelManager {
       );
     }
 
-    loadRendererPage(win, 'panel');
+    loadRendererPage(win, 'panel', nativeGlass ? '?nativeGlass=1' : undefined);
 
     this.win = win;
     return win;

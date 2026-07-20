@@ -1,6 +1,7 @@
 import type { ApprovalGrant, ApprovalRequest } from '../../shared/types';
 
-export type ApprovalInteractionAction = 'once' | 'always' | 'deny' | 'takeover';
+export type ApprovalVerdict = 'once' | 'always' | 'deny';
+export type ApprovalInteractionAction = ApprovalVerdict | 'takeover';
 
 interface ApprovalInteractionToken {
   helperBuddyId: string;

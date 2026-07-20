@@ -33,6 +33,7 @@ export interface PanelWiring {
   runtime: RuntimeFlags | null;
   permissions: PermissionHealth | null;
   actionableError: ActionableErrorState;
+  grantsRevision: number;
   setPermissions: (health: PermissionHealth) => void;
   /** Current mic preference (a live ref read — no resubscribe on change). */
   getMicDeviceId: () => string;
@@ -48,6 +49,7 @@ export function usePanelWiring({ onMicError }: PanelWiringDeps): PanelWiring {
   const [actionableError, setActionableError] = useState<ActionableErrorState>(
     EMPTY_ACTIONABLE_ERROR_STATE,
   );
+  const [grantsRevision, setGrantsRevision] = useState(0);
   const actionableErrorRef = useRef<ActionableErrorState>(EMPTY_ACTIONABLE_ERROR_STATE);
 
   const mergeActionableError = useCallback((incoming: ActionableErrorState): void => {
@@ -83,6 +85,7 @@ export function usePanelWiring({ onMicError }: PanelWiringDeps): PanelWiring {
       clicky.onRuntime(setRuntime),
       clicky.onPermissions(setPermissions),
       clicky.onActionableError(mergeActionableError),
+      clicky.onGrantsRevision(setGrantsRevision),
       // M17: merge the Codex sign-in snapshot into settings (the "ChatGPT"
       // settings card reads it) — lower latency than waiting for the next
       // panel:settings, and reflects the CLI's auth.json rotating live.
@@ -140,6 +143,7 @@ export function usePanelWiring({ onMicError }: PanelWiringDeps): PanelWiring {
     runtime,
     permissions,
     actionableError,
+    grantsRevision,
     setPermissions,
     getMicDeviceId,
   };

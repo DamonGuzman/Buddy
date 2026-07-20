@@ -1,9 +1,8 @@
 /** Same-process macOS Screen Recording and Input Monitoring consent bridge. */
 
-import { app } from 'electron';
-import { existsSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { loadMacNativeBridge } from './mac-native-bridge';
+
+export { getMacNativeBridgePath } from './mac-native-bridge';
 
 interface MacPrivacyNative {
   requestScreenCaptureAccess(): boolean;
@@ -54,28 +53,13 @@ export interface MacAccessibilityResult {
   error?: string;
 }
 
-const loadNative = createRequire(__filename);
 let cachedBridge: MacPrivacyNative | null | undefined;
-
-export function getMacNativeBridgePath(): string | null {
-  if (process.platform !== 'darwin') return null;
-  const nativePath = app.isPackaged
-    ? join(process.resourcesPath, 'macos-screen-permission.node')
-    : join(app.getAppPath(), 'build', 'native', 'macos-screen-permission.node');
-  return existsSync(nativePath) ? nativePath : null;
-}
 
 function bridge(): MacPrivacyNative | null {
   if (process.platform !== 'darwin') return null;
   if (cachedBridge !== undefined) return cachedBridge;
-  const nativePath = getMacNativeBridgePath();
-  if (nativePath === null) {
-    console.warn('[permissions] macOS integration bridge is missing');
-    cachedBridge = null;
-    return null;
-  }
   try {
-    cachedBridge = loadNative(nativePath) as MacPrivacyNative;
+    cachedBridge = loadMacNativeBridge() as MacPrivacyNative;
   } catch (err) {
     console.warn(
       '[permissions] macOS privacy bridge failed to load:',

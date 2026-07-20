@@ -12,14 +12,10 @@ import { useState } from 'react';
 import { useMicDevices } from './hooks/use-mic-devices';
 import { usePanelWiring } from './hooks/use-panel-wiring';
 import { Header } from './components/Header';
-import { ComputerUseApprovalCard } from './components/ComputerUseApprovalCard';
 import { SettingsView } from './components/SettingsView';
-import { useComputerUseApproval } from './hooks/use-computer-use';
 
 export function App(): React.JSX.Element {
   const [micError, setMicError] = useState<string | null>(null);
-  const computerUse = useComputerUseApproval();
-  const currentApproval = computerUse.approvals[0] ?? null;
 
   const {
     assistantState,
@@ -28,6 +24,7 @@ export function App(): React.JSX.Element {
     runtime,
     permissions,
     actionableError,
+    grantsRevision,
     setPermissions,
   } = usePanelWiring({
     onMicError: setMicError,
@@ -44,27 +41,7 @@ export function App(): React.JSX.Element {
         devFlags={runtime?.devFlags ?? []}
       />
       <main className="flex min-h-0 flex-1 flex-col">
-        {currentApproval ? (
-          <div className="min-h-0 flex-1 overflow-y-auto pb-4">
-            <ComputerUseApprovalCard
-              key={currentApproval.approvalId}
-              request={currentApproval}
-              pendingCount={computerUse.approvals.length}
-              resolving={computerUse.resolving}
-              actingInPlace={computerUse.actingInPlace}
-              error={computerUse.error}
-              onResolve={(helperBuddyId, approvalId, verdict) =>
-                void computerUse.resolve(helperBuddyId, approvalId, verdict)
-              }
-              onShowBrowser={(helperBuddyId, approvalId) =>
-                void computerUse.showBrowser(helperBuddyId, approvalId)
-              }
-              onFinishInBrowser={(helperBuddyId, approvalId) =>
-                void computerUse.finishInBrowser(helperBuddyId, approvalId)
-              }
-            />
-          </div>
-        ) : settings ? (
+        {settings ? (
           <SettingsView
             settings={settings}
             session={session}
@@ -72,7 +49,7 @@ export function App(): React.JSX.Element {
             micDevices={micDevices}
             micError={micError}
             permissions={permissions}
-            grantsRevision={computerUse.grantsRevision}
+            grantsRevision={grantsRevision}
             onPermissionHealth={setPermissions}
           />
         ) : null}

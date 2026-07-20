@@ -39,6 +39,7 @@ import { applyBrowserPreviewUpdate } from './helper-buddies-ui';
 import type { HelperView } from './helper-buddies-ui';
 import { TriangleSvg } from './TriangleSvg';
 import { BuddyIsland } from './BuddyIsland';
+import { observeLiquidGlassRegions } from './liquid-glass-regions';
 import type {
   HelperBuddySummary,
   HelperBuddyBrowserPreview,
@@ -365,6 +366,13 @@ function App(): React.JSX.Element {
     const offInteractive = clicky.onInteractive(({ interactive: on }) =>
       hoverCtrl.setInteractiveFromMain(on),
     );
+    const offGlassRegionsReady = clicky.onGlassRegionsReady(({ enabled }) => {
+      if (enabled) document.documentElement.dataset['nativeGlassRegions'] = 'true';
+      else delete document.documentElement.dataset['nativeGlassRegions'];
+    });
+    const stopGlassRegions = observeLiquidGlassRegions(clicky.isMacOS, (regions) =>
+      clicky.sendGlassRegions(regions),
+    );
 
     const applyHoverConfig = (cfg: OverlayHoverConfig): void => {
       const first = cfgRef.current === null;
@@ -511,6 +519,9 @@ function App(): React.JSX.Element {
       offCaption();
       // M15 hover teardown.
       offInteractive();
+      offGlassRegionsReady();
+      stopGlassRegions();
+      delete document.documentElement.dataset['nativeGlassRegions'];
       offHoverConfig();
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseout', onMouseOut);
@@ -643,7 +654,12 @@ function App(): React.JSX.Element {
           </div>
         )}
         {hint && (
-          <div className="hint-bubble" data-fading={hintState === 'fading' ? '' : undefined}>
+          <div
+            className="hint-bubble"
+            data-fading={hintState === 'fading' ? '' : undefined}
+            data-liquid-glass-region="hover-hint"
+            data-liquid-glass-radius="14"
+          >
             <div>{hint.text}</div>
             {hint.sub !== undefined && <div className="hint-sub">{hint.sub}</div>}
           </div>

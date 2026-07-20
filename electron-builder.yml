@@ -58,8 +58,8 @@ mac:
     NSMicrophoneUsageDescription: Buddy uses the microphone only while you explicitly talk to it.
     NSScreenCaptureUsageDescription: Buddy captures your screens only when you press the hotkey or submit a typed request.
   extraResources:
-    - from: build/native/macos-screen-permission.node
-      to: macos-screen-permission.node
+    - from: build/native/buddy-macos-native.node
+      to: buddy-macos-native.node
     - from: build/trayTemplate.png
       to: trayTemplate.png
     - from: build/trayTemplate@2x.png

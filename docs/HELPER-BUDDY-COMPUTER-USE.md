@@ -188,8 +188,9 @@ step ceiling: real web tasks may take arbitrarily many observe/act rounds. They 
 cancellable at every operation boundary, and stalled individual operations still fail fast.
 
 Every successful driver capture also replaces that helper's main-memory-only picture-in-picture
-frame. The overlay renders this frame only while the user is hovering that helper or has clicked
-open its details. Driver disposal emits an ordered close tombstone immediately, so stale browser
+frame. The overlay renders it in a consistent 16:9 detached companion beside the helper's card only
+while the user is hovering that helper or has clicked open its details. Driver disposal emits an
+ordered close tombstone immediately, so stale browser
 pixels cannot survive the browser session. The PiP reuses observations already required by the
 one-action-per-observation loop; it does not introduce polling or additional capture.
 
@@ -388,8 +389,8 @@ absent scope mechanically disables standing consent.
 `src/shared/ipc.ts`:
 
 ```ts
-// Main → Panel (full snapshot; concurrent helpers may all be parked)
-'panel:approvals': ApprovalRequest[];
+// Main → dedicated Approval renderer (full snapshot; concurrent helpers may all be parked)
+'approval:requests': ApprovalRequest[];
 // Renderer → Main (invoke)
 'approval:resolve': { args: [helperBuddyId: string, approvalId: string, verdict: 'once' | 'always' | 'deny']; result: void };
 'approval:show-window': { args: [helperBuddyId: string, approvalId: string]; result: void }; // "let me do it"
@@ -441,7 +442,7 @@ are approving); everything else stays `HelperBuddySummary`-shaped.
 - `src/main/agents/approvals.ts`, `computer-use-runtime.ts`, and
   `src/main/windows/buddy-browser.ts`: transactional approval coordination, profile/takeover
   lifecycle, enrollment, power/shutdown handling, and production composition.
-- `src/renderer/panel/` and `src/renderer/overlay/`: reload-safe approval queue, informed standing
+- `src/renderer/approval/` and `src/renderer/overlay/`: reload-safe approval queue, informed standing
   scope, enrolled-site/grant management, and persistent raised-hand state.
 - `tools/browser-computer-use-e2e/`, `tools/mock-helper-buddy-browser/`, and focused Vitest suites:
   deterministic safety stories plus real Electron integration.

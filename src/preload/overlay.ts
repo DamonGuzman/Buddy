@@ -39,10 +39,12 @@ const api: OverlayApi = {
   // M15 additions (orchestrator-approved): buddy hover.
   onHoverConfig: (cb) => subscribe('overlay:hover-config', cb),
   onInteractive: (cb) => subscribe('overlay:interactive', cb),
+  onGlassRegionsReady: (cb) => subscribe('overlay:glass-regions-ready', cb),
   getHoverConfig: () => ipcRenderer.invoke('overlay:get-hover-config'),
   onDisplaySurface: (cb) => subscribe('overlay:display-surface', cb),
   getDisplaySurface: () => ipcRenderer.invoke('overlay:get-display-surface'),
   sendHover: (evt) => ipcRenderer.send('overlay:hover', evt),
+  sendGlassRegions: (regions) => ipcRenderer.send('overlay:glass-regions', regions),
   sendBuddyClick: () => ipcRenderer.send('overlay:buddy-click', null),
   sendBuddySettings: () => ipcRenderer.send('overlay:buddy-settings', null),
   sendBuddyMove: (rest) => ipcRenderer.send('overlay:buddy-move', rest),

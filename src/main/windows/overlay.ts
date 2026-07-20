@@ -34,6 +34,7 @@ import type {
   AssistantState,
   BuddyRest,
   OverlayDisplaySurface,
+  OverlayGlassRegion,
   OverlayHoverConfig,
   OverlayHoverEvent,
   OverlayHoverStatus,
@@ -71,6 +72,7 @@ import { resolveDisplaySurface } from './display-surface';
 import { coverMacDisplayWithWindow, getMacDisplaySurface } from './mac-screen-permission';
 import { offsetPointerForWindow } from './overlay-offset';
 import { persistBuddyRest, settingsSaveFailureNotice } from './overlay-settings';
+import { applyMacLiquidGlassRegions } from './mac-liquid-glass';
 
 /**
  * Module-level handle to the started manager so sibling main modules (e.g.
@@ -391,6 +393,7 @@ export class OverlayManager {
     this.unsubscribeSettings?.();
     this.unsubscribeSettings = null;
     ipcMain.removeAllListeners('overlay:hover');
+    ipcMain.removeAllListeners('overlay:glass-regions');
     ipcMain.removeAllListeners('overlay:buddy-click');
     ipcMain.removeAllListeners('overlay:buddy-settings');
     ipcMain.removeAllListeners('overlay:buddy-move');
@@ -644,6 +647,16 @@ export class OverlayManager {
     ipcMain.on('overlay:hover', (event, evt: OverlayHoverEvent) => {
       this.onHoverEvent(event.sender, evt);
     });
+    ipcMain.on('overlay:glass-regions', (event, regions: OverlayGlassRegion[]) => {
+      const displayId = this.displayIdFor(event.sender);
+      const entry = displayId === null ? null : this.overlays.get(displayId);
+      if (!entry || !validGlassRegions(regions, entry.win.getContentBounds())) return;
+      const enabled = applyMacLiquidGlassRegions(
+        entry.win,
+        regions.map((region) => ({ ...region, style: 'regular' })),
+      );
+      entry.win.webContents.send('overlay:glass-regions-ready', { enabled });
+    });
     // M20: clicking the buddy summons the whisper composer (was: the panel —
     // the panel is retiring to a settings surface; the tray still opens it).
     ipcMain.on('overlay:buddy-click', () => toggleWhisper());
@@ -812,4 +825,31 @@ function isFiniteRect(r: Rect): boolean {
     r.width <= MAX_HOVER_REGION_DIP &&
     r.height <= MAX_HOVER_REGION_DIP
   );
+}
+
+function validGlassRegions(regions: OverlayGlassRegion[], bounds: Rectangle): boolean {
+  if (!Array.isArray(regions) || regions.length > 8) return false;
+  const ids = new Set<string>();
+  return regions.every((region) => {
+    if (
+      typeof region !== 'object' ||
+      region === null ||
+      typeof region.id !== 'string' ||
+      !/^[a-z0-9][a-z0-9-]{0,63}$/.test(region.id) ||
+      ids.has(region.id) ||
+      !isFiniteRect(region) ||
+      region.x < 0 ||
+      region.y < 0 ||
+      region.x + region.width > bounds.width ||
+      region.y + region.height > bounds.height ||
+      !Number.isFinite(region.cornerRadius) ||
+      region.cornerRadius < 0 ||
+      region.cornerRadius > 1000 ||
+      (region.tintColor !== undefined && !/^#[0-9a-f]{8}$/i.test(region.tintColor))
+    ) {
+      return false;
+    }
+    ids.add(region.id);
+    return true;
+  });
 }

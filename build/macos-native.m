@@ -63,6 +63,11 @@ extern napi_status napi_set_named_property(
   const char *utf8name,
   napi_value value
 );
+extern napi_status napi_throw_error(
+  napi_env env,
+  const char *code,
+  const char *msg
+);
 
 static void set_number(napi_env env, napi_value object, const char *name, double value) {
   napi_value number = NULL;
@@ -76,6 +81,36 @@ static void set_boolean(napi_env env, napi_value object, const char *name, bool 
   if (napi_get_boolean(env, value, &boolean) == 0) {
     napi_set_named_property(env, object, name, boolean);
   }
+}
+
+static void set_string(napi_env env, napi_value object, const char *name, NSString *value) {
+  napi_value string = NULL;
+  if (napi_create_string_utf8(env, value.UTF8String, (size_t)-1, &string) == 0) {
+    napi_set_named_property(env, object, name, string);
+  }
+}
+
+static void set_null(napi_env env, napi_value object, const char *name) {
+  napi_value nullValue = NULL;
+  if (napi_get_null(env, &nullValue) == 0) {
+    napi_set_named_property(env, object, name, nullValue);
+  }
+}
+
+static void set_rect(napi_env env, napi_value object, const char *name, NSRect rect) {
+  napi_value rectObject = NULL;
+  if (napi_create_object(env, &rectObject) != 0) return;
+  set_number(env, rectObject, "x", rect.origin.x);
+  set_number(env, rectObject, "y", rect.origin.y);
+  set_number(env, rectObject, "width", rect.size.width);
+  set_number(env, rectObject, "height", rect.size.height);
+  napi_set_named_property(env, object, name, rectObject);
+}
+
+static napi_value throw_liquid_glass_error(napi_env env, NSString *detail) {
+  NSString *message = [@"macOS Liquid Glass: " stringByAppendingString:detail];
+  napi_throw_error(env, "ERR_BUDDY_LIQUID_GLASS", message.UTF8String);
+  return NULL;
 }
 
 static napi_value json_string(napi_env env, NSDictionary *payload) {
@@ -1093,6 +1128,1082 @@ static napi_value post_input(napi_env env, napi_callback_info info) {
   }
 }
 
+/*
+ * macOS 26 Liquid Glass
+ * ---------------------
+ * Electron documents getNativeWindowHandle() as the NSWindow content NSView on
+ * macOS. Keep that Electron-owned view alive and make it NSGlassEffectView's
+ * designated contentView. This is the hierarchy AppKit requires for correct
+ * foreground treatment; placing glass behind Chromium as a sibling is not
+ * equivalent and is intentionally rejected here.
+ */
+static const void *buddy_liquid_glass_state_key = &buddy_liquid_glass_state_key;
+static NSUInteger active_liquid_glass_state_count = 0;
+
+API_AVAILABLE(macos(26.0))
+@interface BuddyLiquidGlassOptions : NSObject
+@property(nonatomic, assign) NSGlassEffectViewStyle style;
+@property(nonatomic, assign) CGFloat cornerRadius;
+@property(nonatomic, copy, nullable) NSColor *tintColor;
+@end
+
+@implementation BuddyLiquidGlassOptions
+@end
+
+API_AVAILABLE(macos(26.0))
+@interface BuddyLiquidGlassState : NSObject
+@property(nonatomic, weak) NSWindow *window;
+@property(nonatomic, strong) NSGlassEffectView *glassView;
+@property(nonatomic, strong) NSView *electronView;
+@property(nonatomic, strong, nullable) id closeObserver;
+@property(nonatomic, assign) BOOL removing;
+@property(nonatomic, assign) BOOL counted;
+@property(nonatomic, assign) NSRect originalElectronFrame;
+@property(nonatomic, assign) NSAutoresizingMaskOptions originalElectronAutoresizingMask;
+@property(nonatomic, assign) NSWindowStyleMask originalWindowStyleMask;
+@end
+
+static void cleanup_liquid_glass_state(BuddyLiquidGlassState *state, BOOL restoreElectronView)
+  API_AVAILABLE(macos(26.0));
+
+@implementation BuddyLiquidGlassState
+- (void)dealloc {
+  if (_closeObserver != nil) {
+    [NSNotificationCenter.defaultCenter removeObserver:_closeObserver];
+  }
+}
+@end
+
+static bool liquid_glass_is_supported(void) {
+  if (@available(macOS 26.0, *)) {
+    return NSClassFromString(@"NSGlassEffectView") != nil;
+  }
+  return false;
+}
+
+static NSColor *liquid_glass_color_from_hex(NSString *value) API_AVAILABLE(macos(26.0)) {
+  if (![value isKindOfClass:NSString.class] || value.length != 9 ||
+      ![value hasPrefix:@"#"]) {
+    return nil;
+  }
+  NSString *digits = [value substringFromIndex:1];
+  NSCharacterSet *invalid = [[NSCharacterSet
+    characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet];
+  if ([digits rangeOfCharacterFromSet:invalid].location != NSNotFound) return nil;
+
+  unsigned int rgba = 0;
+  NSScanner *scanner = [NSScanner scannerWithString:digits];
+  if (![scanner scanHexInt:&rgba] || !scanner.isAtEnd) return nil;
+  return [NSColor colorWithSRGBRed:((rgba >> 24) & 0xff) / 255.0
+                            green:((rgba >> 16) & 0xff) / 255.0
+                             blue:((rgba >> 8) & 0xff) / 255.0
+                            alpha:(rgba & 0xff) / 255.0];
+}
+
+static BuddyLiquidGlassOptions *parse_liquid_glass_options(
+  NSString *json,
+  NSString **error
+) API_AVAILABLE(macos(26.0)) {
+  NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
+  NSError *jsonError = nil;
+  id value = data == nil ? nil : [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
+  if (![value isKindOfClass:NSDictionary.class]) {
+    *error = jsonError == nil ? @"options must be a JSON object" : @"options are not valid JSON";
+    return nil;
+  }
+
+  NSDictionary *options = value;
+  NSSet<NSString *> *allowed = [NSSet setWithArray:@[
+    @"style", @"cornerRadius", @"tintColor",
+  ]];
+  for (id key in options) {
+    if (![key isKindOfClass:NSString.class] || ![allowed containsObject:key]) {
+      *error = @"options contain an unknown property";
+      return nil;
+    }
+  }
+  if (options.count != allowed.count || options[@"style"] == nil ||
+      options[@"cornerRadius"] == nil || options[@"tintColor"] == nil) {
+    *error = @"options must contain style, cornerRadius, and tintColor";
+    return nil;
+  }
+
+  NSString *style = options[@"style"];
+  if (![style isKindOfClass:NSString.class]) {
+    *error = @"style must be regular or clear";
+    return nil;
+  }
+  NSGlassEffectViewStyle nativeStyle;
+  if ([style isEqualToString:@"regular"]) {
+    nativeStyle = NSGlassEffectViewStyleRegular;
+  } else if ([style isEqualToString:@"clear"]) {
+    nativeStyle = NSGlassEffectViewStyleClear;
+  } else {
+    *error = @"style must be regular or clear";
+    return nil;
+  }
+
+  NSNumber *cornerRadius = options[@"cornerRadius"];
+  if (![cornerRadius isKindOfClass:NSNumber.class] ||
+      CFGetTypeID((__bridge CFTypeRef)cornerRadius) == CFBooleanGetTypeID() ||
+      !isfinite(cornerRadius.doubleValue) || cornerRadius.doubleValue < 0 ||
+      cornerRadius.doubleValue > 1000) {
+    *error = @"cornerRadius must be a finite number from 0 through 1000";
+    return nil;
+  }
+
+  id tintValue = options[@"tintColor"];
+  NSColor *tintColor = nil;
+  if (tintValue != NSNull.null) {
+    tintColor = liquid_glass_color_from_hex(tintValue);
+    if (tintColor == nil) {
+      *error = @"tintColor must be null or #RRGGBBAA";
+      return nil;
+    }
+  }
+
+  BuddyLiquidGlassOptions *parsed = [[BuddyLiquidGlassOptions alloc] init];
+  parsed.style = nativeStyle;
+  parsed.cornerRadius = (CGFloat)cornerRadius.doubleValue;
+  parsed.tintColor = tintColor;
+  return parsed;
+}
+
+static bool validate_installed_liquid_glass_state(
+  BuddyLiquidGlassState *state,
+  NSWindow *window,
+  NSView *providedView,
+  NSString **error
+) API_AVAILABLE(macos(26.0)) {
+  if (state.window != window || state.removing) {
+    *error = @"the native window is already being torn down";
+    return false;
+  }
+  if (providedView != state.glassView && providedView != state.electronView) {
+    *error = @"the native handle does not belong to the installed glass hierarchy";
+    return false;
+  }
+  if (window.contentView != state.glassView ||
+      state.glassView.contentView != state.electronView ||
+      state.electronView.window != window) {
+    *error = @"the Electron content hierarchy changed after glass installation";
+    return false;
+  }
+  return true;
+}
+
+static void apply_liquid_glass_options(
+  NSGlassEffectView *glassView,
+  BuddyLiquidGlassOptions *options
+) API_AVAILABLE(macos(26.0)) {
+  glassView.style = options.style;
+  glassView.cornerRadius = options.cornerRadius;
+  glassView.tintColor = options.tintColor;
+}
+
+/*
+ * Bounded Liquid Glass backgrounds for Chromium-rendered overlay popups.
+ * AppKit glass siblings can composite above Chromium's hosted layer even when
+ * their NSView order says otherwise. Keep the glass in a click-through child
+ * window explicitly ordered below Electron so renderer text is never masked.
+ */
+static const void *buddy_liquid_glass_regions_state_key =
+  &buddy_liquid_glass_regions_state_key;
+static NSUInteger active_liquid_glass_regions_state_count = 0;
+
+API_AVAILABLE(macos(26.0))
+@interface BuddyLiquidGlassRegionSpec : NSObject
+@property(nonatomic, copy) NSString *identifier;
+@property(nonatomic, assign) NSRect topLeftRect;
+@property(nonatomic, strong) BuddyLiquidGlassOptions *options;
+@end
+
+@implementation BuddyLiquidGlassRegionSpec
+@end
+
+API_AVAILABLE(macos(26.0))
+@interface BuddyLiquidGlassRegionsPayload : NSObject
+@property(nonatomic, assign) CGFloat spacing;
+@property(nonatomic, copy) NSArray<BuddyLiquidGlassRegionSpec *> *regions;
+@end
+
+@implementation BuddyLiquidGlassRegionsPayload
+@end
+
+API_AVAILABLE(macos(26.0))
+@interface BuddyLiquidGlassRegionsState : NSObject
+@property(nonatomic, weak) NSWindow *window;
+@property(nonatomic, strong) NSWindow *backingWindow;
+@property(nonatomic, strong) NSGlassEffectContainerView *containerView;
+@property(nonatomic, strong) NSView *hostView;
+@property(nonatomic, strong) NSView *electronView;
+@property(nonatomic, strong) NSMutableDictionary<NSString *, NSGlassEffectView *> *regionViews;
+@property(nonatomic, strong, nullable) id closeObserver;
+@property(nonatomic, assign) BOOL removing;
+@property(nonatomic, assign) BOOL counted;
+@end
+
+static void cleanup_liquid_glass_regions_state(
+  BuddyLiquidGlassRegionsState *state
+) API_AVAILABLE(macos(26.0));
+
+@implementation BuddyLiquidGlassRegionsState
+- (void)dealloc {
+  if (_closeObserver != nil) {
+    [NSNotificationCenter.defaultCenter removeObserver:_closeObserver];
+  }
+}
+@end
+
+static bool valid_region_number(id value, double minimum, double maximum) {
+  return [value isKindOfClass:NSNumber.class] &&
+    CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID() &&
+    isfinite([value doubleValue]) && [value doubleValue] >= minimum &&
+    [value doubleValue] <= maximum;
+}
+
+static BuddyLiquidGlassRegionsPayload *parse_liquid_glass_regions_payload(
+  NSString *json,
+  NSString **error
+) API_AVAILABLE(macos(26.0)) {
+  NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
+  id value = data == nil ? nil : [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+  if (![value isKindOfClass:NSDictionary.class]) {
+    *error = @"region payload must be a JSON object";
+    return nil;
+  }
+  NSDictionary *payload = value;
+  if (payload.count != 2 || payload[@"spacing"] == nil || payload[@"regions"] == nil) {
+    *error = @"region payload must contain spacing and regions";
+    return nil;
+  }
+  if (!valid_region_number(payload[@"spacing"], 0, 1000)) {
+    *error = @"region spacing must be a finite number from 0 through 1000";
+    return nil;
+  }
+  NSArray *regions = payload[@"regions"];
+  if (![regions isKindOfClass:NSArray.class] || regions.count > 8) {
+    *error = @"regions must be an array with at most 8 entries";
+    return nil;
+  }
+
+  NSMutableSet<NSString *> *identifiers = [NSMutableSet set];
+  NSMutableArray<BuddyLiquidGlassRegionSpec *> *parsed = [NSMutableArray array];
+  NSSet<NSString *> *allowed = [NSSet setWithArray:@[
+    @"id", @"x", @"y", @"width", @"height", @"style", @"cornerRadius", @"tintColor",
+  ]];
+  NSRegularExpression *identifierPattern = [NSRegularExpression
+    regularExpressionWithPattern:@"^[a-z0-9][a-z0-9-]{0,63}$"
+                         options:0
+                           error:nil];
+  for (id item in regions) {
+    if (![item isKindOfClass:NSDictionary.class]) {
+      *error = @"every region must be an object";
+      return nil;
+    }
+    NSDictionary *region = item;
+    if (region.count != allowed.count) {
+      *error = @"every region must contain the complete region contract";
+      return nil;
+    }
+    for (id key in region) {
+      if (![key isKindOfClass:NSString.class] || ![allowed containsObject:key]) {
+        *error = @"a region contains an unknown property";
+        return nil;
+      }
+    }
+    NSString *identifier = region[@"id"];
+    if (![identifier isKindOfClass:NSString.class] ||
+        [identifierPattern numberOfMatchesInString:identifier
+                                           options:0
+                                             range:NSMakeRange(0, identifier.length)] != 1 ||
+        [identifiers containsObject:identifier]) {
+      *error = @"region ids must be unique canonical identifiers";
+      return nil;
+    }
+    if (!valid_region_number(region[@"x"], -20000, 20000) ||
+        !valid_region_number(region[@"y"], -20000, 20000) ||
+        !valid_region_number(region[@"width"], 0.01, 20000) ||
+        !valid_region_number(region[@"height"], 0.01, 20000)) {
+      *error = @"region geometry must contain finite positive dimensions";
+      return nil;
+    }
+
+    NSDictionary *optionDictionary = @{
+      @"style": region[@"style"],
+      @"cornerRadius": region[@"cornerRadius"],
+      @"tintColor": region[@"tintColor"],
+    };
+    NSData *optionData = [NSJSONSerialization dataWithJSONObject:optionDictionary options:0 error:nil];
+    NSString *optionJSON = optionData == nil
+      ? nil
+      : [[NSString alloc] initWithData:optionData encoding:NSUTF8StringEncoding];
+    BuddyLiquidGlassOptions *options = optionJSON == nil
+      ? nil
+      : parse_liquid_glass_options(optionJSON, error);
+    if (options == nil) return nil;
+
+    BuddyLiquidGlassRegionSpec *spec = [[BuddyLiquidGlassRegionSpec alloc] init];
+    spec.identifier = identifier;
+    spec.topLeftRect = NSMakeRect(
+      [region[@"x"] doubleValue],
+      [region[@"y"] doubleValue],
+      [region[@"width"] doubleValue],
+      [region[@"height"] doubleValue]
+    );
+    spec.options = options;
+    [identifiers addObject:identifier];
+    [parsed addObject:spec];
+  }
+
+  BuddyLiquidGlassRegionsPayload *result = [[BuddyLiquidGlassRegionsPayload alloc] init];
+  result.spacing = [payload[@"spacing"] doubleValue];
+  result.regions = parsed;
+  return result;
+}
+
+static bool validate_liquid_glass_regions_state(
+  BuddyLiquidGlassRegionsState *state,
+  NSWindow *window,
+  NSView *providedView,
+  NSString **error
+) API_AVAILABLE(macos(26.0)) {
+  if (state.window != window || state.removing) {
+    *error = @"the native region hierarchy is being torn down";
+    return false;
+  }
+  if (providedView != state.electronView) {
+    *error = @"the native handle does not belong to the region hierarchy";
+    return false;
+  }
+  if (window.contentView != state.electronView || state.electronView.window != window ||
+      state.backingWindow.parentWindow != window ||
+      state.backingWindow.contentView != state.containerView ||
+      state.containerView.contentView != state.hostView) {
+    *error = @"the Electron region hierarchy changed after installation";
+    return false;
+  }
+  return true;
+}
+
+static bool apply_liquid_glass_region_payload(
+  BuddyLiquidGlassRegionsState *state,
+  BuddyLiquidGlassRegionsPayload *payload,
+  NSString **error
+) API_AVAILABLE(macos(26.0)) {
+  [state.backingWindow setFrame:state.window.frame display:NO];
+  state.containerView.frame = NSMakeRect(
+    0,
+    0,
+    state.backingWindow.contentLayoutRect.size.width,
+    state.backingWindow.contentLayoutRect.size.height
+  );
+  state.hostView.frame = state.containerView.bounds;
+  state.containerView.spacing = payload.spacing;
+  NSMutableSet<NSString *> *desired = [NSMutableSet set];
+  CGFloat hostHeight = state.hostView.bounds.size.height;
+  for (BuddyLiquidGlassRegionSpec *spec in payload.regions) {
+    NSRect top = spec.topLeftRect;
+    if (top.origin.x < 0 || top.origin.y < 0 || NSMaxX(top) > state.hostView.bounds.size.width ||
+        NSMaxY(top) > hostHeight) {
+      *error = @"a region falls outside the overlay content bounds";
+      return false;
+    }
+    [desired addObject:spec.identifier];
+    NSGlassEffectView *glass = state.regionViews[spec.identifier];
+    if (glass == nil) {
+      glass = [[NSGlassEffectView alloc] initWithFrame:NSZeroRect];
+      NSView *content = [[NSView alloc] initWithFrame:NSZeroRect];
+      content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+      glass.contentView = content;
+      [state.hostView addSubview:glass];
+      state.regionViews[spec.identifier] = glass;
+    }
+    apply_liquid_glass_options(glass, spec.options);
+    glass.frame = NSMakeRect(
+      top.origin.x,
+      hostHeight - top.origin.y - top.size.height,
+      top.size.width,
+      top.size.height
+    );
+    glass.contentView.frame = glass.bounds;
+  }
+  for (NSString *identifier in [state.regionViews.allKeys copy]) {
+    if (![desired containsObject:identifier]) {
+      NSGlassEffectView *glass = state.regionViews[identifier];
+      glass.contentView = nil;
+      [glass removeFromSuperview];
+      [state.regionViews removeObjectForKey:identifier];
+    }
+  }
+  return true;
+}
+
+static void cleanup_liquid_glass_regions_state(
+  BuddyLiquidGlassRegionsState *state
+) {
+  if (state == nil || state.removing) return;
+  state.removing = YES;
+  NSWindow *window = state.window;
+  for (NSGlassEffectView *glass in state.regionViews.allValues) glass.contentView = nil;
+  [state.regionViews removeAllObjects];
+  state.containerView.contentView = nil;
+  if (window != nil && state.backingWindow.parentWindow == window) {
+    [window removeChildWindow:state.backingWindow];
+  }
+  [state.backingWindow orderOut:nil];
+  [state.backingWindow close];
+  if (window != nil &&
+      objc_getAssociatedObject(window, buddy_liquid_glass_regions_state_key) == state) {
+    objc_setAssociatedObject(
+      window,
+      buddy_liquid_glass_regions_state_key,
+      nil,
+      OBJC_ASSOCIATION_RETAIN_NONATOMIC
+    );
+  }
+  if (state.counted) {
+    if (active_liquid_glass_regions_state_count > 0) active_liquid_glass_regions_state_count -= 1;
+    state.counted = NO;
+  }
+}
+
+static bool set_liquid_glass_regions_on_main(
+  NSView *providedView,
+  BuddyLiquidGlassRegionsPayload *payload,
+  NSString **error
+) API_AVAILABLE(macos(26.0)) {
+  NSWindow *window = providedView.window;
+  if (window == nil) {
+    *error = @"the native view is not attached to a window";
+    return false;
+  }
+  if (objc_getAssociatedObject(window, buddy_liquid_glass_state_key) != nil) {
+    *error = @"whole-window Liquid Glass is already installed";
+    return false;
+  }
+  BuddyLiquidGlassRegionsState *state = objc_getAssociatedObject(
+    window, buddy_liquid_glass_regions_state_key
+  );
+  if (state != nil) {
+    if (!validate_liquid_glass_regions_state(state, window, providedView, error)) return false;
+    return apply_liquid_glass_region_payload(state, payload, error);
+  }
+  if (window.contentView != providedView) {
+    *error = @"Electron's native handle is not the NSWindow content view";
+    return false;
+  }
+
+  state = [[BuddyLiquidGlassRegionsState alloc] init];
+  state.window = window;
+  state.electronView = providedView;
+  state.regionViews = [NSMutableDictionary dictionary];
+  state.backingWindow = [[NSWindow alloc]
+    initWithContentRect:window.frame
+              styleMask:NSWindowStyleMaskBorderless
+                backing:NSBackingStoreBuffered
+                  defer:NO];
+  state.backingWindow.opaque = NO;
+  state.backingWindow.backgroundColor = NSColor.clearColor;
+  state.backingWindow.hasShadow = NO;
+  state.backingWindow.ignoresMouseEvents = YES;
+  state.backingWindow.releasedWhenClosed = NO;
+  state.backingWindow.collectionBehavior =
+    NSWindowCollectionBehaviorCanJoinAllSpaces |
+    NSWindowCollectionBehaviorFullScreenAuxiliary |
+    NSWindowCollectionBehaviorIgnoresCycle;
+  state.containerView = [[NSGlassEffectContainerView alloc]
+    initWithFrame:NSMakeRect(0, 0, window.frame.size.width, window.frame.size.height)];
+  state.containerView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  state.hostView = [[NSView alloc] initWithFrame:state.containerView.bounds];
+  state.hostView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+
+  state.backingWindow.contentView = state.containerView;
+  state.containerView.contentView = state.hostView;
+  [window addChildWindow:state.backingWindow ordered:NSWindowBelow];
+
+  if (window.contentView != state.electronView ||
+      state.backingWindow.parentWindow != window ||
+      state.backingWindow.contentView != state.containerView ||
+      state.containerView.contentView != state.hostView || state.electronView.window != window) {
+    cleanup_liquid_glass_regions_state(state);
+    *error = @"AppKit did not preserve the required region hierarchy";
+    return false;
+  }
+  if (!apply_liquid_glass_region_payload(state, payload, error)) {
+    cleanup_liquid_glass_regions_state(state);
+    return false;
+  }
+
+  objc_setAssociatedObject(
+    window,
+    buddy_liquid_glass_regions_state_key,
+    state,
+    OBJC_ASSOCIATION_RETAIN_NONATOMIC
+  );
+  active_liquid_glass_regions_state_count += 1;
+  state.counted = YES;
+  __weak BuddyLiquidGlassRegionsState *weakState = state;
+  state.closeObserver = [NSNotificationCenter.defaultCenter
+    addObserverForName:NSWindowWillCloseNotification
+                object:window
+                 queue:NSOperationQueue.mainQueue
+            usingBlock:^(__unused NSNotification *notification) {
+              cleanup_liquid_glass_regions_state(weakState);
+            }];
+  return true;
+}
+
+static void cleanup_liquid_glass_state(
+  BuddyLiquidGlassState *state,
+  BOOL restoreElectronView
+) {
+  if (state == nil || state.removing) return;
+  state.removing = YES;
+
+  NSWindow *window = state.window;
+  NSRect currentWindowFrame = window == nil ? NSZeroRect : window.frame;
+  NSRect currentGlassFrame = state.glassView.frame;
+  if (state.glassView.contentView == state.electronView) {
+    state.glassView.contentView = nil;
+  }
+  if (restoreElectronView && window != nil && window.contentView == state.glassView) {
+    /* Reparent while full-size sizing is still active, then restore the window contract. */
+    window.contentView = state.electronView;
+    window.styleMask = state.originalWindowStyleMask;
+    [window setFrame:currentWindowFrame display:NO];
+    state.electronView.frame = NSMakeRect(
+      state.originalElectronFrame.origin.x,
+      state.originalElectronFrame.origin.y,
+      currentGlassFrame.size.width,
+      currentGlassFrame.size.height
+    );
+    state.electronView.autoresizingMask = state.originalElectronAutoresizingMask;
+  }
+  if (window != nil && objc_getAssociatedObject(window, buddy_liquid_glass_state_key) == state) {
+    objc_setAssociatedObject(
+      window,
+      buddy_liquid_glass_state_key,
+      nil,
+      OBJC_ASSOCIATION_RETAIN_NONATOMIC
+    );
+  }
+  if (state.counted) {
+    if (active_liquid_glass_state_count > 0) active_liquid_glass_state_count -= 1;
+    state.counted = NO;
+  }
+}
+
+static bool install_liquid_glass_on_main(
+  NSView *providedView,
+  BuddyLiquidGlassOptions *options,
+  NSString **error
+) API_AVAILABLE(macos(26.0)) {
+  NSWindow *window = providedView.window;
+  if (window == nil) {
+    *error = @"the native view is not attached to a window";
+    return false;
+  }
+  if (objc_getAssociatedObject(window, buddy_liquid_glass_regions_state_key) != nil) {
+    *error = @"bounded Liquid Glass regions are already installed";
+    return false;
+  }
+
+  BuddyLiquidGlassState *existing = objc_getAssociatedObject(
+    window, buddy_liquid_glass_state_key
+  );
+  if (existing != nil) {
+    if (!validate_installed_liquid_glass_state(existing, window, providedView, error)) return false;
+    apply_liquid_glass_options(existing.glassView, options);
+    return true;
+  }
+
+  if (window.contentView != providedView) {
+    *error = @"Electron's native handle is not the NSWindow content view";
+    return false;
+  }
+  if ([providedView isKindOfClass:NSGlassEffectView.class]) {
+    *error = @"the window already has an unmanaged glass content view";
+    return false;
+  }
+
+  BuddyLiquidGlassState *state = [[BuddyLiquidGlassState alloc] init];
+  state.window = window;
+  state.electronView = providedView;
+  state.originalElectronFrame = providedView.frame;
+  state.originalElectronAutoresizingMask = providedView.autoresizingMask;
+  state.originalWindowStyleMask = window.styleMask;
+  state.glassView = [[NSGlassEffectView alloc] initWithFrame:providedView.frame];
+  state.glassView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  apply_liquid_glass_options(state.glassView, options);
+
+  /*
+   * Electron's frameless NSWindow remains titled for rounded corners and its
+   * Views root spans the titlebar area. A generic replacement content view is
+   * otherwise constrained to contentLayoutRect (32 px shorter on macOS 26).
+   * Use AppKit's public full-size-content contract while glass is installed.
+   */
+  window.styleMask = window.styleMask | NSWindowStyleMaskFullSizeContentView;
+  /* NSWindow releases its old content view here; state retains Electron's root. */
+  window.contentView = state.glassView;
+  state.glassView.contentView = providedView;
+  /* AppKit installs an internal content host when contentView is assigned. */
+  providedView.frame = state.glassView.bounds;
+  providedView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+
+  if (window.contentView != state.glassView ||
+      state.glassView.contentView != providedView || providedView.window != window) {
+    cleanup_liquid_glass_state(state, YES);
+    *error = @"AppKit did not preserve the required glass content hierarchy";
+    return false;
+  }
+
+  objc_setAssociatedObject(
+    window,
+    buddy_liquid_glass_state_key,
+    state,
+    OBJC_ASSOCIATION_RETAIN_NONATOMIC
+  );
+  active_liquid_glass_state_count += 1;
+  state.counted = YES;
+  __weak BuddyLiquidGlassState *weakState = state;
+  state.closeObserver = [NSNotificationCenter.defaultCenter
+    addObserverForName:NSWindowWillCloseNotification
+                object:window
+                 queue:NSOperationQueue.mainQueue
+            usingBlock:^(__unused NSNotification *notification) {
+              BuddyLiquidGlassState *strongState = weakState;
+              cleanup_liquid_glass_state(strongState, YES);
+            }];
+  return true;
+}
+
+static bool update_liquid_glass_on_main(
+  NSView *providedView,
+  BuddyLiquidGlassOptions *options,
+  NSString **error
+) API_AVAILABLE(macos(26.0)) {
+  NSWindow *window = providedView.window;
+  if (window == nil) {
+    *error = @"the native view is not attached to a window";
+    return false;
+  }
+  BuddyLiquidGlassState *state = objc_getAssociatedObject(window, buddy_liquid_glass_state_key);
+  if (state == nil) {
+    *error = @"Liquid Glass is not installed on this window";
+    return false;
+  }
+  if (!validate_installed_liquid_glass_state(state, window, providedView, error)) return false;
+  apply_liquid_glass_options(state.glassView, options);
+  return true;
+}
+
+static bool remove_liquid_glass_on_main(NSView *providedView, NSString **error)
+  API_AVAILABLE(macos(26.0)) {
+  NSWindow *window = providedView.window;
+  if (window == nil) {
+    *error = @"the native view is not attached to a window";
+    return false;
+  }
+  BuddyLiquidGlassState *state = objc_getAssociatedObject(window, buddy_liquid_glass_state_key);
+  if (state == nil) {
+    if (window.contentView != providedView) {
+      *error = @"the native handle is not the NSWindow content view";
+      return false;
+    }
+    return true;
+  }
+  if (!validate_installed_liquid_glass_state(state, window, providedView, error)) return false;
+  cleanup_liquid_glass_state(state, YES);
+  return true;
+}
+
+static bool copy_native_view_handle(
+  napi_env env,
+  napi_callback_info info,
+  size_t expectedArgumentCount,
+  napi_value *arguments,
+  NSView **view,
+  NSString **optionsJSON,
+  NSString **error
+) {
+  size_t argc = expectedArgumentCount;
+  if (napi_get_cb_info(env, info, &argc, arguments, NULL, NULL) != 0 ||
+      argc != expectedArgumentCount) {
+    *error = @"invalid argument count";
+    return false;
+  }
+  void *bufferData = NULL;
+  size_t bufferLength = 0;
+  if (napi_get_buffer_info(env, arguments[0], &bufferData, &bufferLength) != 0 ||
+      bufferData == NULL || bufferLength != sizeof(void *)) {
+    *error = @"native handle must be a pointer-sized Buffer";
+    return false;
+  }
+  void *pointer = *(void **)bufferData;
+  if (pointer == NULL) {
+    *error = @"native handle contains a null view pointer";
+    return false;
+  }
+  *view = (__bridge NSView *)pointer;
+
+  if (optionsJSON != NULL) {
+    size_t length = 0;
+    if (napi_get_value_string_utf8(env, arguments[1], NULL, 0, &length) != 0 ||
+        length == 0 || length > 4096) {
+      *error = @"options must be a non-empty JSON string up to 4096 bytes";
+      return false;
+    }
+    char *buffer = calloc(length + 1, 1);
+    if (buffer == NULL ||
+        napi_get_value_string_utf8(env, arguments[1], buffer, length + 1, &length) != 0) {
+      free(buffer);
+      *error = @"could not read options JSON";
+      return false;
+    }
+    *optionsJSON = [[NSString alloc] initWithBytes:buffer
+                                           length:length
+                                         encoding:NSUTF8StringEncoding];
+    free(buffer);
+    if (*optionsJSON == nil) {
+      *error = @"options must be valid UTF-8";
+      return false;
+    }
+  }
+  return true;
+}
+
+static napi_value supports_liquid_glass(napi_env env, napi_callback_info info) {
+  size_t argc = 0;
+  if (napi_get_cb_info(env, info, &argc, NULL, NULL, NULL) != 0 || argc != 0) {
+    return throw_liquid_glass_error(env, @"supportsLiquidGlass takes no arguments");
+  }
+  napi_value result = NULL;
+  napi_get_boolean(env, liquid_glass_is_supported(), &result);
+  return result;
+}
+
+typedef NS_ENUM(NSInteger, BuddyLiquidGlassOperation) {
+  BuddyLiquidGlassOperationInstall,
+  BuddyLiquidGlassOperationUpdate,
+  BuddyLiquidGlassOperationRemove,
+};
+
+static napi_value run_liquid_glass_operation(
+  napi_env env,
+  napi_callback_info info,
+  BuddyLiquidGlassOperation operation
+) {
+  if (!liquid_glass_is_supported()) {
+    return throw_liquid_glass_error(env, @"requires macOS 26 or newer");
+  }
+
+  @autoreleasepool {
+    size_t argumentCount = operation == BuddyLiquidGlassOperationRemove ? 1 : 2;
+    napi_value arguments[2] = { NULL, NULL };
+    NSView *view = nil;
+    NSString *optionsJSON = nil;
+    NSString *error = nil;
+    if (!copy_native_view_handle(
+          env,
+          info,
+          argumentCount,
+          arguments,
+          &view,
+          operation == BuddyLiquidGlassOperationRemove ? NULL : &optionsJSON,
+          &error
+        )) {
+      return throw_liquid_glass_error(env, error);
+    }
+
+    __block bool succeeded = false;
+    __block NSString *operationError = nil;
+    void (^operationBlock)(void) = ^{
+      if (@available(macOS 26.0, *)) {
+        if (![view isKindOfClass:NSView.class]) {
+          operationError = @"native handle does not reference an NSView";
+          return;
+        }
+        BuddyLiquidGlassOptions *options = nil;
+        if (operation != BuddyLiquidGlassOperationRemove) {
+          options = parse_liquid_glass_options(optionsJSON, &operationError);
+          if (options == nil) return;
+        }
+        switch (operation) {
+          case BuddyLiquidGlassOperationInstall:
+            succeeded = install_liquid_glass_on_main(view, options, &operationError);
+            break;
+          case BuddyLiquidGlassOperationUpdate:
+            succeeded = update_liquid_glass_on_main(view, options, &operationError);
+            break;
+          case BuddyLiquidGlassOperationRemove:
+            succeeded = remove_liquid_glass_on_main(view, &operationError);
+            break;
+        }
+      } else {
+        operationError = @"requires macOS 26 or newer";
+      }
+    };
+    if (NSThread.isMainThread) {
+      operationBlock();
+    } else {
+      dispatch_sync(dispatch_get_main_queue(), operationBlock);
+    }
+    if (!succeeded) {
+      return throw_liquid_glass_error(
+        env,
+        operationError == nil ? @"the native operation failed" : operationError
+      );
+    }
+    napi_value result = NULL;
+    napi_get_boolean(env, true, &result);
+    return result;
+  }
+}
+
+static napi_value install_liquid_glass(napi_env env, napi_callback_info info) {
+  return run_liquid_glass_operation(env, info, BuddyLiquidGlassOperationInstall);
+}
+
+static napi_value update_liquid_glass(napi_env env, napi_callback_info info) {
+  return run_liquid_glass_operation(env, info, BuddyLiquidGlassOperationUpdate);
+}
+
+static napi_value remove_liquid_glass(napi_env env, napi_callback_info info) {
+  return run_liquid_glass_operation(env, info, BuddyLiquidGlassOperationRemove);
+}
+
+static napi_value set_liquid_glass_regions(napi_env env, napi_callback_info info) {
+  if (!liquid_glass_is_supported()) {
+    return throw_liquid_glass_error(env, @"requires macOS 26 or newer");
+  }
+  @autoreleasepool {
+    napi_value arguments[2] = { NULL, NULL };
+    NSView *view = nil;
+    NSString *payloadJSON = nil;
+    NSString *argumentError = nil;
+    if (!copy_native_view_handle(
+          env, info, 2, arguments, &view, &payloadJSON, &argumentError
+        )) {
+      return throw_liquid_glass_error(env, argumentError);
+    }
+    __block bool succeeded = false;
+    __block NSString *operationError = nil;
+    void (^operationBlock)(void) = ^{
+      if (@available(macOS 26.0, *)) {
+        if (![view isKindOfClass:NSView.class]) {
+          operationError = @"native handle does not reference an NSView";
+          return;
+        }
+        BuddyLiquidGlassRegionsPayload *payload = parse_liquid_glass_regions_payload(
+          payloadJSON, &operationError
+        );
+        if (payload == nil) return;
+        succeeded = set_liquid_glass_regions_on_main(view, payload, &operationError);
+      } else {
+        operationError = @"requires macOS 26 or newer";
+      }
+    };
+    if (NSThread.isMainThread) operationBlock();
+    else dispatch_sync(dispatch_get_main_queue(), operationBlock);
+    if (!succeeded) {
+      return throw_liquid_glass_error(
+        env,
+        operationError == nil ? @"the native region operation failed" : operationError
+      );
+    }
+    napi_value result = NULL;
+    napi_get_boolean(env, true, &result);
+    return result;
+  }
+}
+
+static napi_value inspect_liquid_glass_regions(napi_env env, napi_callback_info info) {
+  @autoreleasepool {
+    napi_value arguments[1] = { NULL };
+    NSView *view = nil;
+    NSString *argumentError = nil;
+    if (!copy_native_view_handle(env, info, 1, arguments, &view, NULL, &argumentError)) {
+      return throw_liquid_glass_error(env, argumentError);
+    }
+    __block bool installed = false;
+    __block NSUInteger regionCount = 0;
+    __block NSUInteger stateCount = 0;
+    __block bool hierarchyValid = false;
+    __block bool electronAboveRegions = false;
+    __block NSString *containerClass = nil;
+    __block NSString *inspectionError = nil;
+    void (^inspectionBlock)(void) = ^{
+      if (@available(macOS 26.0, *)) {
+        NSWindow *window = view.window;
+        if (window == nil) {
+          inspectionError = @"the native view is not attached to a window";
+          return;
+        }
+        stateCount = active_liquid_glass_regions_state_count;
+        BuddyLiquidGlassRegionsState *state = objc_getAssociatedObject(
+          window, buddy_liquid_glass_regions_state_key
+        );
+        if (state == nil) return;
+        installed = true;
+        regionCount = state.regionViews.count;
+        containerClass = NSStringFromClass(state.containerView.class);
+        hierarchyValid = validate_liquid_glass_regions_state(
+          state, window, view, &inspectionError
+        );
+        electronAboveRegions = state.backingWindow.parentWindow == window;
+        for (NSGlassEffectView *glass in state.regionViews.allValues) {
+          if (glass.superview != state.hostView) {
+            electronAboveRegions = false;
+          }
+        }
+      }
+    };
+    if (NSThread.isMainThread) inspectionBlock();
+    else dispatch_sync(dispatch_get_main_queue(), inspectionBlock);
+    if (inspectionError != nil) return throw_liquid_glass_error(env, inspectionError);
+
+    napi_value result = NULL;
+    if (napi_create_object(env, &result) != 0) {
+      return throw_liquid_glass_error(env, @"could not create the region inspection result");
+    }
+    set_boolean(env, result, "supported", liquid_glass_is_supported());
+    set_boolean(env, result, "installed", installed);
+    set_number(env, result, "activeStateCount", stateCount);
+    set_number(env, result, "regionCount", regionCount);
+    set_boolean(env, result, "hierarchyValid", hierarchyValid);
+    set_boolean(env, result, "electronAboveRegions", electronAboveRegions);
+    if (containerClass == nil) set_null(env, result, "containerClass");
+    else set_string(env, result, "containerClass", containerClass);
+    return result;
+  }
+}
+
+static NSString *liquid_glass_tint_hex(NSColor *color) API_AVAILABLE(macos(26.0)) {
+  if (color == nil) return nil;
+  NSColor *srgb = [color colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+  if (srgb == nil) return nil;
+  NSInteger red = (NSInteger)llround(srgb.redComponent * 255.0);
+  NSInteger green = (NSInteger)llround(srgb.greenComponent * 255.0);
+  NSInteger blue = (NSInteger)llround(srgb.blueComponent * 255.0);
+  NSInteger alpha = (NSInteger)llround(srgb.alphaComponent * 255.0);
+  return [NSString stringWithFormat:@"#%02lX%02lX%02lX%02lX",
+    (long)red, (long)green, (long)blue, (long)alpha];
+}
+
+/* Read-only diagnostics used by the Electron lifecycle smoke test and support tooling. */
+static napi_value inspect_liquid_glass(napi_env env, napi_callback_info info) {
+  @autoreleasepool {
+    napi_value arguments[1] = { NULL };
+    NSView *view = nil;
+    NSString *argumentError = nil;
+    if (!copy_native_view_handle(
+          env, info, 1, arguments, &view, NULL, &argumentError
+        )) {
+      return throw_liquid_glass_error(env, argumentError);
+    }
+
+    const bool supported = liquid_glass_is_supported();
+    __block bool installed = false;
+    __block NSUInteger stateCount = 0;
+    __block NSString *wrapperClass = nil;
+    __block NSString *handleRole = @"unmanaged";
+    __block bool contentMatches = false;
+    __block bool sameWindow = false;
+    __block NSInteger hierarchyDepth = 0;
+    __block NSString *style = nil;
+    __block NSNumber *cornerRadius = nil;
+    __block NSString *tintColor = nil;
+    __block NSRect nativeViewFrame = NSZeroRect;
+    __block NSNumber *nativeViewAutoresizingMask = nil;
+    __block NSString *inspectionError = nil;
+
+    if (supported) {
+      void (^inspectionBlock)(void) = ^{
+        if (@available(macOS 26.0, *)) {
+          if (![view isKindOfClass:NSView.class]) {
+            inspectionError = @"native handle does not reference an NSView";
+            return;
+          }
+          NSWindow *window = view.window;
+          if (window == nil) {
+            inspectionError = @"the native view is not attached to a window";
+            return;
+          }
+          nativeViewFrame = view.frame;
+          nativeViewAutoresizingMask = @(view.autoresizingMask);
+          stateCount = active_liquid_glass_state_count;
+          BuddyLiquidGlassState *state = objc_getAssociatedObject(
+            window, buddy_liquid_glass_state_key
+          );
+          if (state == nil) return;
+
+          installed = true;
+          wrapperClass = NSStringFromClass(state.glassView.class);
+          if (view == state.electronView) {
+            handleRole = @"electron";
+          } else if (view == state.glassView) {
+            handleRole = @"wrapper";
+          }
+          contentMatches = state.glassView.contentView == state.electronView;
+          sameWindow = state.window == window && state.glassView.window == window &&
+            state.electronView.window == window;
+
+          NSView *ancestor = state.electronView;
+          NSInteger depth = 0;
+          while (ancestor != nil && ancestor != state.glassView && depth < 128) {
+            ancestor = ancestor.superview;
+            depth += 1;
+          }
+          hierarchyDepth = ancestor == state.glassView ? depth : -1;
+          style = state.glassView.style == NSGlassEffectViewStyleClear ? @"clear" : @"regular";
+          cornerRadius = @(state.glassView.cornerRadius);
+          tintColor = liquid_glass_tint_hex(state.glassView.tintColor);
+        }
+      };
+      if (NSThread.isMainThread) {
+        inspectionBlock();
+      } else {
+        dispatch_sync(dispatch_get_main_queue(), inspectionBlock);
+      }
+    }
+    if (inspectionError != nil) return throw_liquid_glass_error(env, inspectionError);
+
+    napi_value result = NULL;
+    if (napi_create_object(env, &result) != 0) {
+      return throw_liquid_glass_error(env, @"could not create the inspection result");
+    }
+    set_boolean(env, result, "supported", supported);
+    set_boolean(env, result, "installed", installed);
+    set_number(env, result, "activeStateCount", stateCount);
+    if (wrapperClass == nil) set_null(env, result, "wrapperClass");
+    else set_string(env, result, "wrapperClass", wrapperClass);
+    set_string(env, result, "nativeHandleRole", handleRole);
+    set_boolean(env, result, "contentMatchesElectronView", contentMatches);
+    set_boolean(env, result, "sameWindow", sameWindow);
+    set_number(env, result, "hierarchyDepth", hierarchyDepth);
+    if (style == nil) set_null(env, result, "style");
+    else set_string(env, result, "style", style);
+    if (cornerRadius == nil) set_null(env, result, "cornerRadius");
+    else set_number(env, result, "cornerRadius", cornerRadius.doubleValue);
+    if (tintColor == nil) set_null(env, result, "tintColor");
+    else set_string(env, result, "tintColor", tintColor);
+    if (nativeViewAutoresizingMask == nil) {
+      set_null(env, result, "nativeViewFrame");
+      set_null(env, result, "nativeViewAutoresizingMask");
+    } else {
+      set_rect(env, result, "nativeViewFrame", nativeViewFrame);
+      set_number(
+        env,
+        result,
+        "nativeViewAutoresizingMask",
+        nativeViewAutoresizingMask.doubleValue
+      );
+    }
+    return result;
+  }
+}
+
 static NSScreen *screen_for_display_id(double requested_id) {
   for (NSScreen *screen in NSScreen.screens) {
     NSNumber *screen_number = screen.deviceDescription[@"NSScreenNumber"];
@@ -1264,6 +2375,13 @@ napi_value napi_register_module_v1(napi_env env, napi_value exports) {
     { "prepareFocusedReceiverTypeText", 30, prepare_focused_receiver_type_text },
     { "verifyFocusedReceiverTypeText", 29, verify_focused_receiver_type_text },
     { "postInput", 9, post_input },
+    { "supportsLiquidGlass", 19, supports_liquid_glass },
+    { "installLiquidGlass", 18, install_liquid_glass },
+    { "updateLiquidGlass", 17, update_liquid_glass },
+    { "removeLiquidGlass", 17, remove_liquid_glass },
+    { "inspectLiquidGlass", 18, inspect_liquid_glass },
+    { "setLiquidGlassRegions", 21, set_liquid_glass_regions },
+    { "inspectLiquidGlassRegions", 25, inspect_liquid_glass_regions },
   };
 
   for (size_t i = 0; i < sizeof(functions) / sizeof(functions[0]); i++) {

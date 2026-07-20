@@ -30,6 +30,7 @@ import type {
   FilesystemTaskView,
   MicDevice,
   OverlayDisplaySurface,
+  OverlayGlassRegion,
   OverlayHoverConfig,
   OverlayHoverEvent,
   OverlayInteractiveUpdate,
@@ -65,6 +66,8 @@ export interface MainToOverlayEvents {
   'overlay:hover-config': OverlayHoverConfig;
   /** This overlay window's click-through state flipped (dwell-to-interact). */
   'overlay:interactive': OverlayInteractiveUpdate;
+  /** Main confirmed whether bounded native popup glass is active. */
+  'overlay:glass-regions-ready': { enabled: boolean };
   /** Native top-of-display geometry for this overlay's display. */
   'overlay:display-surface': OverlayDisplaySurface;
   // M19 addition: helper buddies on the overlay — a full-list renderer-safe
@@ -117,8 +120,8 @@ export interface MainToPanelEvents {
   'panel:permissions': PermissionHealth;
   /** Latest user-repairable failure; null means the relevant recovery succeeded. */
   'panel:actionable-error': ActionableErrorState;
-  /** Complete raise-hand queue; full-list snapshots prevent lost concurrent requests. */
-  'panel:approvals': ApprovalRequest[];
+  /** Standing browser grants changed outside Settings; refresh the settings card. */
+  'panel:grants-revision': number;
   // M21: 'panel:helper-buddies' and 'panel:show-helper-buddies' retired with the control
   // panel (the helper-buddy view is gone; overlay helper clicks summon the
   // whisper). The remaining panel:* channels serve the settings window +
@@ -126,7 +129,16 @@ export interface MainToPanelEvents {
 }
 
 // ===========================================================================
-// 2b. Main -> Whisper renderer (webContents.send / clicky.on*)
+// 2b. Main -> Approval renderer (webContents.send / clicky.on*)
+// ===========================================================================
+
+export interface MainToApprovalEvents {
+  /** Complete raise-hand queue; full-list snapshots prevent lost concurrent requests. */
+  'approval:requests': ApprovalRequest[];
+}
+
+// ===========================================================================
+// 2c. Main -> Whisper renderer (webContents.send / clicky.on*)
 // ===========================================================================
 
 // M20: the whisper — a small floating composer for talking to buddy by text
@@ -173,6 +185,8 @@ export interface RendererSendEvents {
   // M15 additions: buddy hover.
   /** Hover state machine events: dwell (make interactive) / exit / status. */
   'overlay:hover': OverlayHoverEvent;
+  /** Exact popup backgrounds to mirror with bounded native Liquid Glass. */
+  'overlay:glass-regions': OverlayGlassRegion[];
   /** The buddy was clicked while interactive -> main toggles the whisper. */
   'overlay:buddy-click': null;
   /** The buddy was right-clicked while interactive -> main opens Settings. */
@@ -187,6 +201,8 @@ export interface RendererSendEvents {
   // M20 addition: the whisper composer.
   /** The whisper asked to tuck away (esc / explicit close). */
   'whisper:hide': null;
+  /** Natural standalone approval-card height; main clamps it to the work area. */
+  'approval:content-height': number;
 }
 
 // ===========================================================================
@@ -301,6 +317,7 @@ export interface InvokeChannels {
 
 export type MainToOverlayChannel = keyof MainToOverlayEvents;
 export type MainToPanelChannel = keyof MainToPanelEvents;
+export type MainToApprovalChannel = keyof MainToApprovalEvents;
 export type MainToWhisperChannel = keyof MainToWhisperEvents;
 export type RendererSendChannel = keyof RendererSendEvents;
 export type InvokeChannel = keyof InvokeChannels;
@@ -330,11 +347,14 @@ export interface OverlayApi {
   // M15 additions: buddy hover.
   onHoverConfig(cb: (cfg: OverlayHoverConfig) => void): Unsubscribe;
   onInteractive(cb: (payload: OverlayInteractiveUpdate) => void): Unsubscribe;
+  onGlassRegionsReady(cb: (payload: { enabled: boolean }) => void): Unsubscribe;
   getHoverConfig(): Promise<OverlayHoverConfig>;
   onDisplaySurface(cb: (surface: OverlayDisplaySurface) => void): Unsubscribe;
   getDisplaySurface(): Promise<OverlayDisplaySurface>;
   /** Fire-and-forget hover events (dwell/exit/status). */
   sendHover(evt: OverlayHoverEvent): void;
+  /** Replace this overlay's bounded native popup backgrounds. */
+  sendGlassRegions(regions: OverlayGlassRegion[]): void;
   /** The buddy was clicked while interactive (main toggles the whisper). */
   sendBuddyClick(): void;
   /** The buddy was right-clicked while interactive (main opens Settings). */
@@ -379,7 +399,7 @@ export interface PanelApi {
   onRuntime(cb: (flags: RuntimeFlags) => void): Unsubscribe;
   onPermissions(cb: (health: PermissionHealth) => void): Unsubscribe;
   onActionableError(cb: (state: ActionableErrorState) => void): Unsubscribe;
-  onApprovals(cb: (requests: ApprovalRequest[]) => void): Unsubscribe;
+  onGrantsRevision(cb: (revision: number) => void): Unsubscribe;
   // M17 addition: Codex sign-in state push.
   onCodexSignin(cb: (state: CodexSignInState) => void): Unsubscribe;
 
@@ -411,6 +431,19 @@ export interface PanelApi {
   // playback init failed) — fire-and-forget.
   reportAudioError(payload: AudioDeviceError): void;
 
+  listGrants(): Promise<ApprovalGrant[]>;
+  revokeGrant(id: string): Promise<void>;
+  openBuddyBrowserEnrollment(url: string): Promise<void>;
+  listEnrolledSites(): Promise<EnrolledSite[]>;
+  signOutBuddyBrowserSite(domain: string): Promise<void>;
+  clearBuddyBrowser(): Promise<void>;
+}
+
+/** Exposed only to the standalone approval renderer. */
+export interface ApprovalApi {
+  onRequests(cb: (requests: ApprovalRequest[]) => void): Unsubscribe;
+  /** Resize the transparent host to the card's natural height. */
+  setContentHeight(height: number): void;
   /** Resolve a buddy's pending raise-hand request. */
   resolveApproval(
     helperBuddyId: string,
@@ -422,12 +455,6 @@ export interface PanelApi {
   /** Return the user-assisted browser to the buddy and trigger re-observation. */
   hideApprovalWindow(helperBuddyId: string, approvalId: string): Promise<void>;
   listApprovals(): Promise<ApprovalRequest[]>;
-  listGrants(): Promise<ApprovalGrant[]>;
-  revokeGrant(id: string): Promise<void>;
-  openBuddyBrowserEnrollment(url: string): Promise<void>;
-  listEnrolledSites(): Promise<EnrolledSite[]>;
-  signOutBuddyBrowserSite(domain: string): Promise<void>;
-  clearBuddyBrowser(): Promise<void>;
 }
 
 /** M20: exposed to the whisper renderer as `window.clicky`. */

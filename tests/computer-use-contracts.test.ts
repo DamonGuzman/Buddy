@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { InvokeArgs, InvokeResult, MainToPanelEvents, PanelApi } from '../src/shared/ipc';
+import type {
+  ApprovalApi,
+  InvokeArgs,
+  InvokeResult,
+  MainToApprovalEvents,
+  PanelApi,
+} from '../src/shared/ipc';
 import type {
   HelperBuddyStatus,
   HelperBuddyStep,
@@ -10,11 +16,15 @@ import type {
 } from '../src/shared/types';
 
 const electron = vi.hoisted(() => {
-  const api = { current: null as PanelApi | null };
+  const api = {
+    panel: null as PanelApi | null,
+    approval: null as ApprovalApi | null,
+  };
   return {
     api,
-    exposeInMainWorld: vi.fn((_name: string, exposed: PanelApi) => {
-      api.current = exposed;
+    exposeInMainWorld: vi.fn((_name: string, exposed: PanelApi | ApprovalApi) => {
+      if ('onRequests' in exposed) api.approval = exposed;
+      else api.panel = exposed;
     }),
     invoke: vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>(),
     on: vi.fn(),
@@ -34,6 +44,7 @@ vi.mock('electron', () => ({
 }));
 
 await import('../src/preload/panel');
+await import('../src/preload/approval');
 
 function expectType<T>(_value: T): void {}
 
@@ -42,6 +53,7 @@ describe('computer-use shared contracts', () => {
     electron.invoke.mockReset();
     electron.on.mockReset();
     electron.removeListener.mockReset();
+    electron.send.mockReset();
   });
 
   it('keeps the new lifecycle, step, approval, and grant shapes renderer-safe', () => {
@@ -93,7 +105,11 @@ describe('computer-use shared contracts', () => {
     };
     const site: EnrolledSite = { domain: 'linear.app', cookieCount: 2 };
 
-    expectType<MainToPanelEvents['panel:approvals']>([request, capabilityRequest, liveRequest]);
+    expectType<MainToApprovalEvents['approval:requests']>([
+      request,
+      capabilityRequest,
+      liveRequest,
+    ]);
     expectType<InvokeArgs<'approval:resolve'>>(['helper-buddy-1', 'approval-1', 'always']);
     expectType<InvokeResult<'approvals:list'>>([request]);
     expectType<InvokeResult<'grants:list'>>([grant]);
@@ -107,21 +123,21 @@ describe('computer-use shared contracts', () => {
   });
 
   it('exposes full approval-queue subscriptions without exposing Electron', () => {
-    const api = electron.api.current;
+    const api = electron.api.approval;
     expect(api).not.toBeNull();
     if (!api) return;
 
     const callback = vi.fn();
-    const unsubscribe = api.onApprovals(callback);
+    const unsubscribe = api.onRequests(callback);
 
     expect(electron.on).toHaveBeenCalledOnce();
-    expect(electron.on.mock.calls[0]?.[0]).toBe('panel:approvals');
+    expect(electron.on.mock.calls[0]?.[0]).toBe('approval:requests');
     expect(typeof unsubscribe).toBe('function');
     expect(api).not.toHaveProperty('ipcRenderer');
   });
 
   it('maps every approval and enrollment API to its typed invoke channel', async () => {
-    const api = electron.api.current;
+    const api = electron.api.approval;
     expect(api).not.toBeNull();
     if (!api) return;
 
@@ -130,6 +146,31 @@ describe('computer-use shared contracts', () => {
     await api.showApprovalWindow('helper-buddy-1', 'approval-1');
     await api.hideApprovalWindow('helper-buddy-1', 'approval-1');
     await api.listApprovals();
+
+    expect(electron.invoke.mock.calls).toEqual([
+      ['approval:resolve', 'helper-buddy-1', 'approval-1', 'once'],
+      ['approval:show-window', 'helper-buddy-1', 'approval-1'],
+      ['approval:hide-window', 'helper-buddy-1', 'approval-1'],
+      ['approvals:list'],
+    ]);
+  });
+
+  it('reports the approval card height through the standalone preload', () => {
+    const api = electron.api.approval;
+    expect(api).not.toBeNull();
+    if (!api) return;
+
+    api.setContentHeight(512);
+
+    expect(electron.send).toHaveBeenCalledWith('approval:content-height', 512);
+  });
+
+  it('keeps grant and enrollment management on the Settings preload', async () => {
+    const api = electron.api.panel;
+    expect(api).not.toBeNull();
+    if (!api) return;
+
+    electron.invoke.mockResolvedValue(undefined);
     await api.listGrants();
     await api.revokeGrant('grant-1');
     await api.openBuddyBrowserEnrollment('https://linear.app');
@@ -138,10 +179,6 @@ describe('computer-use shared contracts', () => {
     await api.clearBuddyBrowser();
 
     expect(electron.invoke.mock.calls).toEqual([
-      ['approval:resolve', 'helper-buddy-1', 'approval-1', 'once'],
-      ['approval:show-window', 'helper-buddy-1', 'approval-1'],
-      ['approval:hide-window', 'helper-buddy-1', 'approval-1'],
-      ['approvals:list'],
       ['grants:list'],
       ['grants:revoke', 'grant-1'],
       ['buddy-browser:open-enroll', 'https://linear.app'],

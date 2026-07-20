@@ -9,7 +9,7 @@
  * 'whisper:shown' re-focuses the input on every summon.
  */
 
-import { StrictMode, useEffect, useRef, useState } from 'react';
+import { StrictMode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { clicky } from './clicky';
 import type {
@@ -19,6 +19,8 @@ import type {
   Settings,
   TranscriptEntry,
 } from '../../shared/types';
+import { hasNativeGlass } from '../native-glass-mode';
+import { WhisperScrollFollower } from './scroll-state';
 import { saveWhisperSettings, WHISPER_SETTINGS_SAVE_ERROR } from './settings-save';
 import './whisper.css';
 
@@ -53,13 +55,20 @@ function App(): React.JSX.Element {
   const [filesystemBusy, setFilesystemBusy] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stackRef = useRef<HTMLDivElement | null>(null);
+  const stackContentRef = useRef<HTMLDivElement | null>(null);
+  const scrollFollowerRef = useRef(new WhisperScrollFollower());
 
   useEffect(() => {
     const unsubs = [
       clicky.onTranscript((entry) => setEntries((prev) => upsert(prev, entry))),
       clicky.onAssistantState(setState),
       clicky.onSettings(setSettings),
-      clicky.onShown(() => inputRef.current?.focus()),
+      clicky.onShown(() => {
+        const stack = stackRef.current;
+        scrollFollowerRef.current.resume(stack ?? undefined);
+        if (stack) scrollToLatest(stack, scrollFollowerRef.current);
+        inputRef.current?.focus();
+      }),
       clicky.onFilesystemState(setFilesystemTasks),
       clicky.onFilesystemSelection(setFolder),
     ];
@@ -71,11 +80,33 @@ function App(): React.JSX.Element {
     return () => unsubs.forEach((u) => u());
   }, []);
 
-  // Keep the newest turn in view as replies stream in.
-  useEffect(() => {
+  // Keep following a streamed/new reply only while the reader is already at
+  // the bottom. Manual scrolling pauses follow mode until they return there,
+  // submit a new turn, or summon the Whisper again.
+  useLayoutEffect(() => {
     const stack = stackRef.current;
-    if (stack) stack.scrollTop = stack.scrollHeight;
+    if (stack && scrollFollowerRef.current.shouldFollow()) {
+      scrollToLatest(stack, scrollFollowerRef.current);
+    }
   }, [entries]);
+
+  // Composer growth, task cards, errors, font loading, and other sibling
+  // layout changes can resize the history without changing `entries`. Keep a
+  // followed conversation pinned through those changes, while preserving a
+  // reader's position after any explicit upward scroll.
+  useLayoutEffect(() => {
+    const stack = stackRef.current;
+    const content = stackContentRef.current;
+    if (!stack || !content) return;
+    const observer = new ResizeObserver(() => {
+      if (scrollFollowerRef.current.shouldFollow()) {
+        scrollToLatest(stack, scrollFollowerRef.current);
+      }
+    });
+    observer.observe(stack);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
 
   // Auto-grow the composer with the draft (up to the CSS max-height); the
   // reply stack flexes to absorb the difference, the window stays fixed.
@@ -89,6 +120,9 @@ function App(): React.JSX.Element {
   const send = (): void => {
     const text = draft.trim();
     if (text.length === 0) return;
+    const stack = stackRef.current;
+    scrollFollowerRef.current.resume(stack ?? undefined);
+    if (stack) scrollToLatest(stack, scrollFollowerRef.current);
     setDraft('');
     void clicky.askText(text);
     inputRef.current?.focus();
@@ -171,18 +205,53 @@ function App(): React.JSX.Element {
 
   return (
     <div className="whisper" data-state={state}>
-      <div className="stack" ref={stackRef}>
-        {entries.length === 0 && (
-          <div className="empty">
-            type to buddy — it can still see your screens and point while it answers
-          </div>
-        )}
-        {entries.map((entry) => (
-          <div key={entry.id} className="turn" data-role={entry.role}>
-            {entry.text}
-            {entry.streaming ? <span className="caret" /> : null}
-          </div>
-        ))}
+      <div
+        className="stack"
+        ref={stackRef}
+        tabIndex={0}
+        role="region"
+        aria-label="conversation history"
+        onWheelCapture={(event) => {
+          scrollFollowerRef.current.noteWheel(event.deltaY, event.currentTarget);
+        }}
+        onKeyDownCapture={(event) => {
+          const follower = scrollFollowerRef.current;
+          follower.noteKey(event.key, event.shiftKey, event.currentTarget);
+          if (event.key === 'Home') {
+            event.preventDefault();
+            event.currentTarget.scrollTop = 0;
+            follower.synchronized(event.currentTarget);
+          } else if (event.key === 'End') {
+            event.preventDefault();
+            follower.resume(event.currentTarget);
+            scrollToLatest(event.currentTarget, follower);
+          } else if (event.key === 'PageUp' || (event.key === ' ' && event.shiftKey)) {
+            event.preventDefault();
+            event.currentTarget.scrollTop -= event.currentTarget.clientHeight;
+            follower.synchronized(event.currentTarget);
+          } else if (event.key === 'PageDown' || event.key === ' ') {
+            event.preventDefault();
+            event.currentTarget.scrollTop += event.currentTarget.clientHeight;
+            follower.noteScroll(event.currentTarget);
+          }
+        }}
+        onScroll={(event) => {
+          scrollFollowerRef.current.noteScroll(event.currentTarget);
+        }}
+      >
+        <div className="stack-content" ref={stackContentRef}>
+          {entries.length === 0 && (
+            <div className="empty">
+              type to buddy — it can still see your screens and point while it answers
+            </div>
+          )}
+          {entries.map((entry) => (
+            <div key={entry.id} className="turn" data-role={entry.role}>
+              {entry.text}
+              {entry.streaming ? <span className="caret" /> : null}
+            </div>
+          ))}
+        </div>
       </div>
       {filesystemTasks.length > 0 ? (
         <div className="filesystem-cards">
@@ -232,14 +301,18 @@ function App(): React.JSX.Element {
           onKeyDown={onKeyDown}
         />
       </div>
-      {settingsError ? (
-        <div className="settings-error" role="alert">
-          {settingsError}
-        </div>
-      ) : null}
-      {filesystemError ? (
-        <div className="settings-error" role="alert">
-          {filesystemError}
+      {settingsError || filesystemError ? (
+        <div className="alerts">
+          {settingsError ? (
+            <div className="settings-error" role="alert">
+              {settingsError}
+            </div>
+          ) : null}
+          {filesystemError ? (
+            <div className="settings-error" role="alert">
+              {filesystemError}
+            </div>
+          ) : null}
         </div>
       ) : null}
       <div className="foot">
@@ -362,6 +435,15 @@ function FilesystemCard({
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function scrollToLatest(stack: HTMLDivElement, follower: WhisperScrollFollower): void {
+  stack.scrollTop = stack.scrollHeight;
+  follower.synchronized(stack);
+}
+
+if (hasNativeGlass(window.location.search)) {
+  document.documentElement.dataset['nativeGlass'] = 'true';
 }
 
 createRoot(document.getElementById('root') as HTMLElement).render(

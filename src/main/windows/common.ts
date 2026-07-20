@@ -1,5 +1,5 @@
 /**
- * Shared construction helpers for the overlay + panel BrowserWindows, so the
+ * Shared construction helpers for Buddy BrowserWindows, so the
  * hardening (navigation lockdown, sandboxed webPreferences) and the
  * dev-server-vs-packaged page loading live in exactly one place.
  *
@@ -51,7 +51,7 @@ export function createHardenedWindow(options: BrowserWindowConstructorOptions): 
  */
 export function loadRendererPage(
   win: BrowserWindow,
-  page: 'overlay' | 'panel' | 'whisper' | 'markdown',
+  page: 'overlay' | 'panel' | 'approval' | 'whisper' | 'markdown',
   search?: string,
 ): void {
   if (process.env['ELECTRON_RENDERER_URL']) {

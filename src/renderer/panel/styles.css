@@ -35,6 +35,35 @@
   --clicky: #4c8dff;
 }
 
+/* Main enables this mode only after NSGlassEffectView has been installed for
+   the Settings BrowserWindow. Keep every page-level layer transparent so the
+   native material remains the one and only window background; nested cards
+   use quiet translucent fills, not competing glass effects. */
+:root[data-native-glass='true'] {
+  --background: transparent;
+  --card: oklch(0.19 0.012 260 / 48%);
+  --popover: oklch(0.18 0.012 260 / 88%);
+  --secondary: oklch(0.26 0.012 260 / 58%);
+  --muted: oklch(0.26 0.012 260 / 52%);
+  --accent: oklch(0.3 0.018 260 / 64%);
+  --border: oklch(1 0 0 / 14%);
+  --input: oklch(1 0 0 / 18%);
+}
+
+:root[data-native-glass='true'],
+:root[data-native-glass='true'] body,
+:root[data-native-glass='true'] #root {
+  background: transparent;
+}
+
+:root[data-native-glass='true'] body {
+  border-radius: 20px;
+}
+
+:root[data-native-glass='true'] #root {
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.26), rgba(3, 7, 18, 0.12));
+}
+
 @theme inline {
   --font-sans: 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
 

@@ -47,8 +47,8 @@ typed action** and is always signposted by a visible indicator.
   results. Every helper buddy uses the same full capability surface: the ChatGPT subscription
   backend, Firecrawl, durable memory, picker-authorized transactional filesystem tools, and Buddy's
   persistent browser profile through the shared ActionGate. While a helper has an active browser,
-  its latest exact observation appears as a picture-in-picture frame only inside that helper's
-  hover or click-expanded overlay card. See `docs/HELPER-BUDDY-MODE.md` and
+  its latest exact observation appears in a detached 16:9 picture-in-picture companion beside that
+  helper's hover or click-expanded overlay card. See `docs/HELPER-BUDDY-MODE.md` and
   `docs/HELPER-BUDDY-EXECUTION.md`.
 - **Mock Realtime server** (local WS, speaks the same protocol subset) + **debug harness** for QA.
 
@@ -80,7 +80,9 @@ typed action** and is always signposted by a visible indicator.
   behavior. Before first show, the Windows seam marks each HWND `NonRudeHWND` so Explorer does not
   classify the full-display transparent overlay as a fullscreen app and demote the taskbar; if that
   marker fails, the overlay drops always-on-top rather than breaking the taskbar. Draws buddy +
-  caption + indicator. Never focusable.
+  caption + indicator. Never focusable. On macOS 26+, renderer-measured hover hints, helper cards,
+  and browser-preview companions are mirrored by bounded native Liquid Glass regions beneath the
+  Electron content; the rest of the overlay remains transparent and click-through.
 - **Settings/audio-host renderer** (M21 — the chat panel is GONE): the former panel window
   survives as a hidden audio host (mic capture + voice playback AudioWorklets live in its
   renderer, pre-created at app-ready, unthrottled) whose only visible face is a settings-only
@@ -89,8 +91,15 @@ typed action** and is always signposted by a visible indicator.
   and overlay helper sprites carry those jobs. Tray click now toggles the whisper; a second
   app launch summons it too. Clicking a helper sprite expands its card in place to the helper buddy's
   full status (M22, docs/HELPER-BUDDY-MODE.md §5.5). Internal `panel:*` channel and
-  file names remain for wire/history stability and now denote this window.
-- **Whisper renderer** (M20): ~340×244 transparent frameless composer anchored beside the buddy's
+  file names remain for wire/history stability and now denote this window. Its visible settings
+  surface uses native Liquid Glass on macOS 26+ and an opaque renderer surface elsewhere.
+- **Approval renderer**: a dedicated transparent, content-sized frameless window owns pending
+  human decisions. The yellow approval card is the entire visible surface, including its attached
+  action footer; there is no surrounding Settings/menu shell. It receives the complete approval
+  queue over its own preload contract and is surfaced for live desktop actions or when the user
+  clicks a waiting helper buddy. Before an approved live desktop action runs, main hides this exact
+  window and verifies that it is no longer visible.
+- **Whisper renderer** (M20): 340×390 transparent frameless composer anchored beside the buddy's
   rest spot — the text channel for can't-talk environments. Summoned by a hotkey TAP (release
   within `TAP_MAX_MS` = the conversation's `MIN_HOLD_MS`, so a tap never commits a voice turn) or
   by clicking the buddy (which no longer opens the panel). Full realtime mode ignores taps — the
@@ -117,8 +126,8 @@ src/
     index.ts         app bootstrap, wiring only
     agents/          helper-buddy loop, capabilities, and owner-only Markdown memory store
     tray.ts          tray icon + menu
-    windows/         overlay + panel + whisper + rich Markdown window management (per-display
-                     lifecycle, display hotplug; whisper.ts = M20 floating composer)
+    windows/         overlay + panel + approval + whisper + rich Markdown window management
+                     (per-display lifecycle, display hotplug; whisper.ts = M20 floating composer)
     markdown/        bounded regular-file detection and strict UTF-8 document loading
     output-presenter.ts  routes Markdown outputs internally and other artifacts to native apps
     hotkey.ts        uiohook hold-to-talk state machine (down→capture+listen, up→commit;
@@ -138,10 +147,11 @@ src/
                      read state, trigger pointer, dump last capture metadata
   renderer/
     overlay/         buddy canvas/DOM, bezier animation, caption bubble, indicators,
-                     helper-buddy sprites + hover card + click-to-expand full status/browser PiP
+                     helper-buddy sprites + hover card + detached browser PiP companion
                      (M19/M22, docs/HELPER-BUDDY-MODE.md §5.5)
     panel/           M21: settings-only React app + the hidden audio engines
                      (the chat panel UI — transcript/composer/helper-buddies — is deleted)
+    approval/        self-contained pending approval queue and decision UI
     whisper/         M20 floating composer (reply stack + input + quiet-mode toggle)
   preload/           contextBridge APIs for each renderer
 tools/

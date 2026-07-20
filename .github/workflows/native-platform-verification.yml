@@ -70,7 +70,7 @@ jobs:
 
   macos:
     name: macOS native bridge, build, and package
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v5
@@ -81,15 +81,83 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - name: Verify universal native bridge
+      - name: Verify native bridge API and Mach-O contract
         run: |
-          lipo build/native/macos-screen-permission.node -verify_arch arm64 x86_64
-          node -e "const bridge=require('./build/native/macos-screen-permission.node'); const expected=['coverDisplayWithWindow','getDisplaySurface','preflightListenEventAccess','queryAccessibility','requestListenEventAccess','requestScreenCaptureAccess']; if (JSON.stringify(Object.keys(bridge).sort()) !== JSON.stringify(expected)) process.exit(1)"
+          bridge=build/native/buddy-macos-native.node
+          test -f "$bridge"
+          lipo "$bridge" -verify_arch arm64 x86_64
+
+          BRIDGE="$bridge" node <<'NODE'
+          const bridge = require(`./${process.env.BRIDGE}`);
+          const requiredSubset = [
+            'coverDisplayWithWindow',
+            'getDisplaySurface',
+            'preflightListenEventAccess',
+            'queryAccessibility',
+            'requestListenEventAccess',
+            'requestScreenCaptureAccess',
+          ];
+          const currentExports = [
+            ...requiredSubset,
+            'inspectLiquidGlass',
+            'inspectLiquidGlassRegions',
+            'installLiquidGlass',
+            'postInput',
+            'prepareFocusedReceiverTypeText',
+            'queryFocusedReceiver',
+            'removeLiquidGlass',
+            'setLiquidGlassRegions',
+            'restoreFocusedReceiver',
+            'supportsLiquidGlass',
+            'updateLiquidGlass',
+            'verifyFocusedReceiverTypeText',
+          ].sort();
+          const actualExports = Object.keys(bridge).sort();
+          const missingRequired = requiredSubset.filter((name) => typeof bridge[name] !== 'function');
+          if (missingRequired.length > 0) {
+            throw new Error(`native bridge is missing required functions: ${missingRequired.join(', ')}`);
+          }
+          if (JSON.stringify(actualExports) !== JSON.stringify(currentExports)) {
+            throw new Error(
+              `native bridge export drift: expected ${currentExports.join(', ')}; ` +
+                `received ${actualExports.join(', ')}`,
+            );
+          }
+          NODE
+
+          for arch in arm64 x86_64; do
+            read -r minos sdk <<EOF
+          $(otool -arch "$arch" -l "$bridge" | awk '
+            $1 == "cmd" && $2 == "LC_BUILD_VERSION" { in_build_version = 1; next }
+            in_build_version && $1 == "minos" { minos = $2 }
+            in_build_version && $1 == "sdk" { print minos, $2; exit }
+          ')
+          EOF
+            test "$minos" = '12.0' || {
+              echo "$arch bridge deployment target is $minos, expected 12.0" >&2
+              exit 1
+            }
+            sdk_major=${sdk%%.*}
+            test -n "$sdk_major" && test "$sdk_major" -ge 26 || {
+              echo "$arch bridge SDK is $sdk, expected 26 or newer" >&2
+              exit 1
+            }
+            nm -arch "$arch" -m "$bridge" |
+              grep -Fq "(undefined) weak external _OBJC_CLASS_\$_NSGlassEffectView (from AppKit)" || {
+                echo "$arch does not weak-link NSGlassEffectView" >&2
+                exit 1
+              }
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: buddy-macos-native-bridge
+          path: build/native/buddy-macos-native.node
+          if-no-files-found: error
       - name: Package disposable QA build
         run: npm run dist
         env:
           BUDDY_ALLOW_ADHOC: '1'
-      - name: Launch packaged macOS app and inspect native display placement
+      - name: Verify and launch packaged macOS app
         run: |
           app_dir="$RUNNER_TEMP/buddy-macos-package-qa"
           data_dir="$RUNNER_TEMP/buddy-macos-package-data"
@@ -97,12 +165,19 @@ jobs:
           zip_path=$(find dist -maxdepth 1 -name '*.zip' -print -quit)
           test -n "$zip_path"
           ditto -x -k "$zip_path" "$app_dir"
-          codesign --verify --deep --strict --verbose=2 "$app_dir/Buddy.app"
-          codesign --display --verbose=4 "$app_dir/Buddy.app" 2>&1 | grep -q 'runtime'
-          codesign --display --entitlements :- "$app_dir/Buddy.app" 2>&1 |
+          app="$app_dir/Buddy.app"
+          packaged_bridge="$app/Contents/Resources/buddy-macos-native.node"
+          test -f "$packaged_bridge"
+          lipo "$packaged_bridge" -verify_arch arm64 x86_64
+          codesign --verify --strict --verbose=2 "$packaged_bridge"
+          codesign --display --verbose=4 "$packaged_bridge" 2>&1 | grep -q 'runtime'
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --verbose=4 "$app" 2>&1 | grep -q 'runtime'
+          codesign --display --entitlements :- "$app" 2>&1 |
             grep -q 'com.apple.security.cs.disable-library-validation'
+          test "$(plutil -extract LSMinimumSystemVersion raw -o - "$app/Contents/Info.plist")" = '12.0'
           CLICKY_DEBUG=1 CLICKY_DEBUG_TOKEN=buddy-macos-package CLICKY_DEBUG_PORT=8321 \
-            "$app_dir/Buddy.app/Contents/MacOS/Buddy" --user-data-dir="$data_dir" \
+            "$app/Contents/MacOS/Buddy" --user-data-dir="$data_dir" \
             >"$RUNNER_TEMP/buddy-macos-package.log" 2>&1 &
           buddy_pid=$!
           trap 'kill "$buddy_pid" 2>/dev/null || true' EXIT
@@ -117,6 +192,7 @@ jobs:
           kill "$buddy_pid"
           wait "$buddy_pid" 2>/dev/null || true
           trap - EXIT
+          BUDDY_WHISPER_E2E_EXECUTABLE="$app/Contents/MacOS/Buddy" npm run test:whisper
       - uses: actions/upload-artifact@v7
         with:
           name: buddy-macos-adhoc
@@ -126,3 +202,49 @@ jobs:
             dist/*.blockmap
             dist/*.yml
           if-no-files-found: error
+
+  macos-liquid-glass-runtime:
+    name: macOS 26 Liquid Glass runtime lifecycle
+    needs: macos
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Exercise NSGlassEffectView through Electron
+        run: |
+          test "$(sw_vers -productVersion | cut -d. -f1)" = '26'
+          npm run test:liquid-glass:mac
+
+  macos-native-backward-runtime:
+    name: macOS 14 weak-linked native bridge runtime
+    needs: macos
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v8
+        with:
+          name: buddy-macos-native-bridge
+          path: ${{ runner.temp }}/buddy-macos-native-bridge
+      - name: Load SDK 26 bridge without Liquid Glass
+        env:
+          BUDDY_NATIVE_BRIDGE: ${{ runner.temp }}/buddy-macos-native-bridge/buddy-macos-native.node
+        run: |
+          test "$(sw_vers -productVersion | cut -d. -f1)" = '14'
+          node <<'NODE'
+          const bridge = require(process.env.BUDDY_NATIVE_BRIDGE);
+          if (typeof bridge.supportsLiquidGlass !== 'function') {
+            throw new Error('downloaded native bridge is missing supportsLiquidGlass');
+          }
+          if (bridge.supportsLiquidGlass() !== false) {
+            throw new Error('pre-macOS 26 runtime unexpectedly reported Liquid Glass support');
+          }
+          console.log('SDK 26 bridge loaded safely and reported Liquid Glass unavailable');
+          NODE

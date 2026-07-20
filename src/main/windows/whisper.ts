@@ -34,6 +34,7 @@ import {
   CrashLoopGuard,
   recoverOnRenderProcessGone,
 } from './harden';
+import { applyMacLiquidGlass } from './mac-liquid-glass';
 
 /** Gap between the buddy rest spot and the whisper's near edge. */
 const ANCHOR_GAP_X = 28;
@@ -207,6 +208,19 @@ export class WhisperManager {
       ...(existsSync(icoPath) ? { icon: icoPath } : {}),
       webPreferences: hardenedWebPreferences('whisper.js'),
     });
+    let nativeGlass: boolean;
+    try {
+      nativeGlass = applyMacLiquidGlass(win, {
+        style: 'regular',
+        cornerRadius: 16,
+        // Keep fixed light renderer text readable over bright desktops while
+        // preserving AppKit's native blur/refraction and adaptive highlights.
+        tintColor: '#11182773',
+      });
+    } catch (error) {
+      win.destroy();
+      throw error;
+    }
 
     // Crash recovery: recreate hidden; the next summon shows a fresh window.
     // No fatal escalation — the whisper is optional chrome, voice still works.
@@ -238,7 +252,7 @@ export class WhisperManager {
       this.win = null;
     });
 
-    loadRendererPage(win, 'whisper');
+    loadRendererPage(win, 'whisper', nativeGlass ? '?nativeGlass=1' : undefined);
 
     this.win = win;
     return win;

@@ -1,32 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { clicky } from '../clicky';
-import { isExactApproval, removeApprovalById } from '../computer-use-ui';
-import type { ApprovalRequest } from '../../../shared/types';
-
-export type ApprovalVerdict = 'once' | 'always' | 'deny';
+import { clicky } from './clicky';
+import {
+  isExactApproval,
+  removeApprovalById,
+  type ApprovalVerdict,
+} from '../panel/computer-use-ui';
+import type { ApprovalRequest } from '../../shared/types';
 
 export interface ComputerUseApprovalState {
-  /** Full pending snapshot; the first request is the card currently shown. */
   approvals: ApprovalRequest[];
   resolving: ApprovalVerdict | null;
   actingInPlace: boolean;
   error: string | null;
-  grantsRevision: number;
   resolve: (helperBuddyId: string, approvalId: string, verdict: ApprovalVerdict) => Promise<void>;
   showBrowser: (helperBuddyId: string, approvalId: string) => Promise<void>;
   finishInBrowser: (helperBuddyId: string, approvalId: string) => Promise<void>;
 }
 
-/** Own the pending raise-hand queue delivered to the always-alive panel renderer. */
+/** Own the pending raise-hand queue inside the dedicated approval renderer. */
 export function useComputerUseApproval(): ComputerUseApprovalState {
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const approvalsRef = useRef<ApprovalRequest[]>([]);
-  /** Synchronous per-approval latch; React's async disabled state is not a causality boundary. */
   const resolvingApprovalRef = useRef<string | null>(null);
   const [resolving, setResolving] = useState<ApprovalVerdict | null>(null);
   const [actingInPlace, setActingInPlace] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [grantsRevision, setGrantsRevision] = useState(0);
 
   const replaceApprovals = useCallback((requests: ApprovalRequest[]): void => {
     const previousHead = approvalsRef.current[0]?.approvalId;
@@ -52,7 +50,7 @@ export function useComputerUseApproval(): ComputerUseApprovalState {
   useEffect(() => {
     let active = true;
     let receivedPush = false;
-    const off = clicky.onApprovals((requests) => {
+    const off = clicky.onRequests((requests) => {
       receivedPush = true;
       replaceApprovals(requests);
     });
@@ -63,7 +61,7 @@ export function useComputerUseApproval(): ComputerUseApprovalState {
       })
       .catch(() => {
         if (active && !receivedPush) {
-          setError("buddy couldn't load pending approvals. reopen settings to try again.");
+          setError("buddy couldn't load pending approvals. the requested action remains paused.");
         }
       });
     return () => {
@@ -86,7 +84,6 @@ export function useComputerUseApproval(): ComputerUseApprovalState {
       try {
         await clicky.resolveApproval(request.helperBuddyId, request.approvalId, verdict);
         removeApproval(request.approvalId);
-        if (verdict === 'always') setGrantsRevision((revision) => revision + 1);
       } catch {
         if (approvalsRef.current[0]?.approvalId === request.approvalId) {
           setError("buddy couldn't record your choice. nothing happened — please try again.");
@@ -111,9 +108,7 @@ export function useComputerUseApproval(): ComputerUseApprovalState {
       setError(null);
       try {
         await clicky.showApprovalWindow(request.helperBuddyId, request.approvalId);
-        if (approvalsRef.current[0]?.approvalId === request.approvalId) {
-          setActingInPlace(true);
-        }
+        if (approvalsRef.current[0]?.approvalId === request.approvalId) setActingInPlace(true);
       } catch {
         if (approvalsRef.current[0]?.approvalId === request.approvalId) {
           setError("buddy couldn't open its browser. the action is still waiting.");
@@ -133,7 +128,6 @@ export function useComputerUseApproval(): ComputerUseApprovalState {
       setError(null);
       try {
         await clicky.hideApprovalWindow(request.helperBuddyId, request.approvalId);
-        // "done" discards this proposal and resumes from a fresh observation.
         removeApproval(request.approvalId);
       } catch {
         if (approvalsRef.current[0]?.approvalId === request.approvalId) {
@@ -144,14 +138,5 @@ export function useComputerUseApproval(): ComputerUseApprovalState {
     [removeApproval],
   );
 
-  return {
-    approvals,
-    resolving,
-    actingInPlace,
-    error,
-    grantsRevision,
-    resolve,
-    showBrowser,
-    finishInBrowser,
-  };
+  return { approvals, resolving, actingInPlace, error, resolve, showBrowser, finishInBrowser };
 }

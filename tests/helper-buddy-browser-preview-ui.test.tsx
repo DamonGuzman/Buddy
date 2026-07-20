@@ -54,20 +54,39 @@ describe('helper buddy browser PiP', () => {
     expect(html).toContain("img-src 'self' data:");
   });
 
-  it('shows the active browser frame in the hover card', () => {
+  it('floats the active browser frame beside the hover card', () => {
     const html = renderCard({ hoveredKey: helperBuddy.id, expandedKey: null });
 
+    expect(html).toContain('class="helper-buddy-surfaces"');
+    expect(html).toContain('data-direction="left"');
     expect(html).toContain('aria-label="live browser preview"');
     expect(html).toContain(preview.imageDataUrl);
+    expect(html).toContain('</div><div class="helper-buddy-browser-preview"');
     expect(html).not.toContain('data-expanded=""');
   });
 
-  it('keeps the browser frame in the click-expanded detail card', () => {
+  it('presents every browser capture in a consistent 16:9 PiP frame', () => {
+    const css = readFileSync(
+      new URL('../src/renderer/overlay/overlay.css', import.meta.url),
+      'utf8',
+    );
+
+    expect(css).toMatch(
+      /\.helper-buddy-browser-preview-frame\s*\{[^}]*aspect-ratio:\s*16\s*\/\s*9;/s,
+    );
+    expect(css).toMatch(
+      /\.helper-buddy-browser-preview-frame img\s*\{[^}]*object-fit:\s*cover;[^}]*object-position:\s*top center;/s,
+    );
+  });
+
+  it('keeps the detached browser companion beside click-expanded details', () => {
     const html = renderCard({ hoveredKey: helperBuddy.id, expandedKey: helperBuddy.id });
 
     expect(html).toContain('data-expanded=""');
+    expect(html).toContain('class="helper-buddy-surfaces"');
     expect(html).toContain('aria-label="live browser preview"');
     expect(html).toContain(preview.imageDataUrl);
+    expect(html).toContain('</div><div class="helper-buddy-browser-preview"');
   });
 
   it('does not render browser pixels while the helper card is closed', () => {
