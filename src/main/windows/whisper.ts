@@ -214,8 +214,9 @@ export class WhisperManager {
         style: 'regular',
         cornerRadius: 16,
         // Keep fixed light renderer text readable over bright desktops while
-        // preserving AppKit's native blur/refraction and adaptive highlights.
-        tintColor: '#11182773',
+        // leaving AppKit's native blur/refraction and adaptive highlights
+        // clearly visible.
+        tintColor: '#11182740',
       });
     } catch (error) {
       win.destroy();

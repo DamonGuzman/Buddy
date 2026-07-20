@@ -41,12 +41,12 @@
    use quiet translucent fills, not competing glass effects. */
 :root[data-native-glass='true'] {
   --background: transparent;
-  --card: oklch(0.19 0.012 260 / 48%);
-  --popover: oklch(0.18 0.012 260 / 88%);
-  --secondary: oklch(0.26 0.012 260 / 58%);
-  --muted: oklch(0.26 0.012 260 / 52%);
-  --accent: oklch(0.3 0.018 260 / 64%);
-  --border: oklch(1 0 0 / 14%);
+  --card: oklch(0.19 0.012 260 / 28%);
+  --popover: oklch(0.18 0.012 260 / 38%);
+  --secondary: oklch(0.26 0.012 260 / 36%);
+  --muted: oklch(0.26 0.012 260 / 32%);
+  --accent: oklch(0.3 0.018 260 / 42%);
+  --border: oklch(1 0 0 / 18%);
   --input: oklch(1 0 0 / 18%);
 }
 
@@ -61,7 +61,19 @@
 }
 
 :root[data-native-glass='true'] #root {
-  background: linear-gradient(145deg, rgba(15, 23, 42, 0.26), rgba(3, 7, 18, 0.12));
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.14), rgba(3, 7, 18, 0.06));
+}
+
+/* Portalled controls need their own local depth cue. Keep them translucent so
+   the Settings window's native material remains visible through menus and
+   tooltips instead of turning those surfaces back into flat opaque panels. */
+:root[data-native-glass='true'] [data-slot='select-content'],
+:root[data-native-glass='true'] [data-slot='tooltip-content'] {
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  backdrop-filter: blur(24px) saturate(150%);
+  box-shadow:
+    0 16px 42px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 @theme inline {

@@ -37,6 +37,7 @@ import type {
   OverlayGlassRegion,
   OverlayHoverConfig,
   OverlayHoverEvent,
+  OverlayHoverHintPresentation,
   OverlayHoverStatus,
   PointerCommand,
   Rect,
@@ -73,6 +74,7 @@ import { coverMacDisplayWithWindow, getMacDisplaySurface } from './mac-screen-pe
 import { offsetPointerForWindow } from './overlay-offset';
 import { persistBuddyRest, settingsSaveFailureNotice } from './overlay-settings';
 import { applyMacLiquidGlassRegions } from './mac-liquid-glass';
+import { HoverHintWindow } from './hover-hint';
 
 /**
  * Module-level handle to the started manager so sibling main modules (e.g.
@@ -90,6 +92,7 @@ const MAX_HOVER_REGION_DIP = 400;
 /** One overlay window + the screenIndex used in capture labeling. */
 interface OverlayEntry {
   win: BrowserWindow;
+  hint: HoverHintWindow;
   screenIndex: number;
 }
 
@@ -394,12 +397,16 @@ export class OverlayManager {
     this.unsubscribeSettings = null;
     ipcMain.removeAllListeners('overlay:hover');
     ipcMain.removeAllListeners('overlay:glass-regions');
+    ipcMain.removeAllListeners('overlay:hover-hint');
+    ipcMain.removeAllListeners('hover-hint:painted');
     ipcMain.removeAllListeners('overlay:buddy-click');
     ipcMain.removeAllListeners('overlay:buddy-settings');
     ipcMain.removeAllListeners('overlay:buddy-move');
     ipcMain.removeHandler('overlay:get-hover-config');
     ipcMain.removeHandler('overlay:get-display-surface');
+    ipcMain.removeHandler('hover-hint:get-state');
     for (const entry of this.overlays.values()) {
+      entry.hint.destroy();
       if (!entry.win.isDestroyed()) entry.win.destroy();
     }
     this.overlays.clear();
@@ -435,6 +442,7 @@ export class OverlayManager {
     for (const [displayId, entry] of this.overlays) {
       if (!liveIds.has(displayId)) {
         if (this.hover.isInteractive(displayId)) this.hover.restoreClickThrough();
+        entry.hint.destroy();
         if (!entry.win.isDestroyed()) entry.win.destroy();
         this.overlays.delete(displayId);
         this.hoverStatusByDisplay.delete(displayId);
@@ -451,8 +459,12 @@ export class OverlayManager {
           coverMacDisplayWithWindow(existing.win.getNativeWindowHandle(), display.id);
         }
       } else {
+        const win = this.createWindow(display, index);
+        const hint = new HoverHintWindow(win);
+        hint.start();
         this.overlays.set(display.id, {
-          win: this.createWindow(display, index),
+          win,
+          hint,
           screenIndex: index,
         });
       }
@@ -493,6 +505,8 @@ export class OverlayManager {
       this.crashGuard,
       `overlay(display ${display.id})`,
       () => {
+        const entry = this.overlays.get(display.id);
+        if (entry?.win === win) entry.hint.destroy();
         if (!win.isDestroyed()) win.destroy();
         if (this.overlays.get(display.id)?.win === win) this.overlays.delete(display.id);
         this.syncDisplays();
@@ -501,6 +515,8 @@ export class OverlayManager {
       // BrowserWindow isn't) and drop it from the map so overlayWindowCount
       // stays accurate. No syncDisplays here — that would recreate it.
       () => {
+        const entry = this.overlays.get(display.id);
+        if (entry?.win === win) entry.hint.destroy();
         if (!win.isDestroyed()) win.destroy();
         if (this.overlays.get(display.id)?.win === win) this.overlays.delete(display.id);
       },
@@ -657,6 +673,32 @@ export class OverlayManager {
       );
       entry.win.webContents.send('overlay:glass-regions-ready', { enabled });
     });
+    ipcMain.on('overlay:hover-hint', (event, presentation: OverlayHoverHintPresentation | null) => {
+      const displayId = this.displayIdFor(event.sender);
+      const entry = displayId === null ? null : this.overlays.get(displayId);
+      if (!entry || process.platform !== 'darwin') return;
+      if (presentation === null) {
+        entry.hint.update(null);
+        return;
+      }
+      if (!validHoverHintPresentation(presentation, entry.win.getContentBounds())) return;
+      entry.hint.update(presentation);
+    });
+    ipcMain.on('hover-hint:painted', (event, payload: { revision: number }) => {
+      if (
+        typeof payload !== 'object' ||
+        payload === null ||
+        !Number.isSafeInteger(payload.revision) ||
+        payload.revision <= 0
+      ) {
+        return;
+      }
+      for (const entry of this.overlays.values()) {
+        if (!entry.hint.ownsSender(event.sender.id)) continue;
+        entry.hint.didPaint(payload.revision, event.sender.id);
+        return;
+      }
+    });
     // M20: clicking the buddy summons the whisper composer (was: the panel —
     // the panel is retiring to a settings surface; the tray still opens it).
     ipcMain.on('overlay:buddy-click', () => toggleWhisper());
@@ -684,6 +726,14 @@ export class OverlayManager {
             menuBarHeight: 0,
           } satisfies OverlayDisplaySurface)
         : this.displaySurfaceFor(displayId);
+    });
+    ipcMain.handle('hover-hint:get-state', (event) => {
+      for (const entry of this.overlays.values()) {
+        if (entry.hint.ownsSender(event.sender.id)) {
+          return entry.hint.stateForSender(event.sender.id);
+        }
+      }
+      return null;
     });
   }
 
@@ -852,4 +902,28 @@ function validGlassRegions(regions: OverlayGlassRegion[], bounds: Rectangle): bo
     ids.add(region.id);
     return true;
   });
+}
+
+function validHoverHintPresentation(
+  presentation: OverlayHoverHintPresentation,
+  bounds: Rectangle,
+): boolean {
+  if (typeof presentation !== 'object' || presentation === null) return false;
+  const { text, sub, fading, placement, bounds: hintBounds } = presentation;
+  return (
+    typeof text === 'string' &&
+    text.length > 0 &&
+    text.length <= 500 &&
+    (sub === undefined || (typeof sub === 'string' && sub.length <= 500)) &&
+    typeof fading === 'boolean' &&
+    typeof placement === 'object' &&
+    placement !== null &&
+    (placement.horizontal === 'left' || placement.horizontal === 'right') &&
+    (placement.vertical === 'above' || placement.vertical === 'below') &&
+    isFiniteRect(hintBounds) &&
+    hintBounds.x >= 0 &&
+    hintBounds.y >= 0 &&
+    hintBounds.x + hintBounds.width <= bounds.width &&
+    hintBounds.y + hintBounds.height <= bounds.height
+  );
 }

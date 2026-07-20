@@ -80,9 +80,12 @@ typed action** and is always signposted by a visible indicator.
   behavior. Before first show, the Windows seam marks each HWND `NonRudeHWND` so Explorer does not
   classify the full-display transparent overlay as a fullscreen app and demote the taskbar; if that
   marker fails, the overlay drops always-on-top rather than breaking the taskbar. Draws buddy +
-  caption + indicator. Never focusable. On macOS 26+, renderer-measured hover hints, helper cards,
-  and browser-preview companions are mirrored by bounded native Liquid Glass regions beneath the
-  Electron content; the rest of the overlay remains transparent and click-through.
+  caption + indicator. Never focusable. On macOS 26+, helper cards and browser-preview companions
+  are mirrored by bounded native Liquid Glass regions beneath the Electron content. The transient
+  hover hint is different: it is a preloaded, click-through, non-focusable child window whose
+  renderer content lives inside one whole-window `NSGlassEffectView`. The overlay renderer supplies
+  measured bounds and content, and main reveals only a renderer-confirmed paint revision. This
+  keeps hint text and glass in one AppKit z-order above helper PiP content with no late background.
 - **Settings/audio-host renderer** (M21 — the chat panel is GONE): the former panel window
   survives as a hidden audio host (mic capture + voice playback AudioWorklets live in its
   renderer, pre-created at app-ready, unthrottled) whose only visible face is a settings-only
@@ -126,7 +129,7 @@ src/
     index.ts         app bootstrap, wiring only
     agents/          helper-buddy loop, capabilities, and owner-only Markdown memory store
     tray.ts          tray icon + menu
-    windows/         overlay + panel + approval + whisper + rich Markdown window management
+    windows/         overlay + hover hint + panel + approval + whisper + rich Markdown windows
                      (per-display lifecycle, display hotplug; whisper.ts = M20 floating composer)
     markdown/        bounded regular-file detection and strict UTF-8 document loading
     output-presenter.ts  routes Markdown outputs internally and other artifacts to native apps
@@ -149,6 +152,7 @@ src/
     overlay/         buddy canvas/DOM, bezier animation, caption bubble, indicators,
                      helper-buddy sprites + hover card + detached browser PiP companion
                      (M19/M22, docs/HELPER-BUDDY-MODE.md §5.5)
+    hover-hint/      preloaded macOS glass-child content; paint acknowledgement before reveal
     panel/           M21: settings-only React app + the hidden audio engines
                      (the chat panel UI — transcript/composer/helper-buddies — is deleted)
     approval/        self-contained pending approval queue and decision UI

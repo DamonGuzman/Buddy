@@ -86,6 +86,29 @@ export interface OverlayGlassRegion extends Rect {
   tintColor?: string;
 }
 
+/** Directional corners for the detached hover-hint surface. */
+export interface OverlayHoverHintPlacement {
+  horizontal: 'left' | 'right';
+  vertical: 'above' | 'below';
+}
+
+/**
+ * Renderer-measured hover hint handed to main for presentation in a dedicated
+ * click-through window on macOS. The bounds are overlay-local top-left DIP.
+ */
+export interface OverlayHoverHintPresentation {
+  text: string;
+  sub?: string;
+  fading: boolean;
+  placement: OverlayHoverHintPlacement;
+  bounds: Rect;
+}
+
+/** Exact content revision rendered by the dedicated hover-hint window. */
+export interface OverlayHoverHintRenderState extends Omit<OverlayHoverHintPresentation, 'bounds'> {
+  revision: number;
+}
+
 /** Show/hide the "capture in progress" indicator (always signposted). */
 export interface CaptureIndicatorUpdate {
   active: boolean;

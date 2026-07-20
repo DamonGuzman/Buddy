@@ -51,7 +51,7 @@ export function createHardenedWindow(options: BrowserWindowConstructorOptions): 
  */
 export function loadRendererPage(
   win: BrowserWindow,
-  page: 'overlay' | 'panel' | 'approval' | 'whisper' | 'markdown',
+  page: 'overlay' | 'hover-hint' | 'panel' | 'approval' | 'whisper' | 'markdown',
   search?: string,
 ): void {
   if (process.env['ELECTRON_RENDERER_URL']) {

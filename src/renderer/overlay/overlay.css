@@ -22,8 +22,8 @@
 }
 
 :root[data-native-glass-regions='true'] {
-  --liquid-glass-surface: linear-gradient(145deg, rgba(30, 41, 59, 0.2), rgba(3, 7, 18, 0.1));
-  --liquid-glass-border: rgba(226, 232, 240, 0.3);
+  --liquid-glass-surface: linear-gradient(145deg, rgba(30, 41, 59, 0.14), rgba(3, 7, 18, 0.06));
+  --liquid-glass-border: rgba(226, 232, 240, 0.34);
 }
 
 /* ------------------------------------------------------- Buddy Live Bar */
@@ -554,12 +554,7 @@
   right: -12px;
   max-width: 260px;
   width: max-content;
-  /* This short-lived surface must be painted atomically with its text.
-     Native bounded glass lives in a separate NSWindow and cannot honor DOM
-     z-order against helper PiP content; a renderer-owned surface can. */
-  background: rgba(17, 24, 39, 0.96);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
-  backdrop-filter: blur(24px) saturate(140%);
+  background: var(--liquid-glass-surface);
   color: var(--text);
   font-family: var(--font);
   font-size: 12.5px;
@@ -571,13 +566,17 @@
   border: 1px solid var(--liquid-glass-border);
   box-shadow: var(--liquid-glass-shadow);
   animation: bubble-in 0.3s cubic-bezier(0.34, 1.4, 0.64, 1);
-  transition:
-    opacity 0.3s ease,
-    transform 0.3s ease;
+  transition: opacity 0.3s ease;
+}
+.hint-bubble[data-external-window] {
+  visibility: hidden;
+  opacity: 0;
+  transform: none !important;
+  animation: none;
+  transition: none;
 }
 .hint-bubble[data-fading] {
   opacity: 0;
-  transform: translateY(5px);
 }
 .hint-sub {
   margin-top: 2px;
@@ -1195,7 +1194,7 @@
   animation: helper-browser-preview-in 0.28s cubic-bezier(0.34, 1.45, 0.64, 1);
 }
 :root[data-native-glass-regions='true'] .helper-buddy-browser-preview {
-  background: linear-gradient(155deg, rgba(30, 41, 59, 0.2), rgba(3, 7, 15, 0.1));
+  background: linear-gradient(155deg, rgba(30, 41, 59, 0.14), rgba(3, 7, 15, 0.06));
 }
 .helper-buddy-surfaces[data-vertical='below'] .helper-buddy-browser-preview {
   --helper-browser-shift-y: 10px;

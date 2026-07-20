@@ -18,6 +18,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           overlay: resolve(__dirname, 'src/preload/overlay.ts'),
+          'hover-hint': resolve(__dirname, 'src/preload/hover-hint.ts'),
           panel: resolve(__dirname, 'src/preload/panel.ts'),
           approval: resolve(__dirname, 'src/preload/approval.ts'),
           whisper: resolve(__dirname, 'src/preload/whisper.ts'),
@@ -41,6 +42,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           overlay: resolve(__dirname, 'src/renderer/overlay/index.html'),
+          'hover-hint': resolve(__dirname, 'src/renderer/hover-hint/index.html'),
           panel: resolve(__dirname, 'src/renderer/panel/index.html'),
           approval: resolve(__dirname, 'src/renderer/approval/index.html'),
           whisper: resolve(__dirname, 'src/renderer/whisper/index.html'),

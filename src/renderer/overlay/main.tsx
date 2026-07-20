@@ -16,7 +16,7 @@
  * for JSX.
  */
 
-import { StrictMode, useEffect, useRef, useState } from 'react';
+import { StrictMode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { clicky } from './clicky';
 import { FlightController } from './flight';
@@ -103,6 +103,8 @@ function App(): React.JSX.Element {
   const rotRef = useRef<HTMLDivElement>(null);
   // M15 hover refs/state.
   const pupilsRef = useRef<SVGGElement>(null);
+  const hintRef = useRef<HTMLDivElement>(null);
+  const lastHoverHintPayloadRef = useRef('');
   const cfgRef = useRef<OverlayHoverConfig | null>(null);
   const lastSpokeAtRef = useRef<number | null>(null);
 
@@ -595,6 +597,50 @@ function App(): React.JSX.Element {
       : null;
   /* eslint-enable react-hooks/refs, react-hooks/purity */
 
+  useLayoutEffect(() => {
+    if (!clicky.isMacOS) return;
+    const element = hintRef.current;
+    if (hint === null || element === null) {
+      if (lastHoverHintPayloadRef.current !== 'null') {
+        lastHoverHintPayloadRef.current = 'null';
+        clicky.sendHoverHint(null);
+      }
+      return;
+    }
+
+    const sync = (): void => {
+      const rect = element.getBoundingClientRect();
+      const presentation = {
+        text: hint.text,
+        ...(hint.sub === undefined ? {} : { sub: hint.sub }),
+        fading: hintState === 'fading',
+        placement: {
+          horizontal: placement.h,
+          vertical: placement.v,
+        },
+        bounds: {
+          x: quarterDip(rect.x),
+          y: quarterDip(rect.y),
+          width: quarterDip(rect.width),
+          height: quarterDip(rect.height),
+        },
+      } as const;
+      const payload = JSON.stringify(presentation);
+      if (payload === lastHoverHintPayloadRef.current) return;
+      lastHoverHintPayloadRef.current = payload;
+      clicky.sendHoverHint(presentation);
+    };
+
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(element);
+    window.addEventListener('resize', sync);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', sync);
+    };
+  }, [hint, hintState, placement]);
+
   return (
     <>
       <div className="edge-pulse" data-active={capturing ? '' : undefined} />
@@ -654,7 +700,12 @@ function App(): React.JSX.Element {
           </div>
         )}
         {hint && (
-          <div className="hint-bubble" data-fading={hintState === 'fading' ? '' : undefined}>
+          <div
+            ref={hintRef}
+            className="hint-bubble"
+            data-external-window={clicky.isMacOS ? '' : undefined}
+            data-fading={hintState === 'fading' ? '' : undefined}
+          >
             <div>{hint.text}</div>
             {hint.sub !== undefined && <div className="hint-sub">{hint.sub}</div>}
           </div>
@@ -712,6 +763,10 @@ function App(): React.JSX.Element {
       ))}
     </>
   );
+}
+
+function quarterDip(value: number): number {
+  return Math.round(value * 4) / 4;
 }
 
 const rootEl = document.getElementById('root');

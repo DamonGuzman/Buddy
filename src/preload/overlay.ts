@@ -45,6 +45,7 @@ const api: OverlayApi = {
   getDisplaySurface: () => ipcRenderer.invoke('overlay:get-display-surface'),
   sendHover: (evt) => ipcRenderer.send('overlay:hover', evt),
   sendGlassRegions: (regions) => ipcRenderer.send('overlay:glass-regions', regions),
+  sendHoverHint: (presentation) => ipcRenderer.send('overlay:hover-hint', presentation),
   sendBuddyClick: () => ipcRenderer.send('overlay:buddy-click', null),
   sendBuddySettings: () => ipcRenderer.send('overlay:buddy-settings', null),
   sendBuddyMove: (rest) => ipcRenderer.send('overlay:buddy-move', rest),

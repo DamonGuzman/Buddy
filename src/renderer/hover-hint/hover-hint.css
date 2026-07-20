@@ -1,0 +1,43 @@
+:root {
+  --hint-text: #f3f4f6;
+  --hint-font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+.hover-hint-surface {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 7px 12px;
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.3);
+  border-radius: 14px;
+  background: rgba(17, 24, 39, 0.96);
+  color: var(--hint-text);
+  font-family: var(--hint-font);
+  font-size: 12.5px;
+  line-height: 1.45;
+  letter-spacing: 0.15px;
+  text-transform: lowercase;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+:root[data-native-glass='true'] .hover-hint-surface {
+  background: linear-gradient(145deg, rgba(30, 41, 59, 0.14), rgba(3, 7, 18, 0.06));
+}
+
+.hover-hint-surface[data-fading] {
+  opacity: 0;
+}
+
+.hover-hint-sub {
+  margin-top: 2px;
+  color: rgba(243, 244, 246, 0.72);
+  font-size: 11.5px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hover-hint-surface {
+    transition-duration: 1ms;
+  }
+}

@@ -42,9 +42,9 @@ export function observeLiquidGlassRegions(
           height: quarter(rect.height),
           cornerRadius: Number(element.dataset['liquidGlassRadius'] ?? 16),
           // AppKit controls the blur/refraction strength for regular glass.
-          // This stronger neutral tint keeps white popup copy readable over
-          // high-detail desktop content without flattening the glass effect.
-          tintColor: '#1118278f',
+          // A restrained neutral tint keeps white popup copy readable without
+          // flattening the adaptive highlights into an opaque dark card.
+          tintColor: '#11182740',
         },
       ];
     });

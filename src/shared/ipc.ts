@@ -33,6 +33,8 @@ import type {
   OverlayGlassRegion,
   OverlayHoverConfig,
   OverlayHoverEvent,
+  OverlayHoverHintPresentation,
+  OverlayHoverHintRenderState,
   OverlayInteractiveUpdate,
   PlaybackControl,
   PlaybackStatsUpdate,
@@ -138,7 +140,16 @@ export interface MainToApprovalEvents {
 }
 
 // ===========================================================================
-// 2c. Main -> Whisper renderer (webContents.send / clicky.on*)
+// 2c. Main -> dedicated hover-hint renderer
+// ===========================================================================
+
+export interface MainToHoverHintEvents {
+  /** Replace the complete hint view; null clears the hidden preloaded window. */
+  'hover-hint:update': OverlayHoverHintRenderState | null;
+}
+
+// ===========================================================================
+// 2d. Main -> Whisper renderer (webContents.send / clicky.on*)
 // ===========================================================================
 
 // M20: the whisper — a small floating composer for talking to buddy by text
@@ -187,6 +198,10 @@ export interface RendererSendEvents {
   'overlay:hover': OverlayHoverEvent;
   /** Exact popup backgrounds to mirror with bounded native Liquid Glass. */
   'overlay:glass-regions': OverlayGlassRegion[];
+  /** Present the measured transient hover hint in its dedicated macOS window. */
+  'overlay:hover-hint': OverlayHoverHintPresentation | null;
+  /** The dedicated renderer committed a content revision and is safe to reveal. */
+  'hover-hint:painted': { revision: number };
   /** The buddy was clicked while interactive -> main toggles the whisper. */
   'overlay:buddy-click': null;
   /** The buddy was right-clicked while interactive -> main opens Settings. */
@@ -212,6 +227,8 @@ export interface RendererSendEvents {
 export interface InvokeChannels {
   /** Renderer-safe settings snapshot (never contains the raw API key). */
   'settings:get': { args: []; result: Settings };
+  /** Bootstrap the sender-owned, preloaded hover-hint renderer without a push race. */
+  'hover-hint:get-state': { args: []; result: OverlayHoverHintRenderState | null };
   /** Apply a patch (apiKey is write-only); resolves to the new snapshot. */
   'settings:set': { args: [patch: SettingsPatch]; result: Settings };
   /** Submit a typed question (text fallback -> same pipeline as voice). */
@@ -318,6 +335,7 @@ export interface InvokeChannels {
 export type MainToOverlayChannel = keyof MainToOverlayEvents;
 export type MainToPanelChannel = keyof MainToPanelEvents;
 export type MainToApprovalChannel = keyof MainToApprovalEvents;
+export type MainToHoverHintChannel = keyof MainToHoverHintEvents;
 export type MainToWhisperChannel = keyof MainToWhisperEvents;
 export type RendererSendChannel = keyof RendererSendEvents;
 export type InvokeChannel = keyof InvokeChannels;
@@ -355,6 +373,8 @@ export interface OverlayApi {
   sendHover(evt: OverlayHoverEvent): void;
   /** Replace this overlay's bounded native popup backgrounds. */
   sendGlassRegions(regions: OverlayGlassRegion[]): void;
+  /** Replace or hide this overlay's detached native hover hint. */
+  sendHoverHint(presentation: OverlayHoverHintPresentation | null): void;
   /** The buddy was clicked while interactive (main toggles the whisper). */
   sendBuddyClick(): void;
   /** The buddy was right-clicked while interactive (main opens Settings). */
@@ -455,6 +475,13 @@ export interface ApprovalApi {
   /** Return the user-assisted browser to the buddy and trigger re-observation. */
   hideApprovalWindow(helperBuddyId: string, approvalId: string): Promise<void>;
   listApprovals(): Promise<ApprovalRequest[]>;
+}
+
+/** Exposed only to the preloaded, click-through hover-hint renderer. */
+export interface HoverHintApi {
+  onUpdate(cb: (state: OverlayHoverHintRenderState | null) => void): Unsubscribe;
+  getState(): Promise<OverlayHoverHintRenderState | null>;
+  painted(revision: number): void;
 }
 
 /** M20: exposed to the whisper renderer as `window.clicky`. */
