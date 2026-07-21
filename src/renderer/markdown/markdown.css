@@ -43,7 +43,6 @@ body {
   align-items: center;
   gap: 14px;
   padding: 0 22px;
-  border-bottom: 1px solid rgb(255 255 255 / 8%);
   background: rgb(11 13 18 / 88%);
   backdrop-filter: blur(18px);
   user-select: none;
@@ -52,7 +51,6 @@ body {
 .buddy-mark {
   flex: 0 0 auto;
   padding: 4px 8px 5px;
-  border: 1px solid rgb(91 166 255 / 28%);
   border-radius: 999px;
   background: rgb(47 123 214 / 13%);
   color: #83bdff;
@@ -118,7 +116,6 @@ body {
 .markdown-body h2 {
   margin: 2.8rem 0 1rem;
   padding-bottom: 0.45rem;
-  border-bottom: 1px solid rgb(148 163 184 / 16%);
   font-size: 1.65rem;
 }
 
@@ -186,8 +183,9 @@ body {
 }
 
 .markdown-body blockquote {
-  padding: 0.2rem 0 0.2rem 1.1rem;
-  border-left: 3px solid #3182ce;
+  padding: 0.7rem 1rem;
+  border-radius: 8px;
+  background: rgb(49 130 206 / 10%);
   color: #aeb9c6;
 }
 
@@ -197,7 +195,6 @@ body {
 
 .markdown-body code {
   padding: 0.16em 0.38em;
-  border: 1px solid rgb(148 163 184 / 15%);
   border-radius: 5px;
   background: #151922;
   color: #b9d9ff;
@@ -208,16 +205,13 @@ body {
 .markdown-body pre {
   overflow: auto;
   padding: 1rem 1.15rem;
-  border: 1px solid rgb(148 163 184 / 14%);
   border-radius: 10px;
   background: #11151d;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%);
   line-height: 1.55;
 }
 
 .markdown-body pre code {
   padding: 0;
-  border: 0;
   background: transparent;
   color: #d8e7f7;
   font-size: 0.86rem;
@@ -236,7 +230,6 @@ body {
 .markdown-body td {
   min-width: 8rem;
   padding: 0.68rem 0.8rem;
-  border: 1px solid rgb(148 163 184 / 16%);
   text-align: left;
   vertical-align: top;
 }
@@ -253,8 +246,8 @@ body {
 
 .markdown-body hr {
   margin: 2.5rem 0;
+  height: 1rem;
   border: 0;
-  border-top: 1px solid rgb(148 163 184 / 18%);
 }
 
 .markdown-image-placeholder {
@@ -263,8 +256,8 @@ body {
   gap: 0.45rem;
   max-width: 100%;
   padding: 0.65rem 0.8rem;
-  border: 1px dashed rgb(148 163 184 / 30%);
   border-radius: 8px;
+  background: rgb(148 163 184 / 8%);
   color: #94a3b8;
   font-size: 0.9rem;
 }

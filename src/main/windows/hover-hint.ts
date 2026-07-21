@@ -117,7 +117,7 @@ export class HoverHintWindow {
       frame: false,
       transparent: true,
       backgroundColor: '#00000000',
-      hasShadow: true,
+      hasShadow: false,
       focusable: false,
       resizable: false,
       movable: false,

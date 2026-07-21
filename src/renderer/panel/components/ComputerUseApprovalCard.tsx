@@ -67,11 +67,11 @@ export function ComputerUseApprovalCard({
     <section
       aria-labelledby="computer-use-approval-title"
       data-approval-surface
-      className="flex h-full flex-col overflow-hidden rounded-[20px] border border-amber-400/55 bg-[#211f17] shadow-2xl shadow-black/45"
+      className="flex h-full flex-col overflow-hidden rounded-[20px] bg-[#211f17] shadow-2xl shadow-black/45"
     >
       <div
         data-approval-header
-        className="flex shrink-0 items-start gap-2.5 border-b border-amber-400/25 px-3.5 py-3 [-webkit-app-region:drag]"
+        className="flex shrink-0 items-start gap-2.5 px-3.5 py-3 [-webkit-app-region:drag]"
       >
         <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-amber-400/15 text-amber-300">
           <Hand className="size-4" aria-hidden="true" />
@@ -94,7 +94,7 @@ export function ComputerUseApprovalCard({
       <div data-approval-evidence className="min-h-0 flex-1 overflow-y-auto">
         <div data-approval-evidence-content className="flex flex-col gap-2.5 p-3.5">
           {screenshot && previewStatus !== 'invalid' ? (
-            <div className="overflow-hidden rounded-lg border bg-black/35">
+            <div className="overflow-hidden rounded-lg bg-black/35">
               <img
                 key={screenshot}
                 src={screenshot}
@@ -104,20 +104,20 @@ export function ComputerUseApprovalCard({
                 onError={() => setImageState({ src: screenshot, status: 'invalid' })}
               />
               {previewStatus === 'loading' ? (
-                <div className="border-t px-3 py-1.5 text-center text-[10px] text-muted-foreground">
+                <div className="px-3 py-1.5 text-center text-[10px] text-muted-foreground">
                   verifying preview…
                 </div>
               ) : null}
             </div>
           ) : requiresPreview ? (
-            <div className="flex items-center gap-2 rounded-lg border border-destructive/35 bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
+            <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-[11px] text-destructive">
               <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
               the browser preview is unavailable. deny this action unless you can verify it in
               place.
             </div>
           ) : null}
 
-          <div className="rounded-lg border border-clicky/25 bg-clicky/8 px-3 py-2">
+          <div className="rounded-lg bg-clicky/8 px-3 py-2">
             <div className="text-[10px] font-medium tracking-wide text-clicky uppercase">
               your exact request
             </div>
@@ -141,7 +141,7 @@ export function ComputerUseApprovalCard({
             ) : null}
           </div>
 
-          <div className="rounded-lg border border-amber-400/25 bg-black/15 px-3 py-2">
+          <div className="rounded-lg bg-black/15 px-3 py-2">
             <div className="flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-amber-200 uppercase">
               <ShieldCheck className="size-3.5" aria-hidden="true" />
               why buddy paused
@@ -183,7 +183,7 @@ export function ComputerUseApprovalCard({
 
       <div
         data-approval-actions
-        className="grid shrink-0 grid-cols-2 gap-2 border-t border-amber-400/25 bg-black/20 p-3.5 [-webkit-app-region:no-drag]"
+        className="grid shrink-0 grid-cols-2 gap-2 bg-black/20 p-3.5 [-webkit-app-region:no-drag]"
       >
         <Button
           type="button"

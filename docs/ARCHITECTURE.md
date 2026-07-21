@@ -1,6 +1,6 @@
-# Buddy for macOS and Windows — MVP Architecture & Scope
+# Buddy for macOS and Windows — Current Architecture & Scope
 
-> The single source of truth for this MVP. All contributors read this first.
+> The single source of truth for the current product. All contributors read this first.
 
 ## 1. Product in one paragraph
 
@@ -13,7 +13,7 @@ transparent overlay to physically point at the UI element it's describing. No ch
 lowercase, mentor-over-your-shoulder personality. Capture happens **only on an explicit hotkey or
 typed action** and is always signposted by a visible indicator.
 
-## 2. MVP scope
+## 2. Current scope
 
 **In:**
 
@@ -35,10 +35,13 @@ typed action** and is always signposted by a visible indicator.
   mouse or keyboard access.
 - Per-monitor transparent click-through always-on-top overlay: buddy triangle, quadratic-bezier
   arc animation to targets, optional caption bubble (the spoken text), listening/thinking indicator.
-- Tray icon + small control panel window: status, live transcript, **text-input fallback** (typed
-  question → same pipeline, answer as caption + voice), settings.
-- Settings: OpenAI and Firecrawl API keys (encrypted separately via `safeStorage`), model (`gpt-realtime-2.1-mini` default /
-  `gpt-realtime-2.1`), voice, hotkey display (fixed for MVP), captions on/off.
+- Menu-bar/tray icon, settings-only window, and a floating **whisper composer** for typed questions.
+  Conversation state, replies, and helper-buddy status live in the overlay/whisper surfaces; there
+  is no conventional chat panel.
+- Settings: OpenAI and Firecrawl API keys (encrypted separately via `safeStorage`), model
+  (`gpt-realtime-2.1` default / `gpt-realtime-2.1-mini`), voice, hotkey display (fixed), captions,
+  full-realtime mode, quiet mode, ChatGPT sign-in, computer-use opt-in, browser enrollment, and
+  helper-buddy permissions.
 - Persona system prompt: lowercase, warm, brief, "written for the ear", never ends on a dead-end —
   always plants a seed for something more ambitious to try next. Calls `point_at` whenever it
   references something on screen.
@@ -49,13 +52,19 @@ typed action** and is always signposted by a visible indicator.
   persistent browser profile through the shared ActionGate. While a helper has an active browser,
   its latest exact observation appears in a detached 16:9 picture-in-picture companion beside that
   helper's hover or click-expanded overlay card. See `docs/HELPER-BUDDY-MODE.md` and
-  `docs/HELPER-BUDDY-EXECUTION.md`.
+  `docs/HELPER-BUDDY-EXECUTION.md`. Because the filesystem workspace is a mandatory admission
+  dependency and its host shell is currently macOS-only, helper buddy mode fails closed on Windows.
+- Native live-desktop computer use is implemented on both platforms behind the same opt-in and
+  one-use approval contract: CoreGraphics/Accessibility input on macOS and a Win32/PowerShell input
+  daemon on Windows. This live-desktop path is independent of the macOS-only helper-buddy boundary.
 - **Mock Realtime server** (local WS, speaks the same protocol subset) + **debug harness** for QA.
 
-**Out (stub or defer):**
+**Not implemented:**
 
-- Cloudflare Worker / ephemeral-token proxy (MVP is local-key, single user).
-- Integrations (Notion/Gmail/Calendar/Linear), wake word, ElevenLabs, auto-update, installer polish.
+- Cloudflare Worker / ephemeral-token proxy (the current app is local-key and single-user).
+- First-party OAuth/API connectors (Notion/Gmail/Calendar/Linear), wake word, ElevenLabs,
+  auto-update, and signed Windows distribution. Helper buddies may still use explicitly enrolled
+  sites through Buddy's separate persistent browser profile.
 
 ## 3. Stack
 
@@ -63,11 +72,12 @@ typed action** and is always signposted by a visible indicator.
 - **uiohook-napi** behind a platform seam for global keydown/keyup (Electron `globalShortcut` has
   no keyup, so it cannot implement hold-to-talk).
 - Audio: renderer `getUserMedia` → `AudioWorklet` → PCM16 (24kHz mono) chunks → main → WS.
-  Playback: WS audio deltas → renderer `AudioWorklet` queue. Barge-in not required for MVP
-  (push-to-talk model).
+  Playback: WS audio deltas → renderer `AudioWorklet` queue. A new hold interrupts active playback;
+  full-realtime mode uses server VAD and server-driven interruption.
 - Screenshots: Electron `desktopCapturer` per display; resize via canvas in a hidden worker window
   or `sharp`-free approach (nativeImage resize is fine).
-- No backend. Everything local.
+- No Buddy relay backend. App state and credentials stay local; model and web traffic goes directly
+  from the desktop app to the configured providers.
 
 ## 4. Process & window model
 
@@ -139,6 +149,8 @@ src/
     coords.ts        screenshot px → display DIP coord mapping (pure functions, unit-tested)
     grounding/       Native accessibility grounding: Windows UIA daemon and macOS AX provider,
                      shared timeboxing and pure label scoring
+    computer/        Shared computer-use operator and drivers; native input factory selects
+                     macOS CoreGraphics/AX or Windows Win32/PowerShell implementations
     realtime/
       session.ts     WS session: connect, session.update, audio append/commit, image input,
                      response streaming, tool-call events, reconnect
@@ -200,8 +212,8 @@ Attribution (raw vs snapped point, score, name, ms) rides on `PointerCommand.sna
 **M10 — REST grounding fallback: native accessibility snap → REST ground → raw point.** The coordinate study
 (docs/COORD-STUDY.md §8-§9) measured that coordinate weakness is realtime-family-specific:
 `gpt-5.4-mini` at reasoning effort `low` over plain REST grounds the same screenshots at ~10px
-median / 93% in-element / ~1.3s p50 — where the realtime model does ~80-100px. So when the UIA
-snap finds no confident match (element with no UIA Name, label/name token mismatch, timeout),
+median / 93% in-element / ~1.3s p50 — where the realtime model does ~80-100px. So when the native
+AX/UIA provider finds no confident match (unnamed element, label/name token mismatch, timeout),
 `src/main/grounding/rest-grounder.ts` re-grounds the model's own spoken label against the SAME
 screenshot JPEG the realtime model saw (the turn's `CaptureResult` is closure-retained by the
 pointer dispatch, so this holds even after turn settle releases `turnCaptures`), replicating the
@@ -214,8 +226,8 @@ used — the REST layer is never worse than today. The API key comes from the sa
 as the realtime session (decrypted in main, never logged); one call max in flight; a superseding
 turn / barge-in drops the pending pointer via the `turnToken` check, and the tool output has
 already gone back so the model's spoken answer is never gated on grounding.
-`CLICKY_NO_REST_GROUND=1` disables the REST layer (as `CLICKY_NO_SNAP=1` disables the UIA
-layer); attribution rides on `PointerCommand.groundingSource` (`'uia' | 'ax' | 'rest' | 'raw'`) plus
+`CLICKY_NO_REST_GROUND=1` disables the REST layer (as `CLICKY_NO_SNAP=1` disables the native
+AX/UIA layer); attribution rides on `PointerCommand.groundingSource` (`'uia' | 'ax' | 'rest' | 'raw'`) plus
 `restUsed`/`restMs`, surfaced through `DebugState.lastPointer`. Headless validation of the
 production code path: docs/EVAL.md §10.
 
@@ -240,7 +252,7 @@ Every user-reachable failure is classified into `src/main/errors.ts` — a pure 
 codes, HTTP-rejected WS upgrades, network errno strings, handshake timeouts). Consumers:
 `conversation.failTurn`, the conversation's session `error` listener (mid-session events are
 no longer a wordless red flash; mid-hold connect failures are deferred to commit resolution),
-and boot wiring in `index.ts`. Kinds cover keys (missing / rejected / DPAPI-unreadable /
+and boot wiring in `index.ts`. Kinds cover keys (missing / rejected / safeStorage-unreadable /
 quota), server trouble (rate limit / model access / 5xx / interrupted / incomplete), devices
 (mic via the renderer's `audio:capture-error` report + zero-chunk holds; speakers force
 captions on while playback is down), and local failures (capture-less turns also inject a
@@ -307,4 +319,7 @@ model call does not silently proceed without observability.
   integration/orchestrator-approved edits**.
 - Commit per milestone with clear messages.
 - `npm run dev` (electron-vite dev), `npm run build`, `npm test`, `npm run mock` (mock server),
-  `npm run dist` (electron-builder, DMG + ZIP on macOS or portable + NSIS on Windows).
+  `npm run dist` (electron-builder, DMG + ZIP on macOS or portable + NSIS on Windows). Windows
+  artifacts are currently unsigned. macOS artifacts require a stable signing identity unless the
+  developer explicitly opts into a disposable ad-hoc QA build with `BUDDY_ALLOW_ADHOC=1`; production
+  release builds additionally require notarization credentials.

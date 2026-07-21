@@ -1,4 +1,4 @@
-# Buddy for macOS and Windows (MVP)
+# Buddy for macOS and Windows
 
 macOS menu-bar / Windows tray app: hold Control+left Option on macOS or Ctrl+left Alt on Windows, talk; it sees your screens, answers in voice, and flies an
 animated pointer to what it's describing. Read `docs/ARCHITECTURE.md` before changing anything —
@@ -14,7 +14,8 @@ it defines scope, module ownership, the IPC/coordinate contracts, and convention
 - `npm run eval:voice` — voice round-trip / latency / barge-in eval (see docs/EVAL.md)
 - `npm run eval:tts` — generate eval utterance WAVs (SAPI, one-time)
 - `npm run icon` — regenerate Windows/macOS app and tray icons (build/make-icon.mjs)
-- `npm run dist` — package the current OS (macOS DMG+ZIP or Windows NSIS+portable, unsigned)
+- `npm run test:browser` — hidden-browser computer-use integration verification
+- `npm run dist` — package the current OS (signed/ad-hoc macOS DMG+ZIP or unsigned Windows NSIS+portable)
 
 ## Hard rules
 

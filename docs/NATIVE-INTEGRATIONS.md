@@ -1,8 +1,8 @@
-# Native integration direction
+# Native platform integrations
 
-This note records the platform and language decisions behind macOS
-Accessibility grounding and the Buddy Live Bar. The product-facing behavior is
-shared; native code is kept behind small providers.
+This note records the native platform decisions behind accessibility grounding, live-desktop
+input, macOS presentation, and release verification. Product-facing behavior is shared; native
+code stays behind small providers.
 
 ## Accessibility: one contract, two providers
 
@@ -49,6 +49,20 @@ not selected from a stale startup or frontmost-app cache.
 This is bounded to the current request—no continuous screen capture or
 accessibility-tree monitoring. Canvas, game, remote-desktop, and unlabeled
 custom controls continue through the existing REST vision fallback.
+
+## Live-desktop input: one operator, two controllers
+
+The computer-use operator and `LiveDesktopDriver` are shared. The factory in
+`src/main/computer/input-controller.ts` selects one permission-gated native controller:
+
+- macOS: the in-process native bridge posts CoreGraphics mouse, scroll, text, and key events after
+  confirming Accessibility trust. Coordinates remain global logical points, matching Electron DIP.
+- Windows: the persistent PowerShell input daemon posts Win32 mouse and keyboard input in physical
+  screen pixels. Electron owns the DIP-to-physical conversion.
+
+Both implementations use the same explicit Settings opt-in, fresh screenshot after each action,
+native focused-receiver evidence, independent review, and one-use human approval contract.
+Unsupported platforms fail before an input controller is created.
 
 ## Objective-C versus Swift
 

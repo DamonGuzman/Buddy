@@ -156,7 +156,7 @@ describe('WindowsInputController', () => {
     };
     const controller = new WindowsInputController(dir, { spawnImpl, platform: 'darwin' });
     await expect(controller.click(1, 2)).rejects.toThrow(
-      'computer use is only available on windows',
+      'the Windows input controller is only available on Windows',
     );
     expect(children).toHaveLength(0);
   });

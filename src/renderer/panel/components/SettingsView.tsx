@@ -145,7 +145,7 @@ export function SettingsView({
       {activeIssue ? (
         <div
           role="alert"
-          className="mx-4 mt-3 flex items-start gap-2.5 rounded-lg border border-destructive/45 bg-destructive/10 px-3 py-2.5 text-xs"
+          className="mx-4 mt-3 flex items-start gap-2.5 rounded-lg bg-destructive/10 px-3 py-2.5 text-xs"
         >
           <div className="min-w-0 flex-1">
             <div className="font-medium text-destructive">needs your attention</div>
@@ -203,7 +203,7 @@ export function SettingsView({
               onPatch={patch}
             />
           </div>
-          <div className="flex items-center gap-2.5 rounded-lg border border-dashed px-3.5 py-2.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-2.5 rounded-lg bg-muted/35 px-3.5 py-2.5 text-xs text-muted-foreground">
             <span>🪄</span>
             <span>
               {settings.firecrawlApiKeyPresent && !settings.firecrawlApiKeyUnreadable

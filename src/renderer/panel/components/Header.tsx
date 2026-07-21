@@ -15,7 +15,7 @@ const STATE_LABEL: Record<AssistantState, string> = {
 
 /** Subtle per-state tint on the assistant-state badge (dark zinc base). */
 const STATE_BADGE: Record<AssistantState, string> = {
-  idle: 'border-border text-muted-foreground',
+  idle: 'text-muted-foreground',
   listening: STATUS_TINT.accent,
   thinking: STATUS_TINT.warning,
   speaking: STATUS_TINT.positive,
@@ -62,7 +62,7 @@ export function Header(props: HeaderProps): React.JSX.Element {
       : SESSION_TITLE[sessionState];
 
   return (
-    <header className="flex items-center gap-2 border-b px-4 pt-3.5 pb-3 [-webkit-app-region:drag]">
+    <header className="flex items-center gap-2 px-4 pt-3.5 pb-3 [-webkit-app-region:drag]">
       <div className="flex items-center gap-2">
         <Triangle size={22} />
         <h1 className="text-[17px] leading-none font-semibold tracking-tight">buddy settings</h1>

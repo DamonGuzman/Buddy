@@ -62,7 +62,7 @@ export function MicrophoneCard({
           buddy to type instead.
         </p>
       ) : null}
-      <div className="flex min-h-7 items-center gap-2.5 border-t pt-2.5">
+      <div className="flex min-h-7 items-center gap-2.5 pt-2.5">
         <Label
           htmlFor="full-realtime-mode"
           className="flex-1 text-xs font-normal text-muted-foreground"
@@ -83,7 +83,7 @@ export function MicrophoneCard({
         <Label className="flex-1 text-xs font-normal text-muted-foreground">
           {settings.fullRealtimeMode ? 'start / stop realtime' : 'push to talk'}
         </Label>
-        <Kbd className="border border-b-2 px-2 text-foreground">{settings.hotkeyLabel}</Kbd>
+        <Kbd className="bg-muted px-2 text-foreground">{settings.hotkeyLabel}</Kbd>
       </div>
       <p className="text-[11px] leading-relaxed text-muted-foreground/80">
         {settings.fullRealtimeMode

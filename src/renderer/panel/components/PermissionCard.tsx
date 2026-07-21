@@ -55,8 +55,8 @@ export function PermissionCard({ health, onHealth }: PermissionCardProps): React
           variant="outline"
           className={
             ready
-              ? 'rounded-full border-emerald-400/40 bg-emerald-400/10 font-medium text-emerald-300'
-              : 'rounded-full border-amber-400/40 bg-amber-400/10 font-medium text-amber-300'
+              ? 'rounded-full bg-emerald-400/10 font-medium text-emerald-300'
+              : 'rounded-full bg-amber-400/10 font-medium text-amber-300'
           }
         >
           {ready ? 'all working ✓' : health.restartRecommended ? 'restart needed' : 'action needed'}
@@ -69,7 +69,7 @@ export function PermissionCard({ health, onHealth }: PermissionCardProps): React
           return (
             <div
               key={row.key}
-              className="flex min-h-9 items-center gap-2 border-b pb-2 last:border-b-0 last:pb-0"
+              className="flex min-h-9 items-center gap-2 pb-2 last:pb-0"
             >
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="text-xs text-foreground">{row.label}</span>

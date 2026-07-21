@@ -57,7 +57,7 @@ export function ChatGptCard({ settings, onPatch }: ChatGptCardProps): React.JSX.
             buddy uses your chatgpt plan for pointing and helper buddies. voice still needs an
             openai api key.
           </p>
-          <div className="flex min-h-7 items-center gap-2.5 border-t pt-2.5">
+          <div className="flex min-h-7 items-center gap-2.5 pt-2.5">
             <Label
               htmlFor="prefer-api-grounding"
               className="flex-1 text-xs font-normal text-muted-foreground"
@@ -70,7 +70,7 @@ export function ChatGptCard({ settings, onPatch }: ChatGptCardProps): React.JSX.
               onCheckedChange={(checked) => void onPatch({ preferApiKeyGrounding: checked })}
             />
           </div>
-          <div className="flex min-h-7 items-center gap-2.5 border-t pt-2.5">
+          <div className="flex min-h-7 items-center gap-2.5 pt-2.5">
             <div className="flex flex-1 flex-col gap-0.5">
               <Label htmlFor="computer-use" className="text-xs font-normal text-muted-foreground">
                 let sol click &amp; type

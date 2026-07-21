@@ -21,6 +21,12 @@
 > channels use `helper-buddies:*`, `overlay:helper-buddy-*`, and `/helper-buddies`. There is no
 > transcript-intent fallback or legacy helper-buddy-mode API.
 
+> Current platform boundary: helper buddy admission is macOS-only. Every helper requires the
+> picker-authorized filesystem workspace, and its host runner intentionally fails closed outside
+> macOS. The browser, ActionGate, approval, memory, and web components are platform-neutral, but they
+> are not exposed as a reduced Windows helper profile because partial capability profiles are not
+> supported.
+
 ---
 
 ## 0. Executive summary

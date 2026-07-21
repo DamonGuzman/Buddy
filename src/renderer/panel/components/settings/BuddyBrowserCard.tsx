@@ -137,7 +137,7 @@ export function BuddyBrowserCard({ grantsRevision }: BuddyBrowserCardProps): Rea
         </div>
       </form>
 
-      <div className="border-t pt-2.5">
+      <div className="pt-2.5">
         <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground/90">
           <ShieldCheck className="size-3.5 text-emerald-400" aria-hidden="true" />
           signed-in sites
@@ -157,7 +157,7 @@ export function BuddyBrowserCard({ grantsRevision }: BuddyBrowserCardProps): Rea
             {sites.map((site) => (
               <div
                 key={site.domain}
-                className="flex items-center gap-2 rounded-md border px-2 py-1.5"
+                className="flex items-center gap-2 rounded-md bg-muted/35 px-2 py-1.5"
               >
                 <span className="min-w-0 flex-1 truncate text-[11px]">{site.domain}</span>
                 <Badge variant="outline" className="rounded-full text-[9px] font-normal">
@@ -185,7 +185,7 @@ export function BuddyBrowserCard({ grantsRevision }: BuddyBrowserCardProps): Rea
         )}
       </div>
 
-      <div className="border-t pt-2.5">
+      <div className="pt-2.5">
         <div className="text-[11px] font-medium text-foreground/90">always-allowed actions</div>
         <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground/70">
           these remember consequences only. every action is still checked against your request.
@@ -195,7 +195,7 @@ export function BuddyBrowserCard({ grantsRevision }: BuddyBrowserCardProps): Rea
         ) : (
           <div className="mt-1.5 flex flex-col gap-1.5">
             {grants.map((grant) => (
-              <div key={grant.id} className="flex items-center gap-2 rounded-md border px-2 py-1.5">
+              <div key={grant.id} className="flex items-center gap-2 rounded-md bg-muted/35 px-2 py-1.5">
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[11px]">{approvalGrantLabel(grant)}</div>
                   <div className="text-[9px] text-muted-foreground/70">
@@ -224,9 +224,9 @@ export function BuddyBrowserCard({ grantsRevision }: BuddyBrowserCardProps): Rea
         )}
       </div>
 
-      <div className="border-t pt-2.5">
+      <div className="pt-2.5">
         {confirmClear ? (
-          <div className="rounded-lg border border-destructive/35 bg-destructive/10 p-2.5">
+          <div className="rounded-lg bg-destructive/10 p-2.5">
             <div className="text-[11px] font-medium text-destructive">clear buddy's browser?</div>
             <p className="mt-1 text-[10px] leading-relaxed text-foreground/80">
               this signs buddy out everywhere and removes all browser data. it cannot be undone.

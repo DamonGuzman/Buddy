@@ -28,7 +28,6 @@
   --accent: oklch(0.274 0.006 286.033);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.552 0.016 285.938);
   /* Clicky brand blue — the buddy's color (matches Triangle.tsx / overlay). */
@@ -46,7 +45,6 @@
   --secondary: oklch(0.26 0.012 260 / 36%);
   --muted: oklch(0.26 0.012 260 / 32%);
   --accent: oklch(0.3 0.018 260 / 42%);
-  --border: oklch(1 0 0 / 18%);
   --input: oklch(1 0 0 / 18%);
 }
 
@@ -71,9 +69,7 @@
 :root[data-native-glass='true'] [data-slot='tooltip-content'] {
   -webkit-backdrop-filter: blur(24px) saturate(150%);
   backdrop-filter: blur(24px) saturate(150%);
-  box-shadow:
-    0 16px 42px rgba(0, 0, 0, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.34);
 }
 
 @theme inline {
@@ -94,7 +90,6 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
-  --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-clicky: var(--clicky);
@@ -169,7 +164,7 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;

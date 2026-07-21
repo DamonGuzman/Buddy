@@ -101,7 +101,9 @@ export class WindowsInputController implements ComputerInputController {
   }
 
   private ensureChild(): ChildProcessWithoutNullStreams {
-    if (this.platform !== 'win32') throw new Error('computer use is only available on windows');
+    if (this.platform !== 'win32') {
+      throw new Error('the Windows input controller is only available on Windows');
+    }
     if (this.child !== null && this.child.exitCode === null) return this.child;
     mkdirSync(this.scriptDir, { recursive: true });
     const scriptPath = join(this.scriptDir, 'windows-input.ps1');

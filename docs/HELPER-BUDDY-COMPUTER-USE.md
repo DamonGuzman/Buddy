@@ -7,6 +7,11 @@
 > on the shipped helper-buddy runtime (`src/main/agents/`), the Sol computer-use operator
 > (`src/main/computer/`), and Codex auth. Read `docs/ARCHITECTURE.md` first; this doc assumes it.
 
+> Platform boundary: the browser driver and approval machinery are cross-platform, and live-desktop
+> computer use has native macOS and Windows controllers. Full helper buddy admission is currently
+> macOS-only because the unified helper capability surface requires the macOS host-shell/filesystem
+> workspace; Buddy intentionally does not expose a reduced Windows helper profile.
+
 > Posture change, made deliberately: HELPER-BUDDY-MODE §3.2 deferred "mouse-keyboard automation" hard.
 > That deferral was about actuating the USER'S live desktop. This design keeps that line intact —
 > the live desktop stays behind explicit opt-in computer use (Sol) and, for buddies, behind
@@ -65,9 +70,10 @@ Five pillars, one line each:
 
 ## 1. The driver seam
 
-`ComputerUseOperator` (src/main/computer/operator.ts) already contains the loop we want —
-screenshot → model → single action → settle → fresh screenshot — but hard-wires the live desktop
-(`WindowsInputController` + `captureAllDisplays` + DIP mapping). Extract the actuation surface:
+`ComputerUseOperator` (`src/main/computer/operator.ts`) owns the shared loop — screenshot → model →
+single action → settle → fresh screenshot — while the live-desktop surface composes
+`captureAllDisplays`, DIP mapping, and the platform input-controller factory. The factory selects
+`MacInputController` on macOS and `WindowsInputController` on Windows:
 
 ```ts
 // src/main/computer/driver.ts
@@ -93,8 +99,9 @@ export interface DriverPoint {
 }
 ```
 
-- `LiveDesktopDriver` wraps the existing `WindowsInputController` daemon + `mapModelPoint` +
-  `dipToScreenPoint` — behavior byte-identical to today; `operator.ts` becomes a consumer.
+- `LiveDesktopDriver` wraps `createComputerInputController` + `mapModelPoint` and keeps native
+  coordinate conversion behind the platform seam: CoreGraphics global logical points on macOS,
+  Electron DIP-to-physical conversion plus the input daemon on Windows.
 - `OffscreenBrowserDriver` is new (§2). One instance per buddy, owned by the helper-buddy runtime, torn down by
   the helper buddy's existing `AbortSignal` / terminal transition.
 - The **ActionGate (§4) sits inside the driver-consuming execute path**, not in any prompt: parsed

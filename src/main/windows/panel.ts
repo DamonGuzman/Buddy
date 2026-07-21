@@ -341,6 +341,7 @@ export class PanelManager {
       height: PANEL_HEIGHT,
       frame: false,
       ...(process.platform === 'darwin' ? { transparent: true } : {}),
+      hasShadow: false,
       resizable: false,
       maximizable: false,
       minimizable: false,

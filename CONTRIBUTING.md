@@ -14,13 +14,17 @@ development environment running and what we expect from contributions.
 
 ## Development setup
 
-Requirements: Node.js 22+, npm, and macOS 12+ or Windows 10 (build 19041+).
+Runtime requirements: Node.js 22+, npm, and macOS 12+ or Windows 10 (build 19041+). Building on
+macOS additionally requires Xcode command-line tools with the macOS 26 SDK because the universal
+native bridge weak-links the macOS 26 Liquid Glass APIs while retaining a macOS 12 deployment
+target.
 
 ```sh
 npm install
 npm run dev        # hot-reload dev app with a separate, persistent dev profile
 npm test           # vitest unit tests
 npm run build      # typecheck + production build
+npm run test:browser # hidden-browser computer-use integration test
 ```
 
 No API key is needed for development — a local mock speaks the Realtime

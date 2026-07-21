@@ -1,7 +1,7 @@
 {
   "name": "buddy",
   "version": "0.1.0",
-  "description": "Buddy for Windows and macOS — talk while it sees your screens and points at things.",
+  "description": "Buddy for macOS and Windows — talk while it sees your screens and points at things.",
   "main": "out/main/index.js",
   "private": true,
   "author": "Fastyr, Inc.",

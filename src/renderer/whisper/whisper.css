@@ -1,6 +1,6 @@
 /**
- * Whisper styling: the caption bubble's visual language (same ink, border,
- * radius, lowercase voice as overlay.css .caption / .helper-buddy-card), plus a
+ * Whisper styling: the caption bubble's visual language (same ink, radius,
+ * lowercase voice as overlay.css .caption / .helper-buddy-card), plus a
  * tail pointing toward the buddy (the window sits above-left of the rest
  * spot). The default stays fully cross-platform. On macOS 26+, main marks the
  * document only after installing the native NSGlassEffectView wrapper; that
@@ -9,7 +9,6 @@
 
 :root {
   --ink: rgba(17, 24, 39, 0.94);
-  --ink-border: rgba(148, 163, 184, 0.22);
   --text: #f3f4f6;
   --blue: #4c8dff;
   --font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
@@ -25,7 +24,6 @@
   display: flex;
   flex-direction: column;
   background: var(--ink);
-  border: 1px solid var(--ink-border);
   border-radius: 16px;
   padding: 10px 12px 9px;
   font-family: var(--font);
@@ -33,7 +31,7 @@
   line-height: 1.45;
   letter-spacing: 0.15px;
   color: var(--text);
-  transition: border-color 0.25s ease;
+  transition: box-shadow 0.25s ease;
 }
 .whisper::after {
   /* tail toward the buddy (below-right of the window) */
@@ -44,8 +42,6 @@
   width: 12px;
   height: 12px;
   background: var(--ink);
-  border-right: 1px solid var(--ink-border);
-  border-bottom: 1px solid var(--ink-border);
   transform: rotate(45deg);
 }
 
@@ -63,10 +59,6 @@
 :root[data-native-glass='true'] .whisper::after {
   content: none;
 }
-:root[data-native-glass='true'] .whisper[data-state='thinking'],
-:root[data-native-glass='true'] .whisper[data-state='listening'] {
-  border-color: transparent;
-}
 :root[data-native-glass='true'] .whisper[data-state='thinking'] {
   animation: none;
 }
@@ -76,7 +68,7 @@
 }
 .whisper[data-state='thinking'],
 .whisper[data-state='listening'] {
-  border-color: rgba(76, 141, 255, 0.55);
+  box-shadow: 0 0 0 1px rgba(76, 141, 255, 0.28), 0 14px 40px rgba(0, 0, 0, 0.32);
 }
 .whisper[data-state='thinking'] {
   animation: whisper-think 1.4s ease-in-out infinite;
@@ -84,10 +76,10 @@
 @keyframes whisper-think {
   0%,
   100% {
-    border-color: rgba(76, 141, 255, 0.55);
+    box-shadow: 0 0 0 1px rgba(76, 141, 255, 0.28), 0 14px 40px rgba(0, 0, 0, 0.32);
   }
   50% {
-    border-color: rgba(76, 141, 255, 0.2);
+    box-shadow: 0 0 0 1px rgba(76, 141, 255, 0.08), 0 14px 40px rgba(0, 0, 0, 0.32);
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -141,19 +133,16 @@
 }
 .filesystem-card {
   flex: none;
-  border: 1px solid rgba(96, 165, 250, 0.32);
   border-radius: 11px;
   background: rgba(30, 64, 175, 0.12);
   padding: 8px 9px;
 }
 .filesystem-card[data-status='failed'] {
-  border-color: rgba(248, 113, 113, 0.38);
   background: rgba(127, 29, 29, 0.16);
 }
 .filesystem-card[data-status='published'],
 .filesystem-card[data-status='kept'],
 .filesystem-card[data-status='undone'] {
-  border-color: rgba(74, 222, 128, 0.34);
   background: rgba(20, 83, 45, 0.15);
 }
 .filesystem-head {
@@ -247,7 +236,8 @@
 .filesystem-actions button,
 .folder-button,
 .folder-chip button {
-  border: 1px solid var(--ink-border);
+  appearance: none;
+  border: 0;
   border-radius: 999px;
   background: transparent;
   color: rgba(243, 244, 246, 0.72);
@@ -259,7 +249,6 @@
   padding: 5px 9px;
 }
 .filesystem-actions button.primary {
-  border-color: rgba(96, 165, 250, 0.55);
   background: rgba(59, 130, 246, 0.25);
   color: #eff6ff;
 }
@@ -275,7 +264,6 @@
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 7px;
-  border: 1px solid rgba(96, 165, 250, 0.35);
   border-radius: 10px;
   background: rgba(59, 130, 246, 0.12);
   padding: 6px 8px;
@@ -350,13 +338,12 @@
   align-items: flex-end;
   gap: 8px;
   background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 11px;
   padding: 6px 9px;
   flex: none;
 }
 .composer:focus-within {
-  border-color: rgba(76, 141, 255, 0.55);
+  box-shadow: 0 0 0 2px rgba(76, 141, 255, 0.32);
 }
 .tri {
   flex: none;
@@ -400,7 +387,6 @@
 }
 .settings-error {
   flex: none;
-  border: 1px solid rgba(248, 113, 113, 0.38);
   border-radius: 8px;
   padding: 5px 7px;
   color: #fecaca;
@@ -427,25 +413,24 @@
 .folder-button:hover:not(:disabled),
 .filesystem-actions button:hover:not(:disabled),
 .folder-chip button:hover {
-  border-color: rgba(148, 163, 184, 0.48);
   color: var(--text);
 }
 .quiet {
+  appearance: none;
+  border: 0;
   font: 600 10.5px/1 var(--font);
   text-transform: lowercase;
   color: rgba(243, 244, 246, 0.7);
   background: transparent;
-  border: 1px solid var(--ink-border);
   border-radius: 999px;
   padding: 3px 10px;
   cursor: pointer;
   transition:
     color 0.15s ease,
-    border-color 0.15s ease;
+    background-color 0.15s ease;
 }
 .quiet:hover {
   color: var(--text);
-  border-color: rgba(148, 163, 184, 0.45);
 }
 .quiet:disabled {
   cursor: default;
@@ -454,10 +439,10 @@
 .quiet[data-muted] {
   color: #a5d0ff;
   background: rgba(76, 141, 255, 0.14);
-  border-color: rgba(76, 141, 255, 0.4);
 }
 
 .whisper button:focus-visible {
-  outline: 1px solid rgba(243, 244, 246, 0.72);
-  outline-offset: 2px;
+  outline: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
 }

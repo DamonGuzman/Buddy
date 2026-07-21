@@ -198,6 +198,7 @@ export class WhisperManager {
       height: WHISPER_HEIGHT,
       frame: false,
       transparent: true,
+      hasShadow: false,
       resizable: false,
       maximizable: false,
       minimizable: false,

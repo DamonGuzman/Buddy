@@ -6,12 +6,8 @@
 
 :root {
   --ink: rgba(17, 24, 39, 0.92);
-  --ink-border: rgba(148, 163, 184, 0.22);
   --liquid-glass-surface: var(--ink);
-  --liquid-glass-border: var(--ink-border);
-  --liquid-glass-shadow:
-    0 10px 32px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    inset 0 -1px 0 rgba(15, 23, 42, 0.22);
+  --liquid-glass-shadow: 0 10px 32px rgba(0, 0, 0, 0.38);
   --blue: #3b82f6;
   --blue-soft: rgba(96, 165, 250, 0.85);
   --listen: rgba(74, 222, 128, 0.9);
@@ -23,7 +19,6 @@
 
 :root[data-native-glass-regions='true'] {
   --liquid-glass-surface: linear-gradient(145deg, rgba(30, 41, 59, 0.14), rgba(3, 7, 18, 0.06));
-  --liquid-glass-border: rgba(226, 232, 240, 0.34);
 }
 
 /* ------------------------------------------------------- Buddy Live Bar */
@@ -142,10 +137,7 @@
   overflow: hidden;
   color: rgba(255, 255, 255, 0.92);
   background: rgba(5, 5, 7, 0.97);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow:
-    0 8px 25px rgba(0, 0, 0, 0.33),
-    inset 0 1px rgba(255, 255, 255, 0.055);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.33);
   transition:
     width 320ms cubic-bezier(0.2, 0.9, 0.2, 1),
     min-width 320ms cubic-bezier(0.2, 0.9, 0.2, 1),
@@ -563,7 +555,6 @@
   text-transform: lowercase;
   padding: 7px 12px;
   border-radius: 14px 14px 4px 14px;
-  border: 1px solid var(--liquid-glass-border);
   box-shadow: var(--liquid-glass-shadow);
   animation: bubble-in 0.3s cubic-bezier(0.34, 1.4, 0.64, 1);
   transition: opacity 0.3s ease;
@@ -705,7 +696,6 @@
   text-transform: lowercase;
   padding: 9px 13px;
   border-radius: 14px 14px 4px 14px;
-  border: 1px solid var(--ink-border);
   box-shadow: 0 5px 20px rgba(0, 0, 0, 0.45);
   animation: bubble-in 0.3s cubic-bezier(0.34, 1.4, 0.64, 1);
   transition:
@@ -793,7 +783,6 @@
   letter-spacing: 0.15px;
   padding: 3.5px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(96, 165, 250, 0.4);
   white-space: nowrap;
   box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
   animation: pop-in 0.24s cubic-bezier(0.34, 1.5, 0.64, 1);
@@ -1063,7 +1052,6 @@
   height: 22px;
   border-radius: 999px;
   background: var(--ink);
-  border: 1px solid var(--ink-border);
   color: var(--text);
   font: 600 10.5px/20px var(--font);
   text-align: center;
@@ -1103,7 +1091,6 @@
   position: absolute;
   background: var(--liquid-glass-surface);
   color: var(--text);
-  border: 1px solid var(--liquid-glass-border);
   border-radius: 16px;
   padding: 10px 13px 11px;
   font-size: 12.5px;
@@ -1141,32 +1128,26 @@
   font-weight: 600;
   padding: 1.5px 8px;
   border-radius: 999px;
-  border: 1px solid transparent;
 }
 .helper-buddy-card-pill[data-kind='working'] {
   color: #a5d0ff;
   background: rgba(76, 141, 255, 0.16);
-  border-color: rgba(76, 141, 255, 0.35);
 }
 .helper-buddy-card-pill[data-kind='waiting'] {
   color: rgba(243, 244, 246, 0.65);
   background: rgba(148, 163, 184, 0.14);
-  border-color: rgba(148, 163, 184, 0.3);
 }
 .helper-buddy-card-pill[data-kind='done'] {
   color: #9ff0bb;
   background: rgba(34, 197, 94, 0.15);
-  border-color: rgba(34, 197, 94, 0.35);
 }
 .helper-buddy-card-pill[data-kind='trouble'] {
   color: #ffd48f;
   background: rgba(245, 158, 11, 0.14);
-  border-color: rgba(245, 158, 11, 0.35);
 }
 .helper-buddy-card-pill[data-kind='approval'] {
   color: #ffd48f;
   background: rgba(245, 158, 11, 0.18);
-  border-color: rgba(245, 158, 11, 0.45);
 }
 .helper-buddy-card-task {
   font-size: 13px;
@@ -1180,13 +1161,11 @@
   flex: none;
   width: clamp(176px, calc(100vw - 470px), 310px);
   padding: 7px;
-  border: 1px solid color-mix(in srgb, var(--helper-browser-accent) 32%, #64748b);
   border-radius: 15px;
   background: linear-gradient(155deg, rgba(17, 24, 39, 0.98), rgba(3, 7, 15, 0.98));
   box-shadow:
     0 18px 44px rgba(0, 0, 0, 0.52),
-    0 0 18px color-mix(in srgb, var(--helper-browser-glow) 10%, transparent),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    0 0 18px color-mix(in srgb, var(--helper-browser-glow) 10%, transparent);
   pointer-events: none;
   overflow: visible;
   transform: translateY(var(--helper-browser-shift-y));
@@ -1269,13 +1248,10 @@
 .helper-buddy-browser-preview-frame {
   width: 100%;
   aspect-ratio: 16 / 9;
-  border: 1px solid rgba(148, 163, 184, 0.2);
   overflow: hidden;
   border-radius: 10px;
   background: #05070b;
-  box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.34),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.34);
 }
 .helper-buddy-browser-preview-frame img {
   display: block;
@@ -1309,16 +1285,13 @@
   font-size: 11px;
   font-weight: 600;
   color: rgba(243, 244, 246, 0.75);
-  border: 1px solid var(--ink-border);
   border-radius: 999px;
   padding: 2px 10px;
   transition:
     color 0.15s ease,
-    border-color 0.15s ease;
 }
 .helper-buddy-card-stop:hover {
   color: #fda4af;
-  border-color: rgba(244, 63, 94, 0.5);
 }
 
 /* M22: click-to-expand full status. Taller + scrollable; height stays under
@@ -1402,10 +1375,6 @@
   align-items: center;
   gap: 7px;
   padding: 4.5px 0;
-  border-top: 1px solid rgba(148, 163, 184, 0.12);
-}
-.helper-buddy-row:first-of-type {
-  border-top: none;
 }
 .helper-buddy-row-task {
   flex: 1;
