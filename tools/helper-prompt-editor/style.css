@@ -1,0 +1,458 @@
+:root {
+  font-family:
+    Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  color: #1d2433;
+  background: #eef1f7;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 760px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(91, 106, 232, 0.13), transparent 34rem), #eef1f7;
+}
+
+button,
+select {
+  font: inherit;
+}
+
+.shell {
+  width: min(1120px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 42px 0 28px;
+}
+
+.app-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 28px;
+  margin-bottom: 22px;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: #6257c8;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(30px, 4vw, 46px);
+  letter-spacing: -0.045em;
+  line-height: 1;
+}
+
+.subtitle {
+  max-width: 650px;
+  margin: 12px 0 0;
+  color: #687083;
+  font-size: 15px;
+}
+
+.save-area {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+}
+
+.status {
+  max-width: 260px;
+  color: #697185;
+  font-size: 13px;
+  text-align: right;
+}
+
+.status[data-tone='dirty'] {
+  color: #93631a;
+}
+
+.status[data-tone='saved'] {
+  color: #287454;
+}
+
+.status[data-tone='error'] {
+  color: #b52f43;
+}
+
+.button {
+  min-height: 38px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.button:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.button-primary {
+  color: white;
+  background: #5a4fd3;
+  box-shadow: 0 5px 16px rgba(66, 54, 183, 0.2);
+}
+
+.button-primary:hover:not(:disabled) {
+  background: #493ec1;
+}
+
+.button-secondary {
+  color: #454d60;
+  border-color: #d5d9e5;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.editor-card {
+  overflow: hidden;
+  border: 1px solid rgba(138, 145, 167, 0.25);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.93);
+  box-shadow: 0 24px 80px rgba(51, 59, 84, 0.13);
+}
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow-x: auto;
+  min-height: 58px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #e4e6ed;
+  background: rgba(249, 250, 253, 0.95);
+  backdrop-filter: blur(18px);
+}
+
+.toolbar button,
+.toolbar-select {
+  flex: none;
+  min-height: 34px;
+  padding: 0 10px;
+  color: #4b5365;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.toolbar button:hover:not(:disabled),
+.toolbar-select:hover:not(:disabled) {
+  border-color: #dcdfea;
+  background: white;
+}
+
+.toolbar button.is-active {
+  color: #493fc0;
+  border-color: #d8d3ff;
+  background: #eeecff;
+}
+
+.toolbar button:disabled,
+.toolbar-select:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.toolbar-select {
+  border-color: #dcdfea;
+  background: white;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  margin: 0 4px;
+  background: #dde0e9;
+}
+
+.toolbar-spacer {
+  flex: 1 0 16px;
+}
+
+.editor {
+  min-height: calc(100vh - 260px);
+}
+
+.ProseMirror {
+  min-height: calc(100vh - 260px);
+  padding: 52px clamp(40px, 8vw, 104px) 84px;
+  outline: none;
+  color: #252b39;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 18px;
+  line-height: 1.72;
+}
+
+.ProseMirror > :first-child {
+  margin-top: 0;
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3 {
+  color: #171c27;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+}
+
+.ProseMirror h1 {
+  margin: 1.5em 0 0.7em;
+  font-size: 2em;
+}
+
+.ProseMirror h2 {
+  margin: 1.7em 0 0.65em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid #e5e7ee;
+  font-size: 1.45em;
+}
+
+.ProseMirror h3 {
+  margin: 1.5em 0 0.55em;
+  font-size: 1.15em;
+}
+
+.ProseMirror p,
+.ProseMirror ul,
+.ProseMirror ol,
+.ProseMirror blockquote,
+.ProseMirror pre {
+  margin: 0.8em 0;
+}
+
+.ProseMirror ul,
+.ProseMirror ol {
+  padding-left: 1.6em;
+}
+
+.ProseMirror li {
+  margin: 0.28em 0;
+  padding-left: 0.2em;
+}
+
+.ProseMirror li p {
+  margin: 0;
+}
+
+.ProseMirror blockquote {
+  margin-left: 0;
+  padding: 0.1em 0 0.1em 1.1em;
+  color: #626a7b;
+  border-left: 4px solid #9b93ec;
+}
+
+.ProseMirror code {
+  padding: 0.12em 0.32em;
+  border-radius: 5px;
+  background: #eef0f5;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.84em;
+}
+
+.ProseMirror pre {
+  overflow-x: auto;
+  padding: 18px 20px;
+  color: #e9ebf4;
+  border-radius: 11px;
+  background: #202432;
+}
+
+.ProseMirror pre code {
+  padding: 0;
+  color: inherit;
+  background: transparent;
+}
+
+.ProseMirror a {
+  color: #564bc8;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.ProseMirror hr {
+  margin: 2em 0;
+  border: 0;
+  border-top: 1px solid #dfe2ea;
+}
+
+.ProseMirror ::selection {
+  background: #d9d5ff;
+}
+
+.fatal {
+  margin: 0;
+  padding: 64px;
+  color: #b52f43;
+  text-align: center;
+}
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 14px 4px 0;
+  color: #7a8191;
+  font-size: 12px;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 20px;
+  margin-left: 3px;
+  padding: 2px 5px;
+  color: #5d6474;
+  border: 1px solid #d4d8e2;
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: #fafbfc;
+  font-family: inherit;
+  text-align: center;
+}
+
+@media (max-width: 850px) {
+  .shell {
+    width: min(100% - 24px, 1120px);
+    padding-top: 24px;
+  }
+
+  .app-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .save-area {
+    justify-content: flex-end;
+  }
+
+  .status {
+    margin-right: auto;
+    text-align: left;
+  }
+
+  .ProseMirror {
+    padding: 38px 28px 64px;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #e9ebf3;
+    background: #161821;
+  }
+
+  body {
+    background:
+      radial-gradient(circle at 20% 0%, rgba(105, 94, 222, 0.18), transparent 34rem), #161821;
+  }
+
+  .eyebrow,
+  .ProseMirror a {
+    color: #a79fff;
+  }
+
+  .subtitle,
+  .status,
+  footer {
+    color: #9ba2b2;
+  }
+
+  .button-secondary,
+  .toolbar-select {
+    color: #d8dbe5;
+    border-color: #3a3e4b;
+    background: #282b35;
+  }
+
+  .editor-card {
+    border-color: #363a46;
+    background: #20232c;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+  }
+
+  .toolbar {
+    border-color: #373b47;
+    background: rgba(34, 37, 47, 0.94);
+  }
+
+  .toolbar button,
+  .toolbar-select {
+    color: #c6cad5;
+  }
+
+  .toolbar button:hover:not(:disabled),
+  .toolbar-select:hover:not(:disabled) {
+    border-color: #454a59;
+    background: #2c303b;
+  }
+
+  .toolbar button.is-active {
+    color: #b8b1ff;
+    border-color: #554e8c;
+    background: #343052;
+  }
+
+  .toolbar-divider {
+    background: #414552;
+  }
+
+  .ProseMirror {
+    color: #dde0e9;
+  }
+
+  .ProseMirror h1,
+  .ProseMirror h2,
+  .ProseMirror h3 {
+    color: #f4f5f8;
+  }
+
+  .ProseMirror h2 {
+    border-color: #3b3f4b;
+  }
+
+  .ProseMirror code {
+    background: #30343f;
+  }
+
+  .ProseMirror blockquote {
+    color: #abb1c0;
+  }
+
+  .ProseMirror hr {
+    border-color: #3c404c;
+  }
+
+  kbd {
+    color: #c7cad4;
+    border-color: #484c58;
+    background: #262932;
+  }
+}

@@ -119,6 +119,42 @@ export const filesystemTools: HelperBuddyToolSpec[] = [
   {
     definition: {
       type: 'function',
+      name: 'view_image',
+      description:
+        'Select one image by its exact selected-folder-relative path and attach it as visual input for your next model turn. Use this to inspect existing images or staged image output. Supported formats are PNG, JPEG, WebP, and GIF.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: {
+            type: 'string',
+            description:
+              'Exact selected-folder-relative path to the image. A staged version takes precedence over the source version.',
+          },
+        },
+        required: ['path'],
+        additionalProperties: false,
+      },
+    },
+    timeoutMs: 30_000,
+    stepKind: 'file',
+    async execute(args, ctx) {
+      const path = typeof args['path'] === 'string' ? args['path'] : '';
+      const image = await ctx.filesystem.viewImage(ctx.brief.filesystem.taskId, path);
+      return {
+        output: JSON.stringify({
+          ok: true,
+          path: image.path,
+          mimeType: image.mimeType,
+          bytes: image.bytes,
+          note: 'the selected image is attached as visual input after this tool result',
+        }),
+        modelImages: [image],
+      };
+    },
+  },
+  {
+    definition: {
+      type: 'function',
       name: 'present_file',
       description:
         'Choose the single finished, non-executable regular file Buddy should open for the user after the staged transaction is verified and committed. Call this after validation and workspace_changes. If several files changed, choose the primary user-facing artifact.',

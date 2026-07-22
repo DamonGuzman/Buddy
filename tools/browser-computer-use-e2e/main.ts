@@ -618,6 +618,7 @@ function unusedFilesystemPort(): HelperBuddyFilesystemToolPort {
     stagePaths: unexpected,
     runStagedShell: unexpected,
     describeChanges: unexpected,
+    viewImage: unexpected,
     presentFile: unexpected,
   };
 }

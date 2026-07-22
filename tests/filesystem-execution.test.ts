@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -30,6 +30,7 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
         expect.objectContaining({ type: 'function', name: 'stage_paths' }),
         expect.objectContaining({ type: 'function', name: 'run_staged_shell' }),
         expect.objectContaining({ type: 'function', name: 'workspace_changes' }),
+        expect.objectContaining({ type: 'function', name: 'view_image' }),
         expect.objectContaining({ type: 'function', name: 'present_file' }),
         expect.objectContaining({ type: 'function', name: 'browser_navigate' }),
       ]),
@@ -70,6 +71,62 @@ describe.runIf(process.platform === 'darwin')('macOS host filesystem execution',
     expect(stagedResult.exitCode).toBe(0);
     expect(await readFile(sourceEscape, 'utf8')).toBe('source');
     expect(await readFile(stagedEscape, 'utf8')).toBe('staged');
+    await service.cancelPending(task.taskId);
+  });
+
+  it('reads a selected relative image for model vision and rejects non-images', async () => {
+    const outer = await realpath(await mkdtemp(join(homedir(), '.buddy-view-image-test-')));
+    cleanup.push(outer);
+    const root = join(outer, 'selected');
+    await mkdir(root);
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    );
+    await writeFile(join(root, 'reference.png'), png);
+    await writeFile(join(root, 'notes.txt'), 'not an image');
+    const outside = join(outer, 'outside');
+    await mkdir(outside);
+    await writeFile(join(outside, 'private.png'), png);
+    await symlink(outside, join(root, 'linked-outside'));
+    const service = new FilesystemTaskService({
+      basePath: join(outer, 'private'),
+      onState: () => {},
+      onSelection: () => {},
+    });
+    await service.initialize();
+    const grant = await service.grant(root);
+    const task = await service.prepare(grant.id, 'inspect a reference image');
+
+    await expect(service.viewImage(task.taskId, 'reference.png')).resolves.toEqual({
+      path: 'reference.png',
+      mimeType: 'image/png',
+      base64: png.toString('base64'),
+      bytes: png.length,
+    });
+    const gifBase64 = 'R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+    await service.stagePaths(task.taskId, ['reference.png']);
+    const stagedWrite = await service.runStagedShell(
+      task.taskId,
+      `printf %s ${shellQuote(gifBase64)} | base64 -D > reference.png`,
+      '.',
+      new AbortController().signal,
+    );
+    expect(stagedWrite.exitCode).toBe(0);
+    await expect(service.viewImage(task.taskId, 'reference.png')).resolves.toMatchObject({
+      path: 'reference.png',
+      mimeType: 'image/gif',
+      base64: gifBase64,
+    });
+    await expect(service.viewImage(task.taskId, 'notes.txt')).rejects.toThrow(
+      'unsupported image format',
+    );
+    await expect(service.viewImage(task.taskId, '../reference.png')).rejects.toThrow(
+      'path escapes the selected folder',
+    );
+    await expect(service.viewImage(task.taskId, 'linked-outside/private.png')).rejects.toThrow(
+      'image path escapes the selected folder',
+    );
     await service.cancelPending(task.taskId);
   });
 

@@ -273,7 +273,9 @@ describe('unified-capability HelperBuddyRunner integration', () => {
     }).run();
 
     expect(toolNames(browserBackend.requests[0]!)).toContain('browser_navigate');
-    expect(browserBackend.requests[0]!.instructions).toContain('exactly one browser action');
+    expect(browserBackend.requests[0]!.instructions).toContain(
+      'multiple browser actions in one response start concurrently',
+    );
     expect(inputJson(browserBackend.requests[1]!)).toContain('justification is required');
     expect(deps.createDriver).not.toHaveBeenCalled();
     expect(driver.navigate).not.toHaveBeenCalled();
@@ -385,49 +387,52 @@ describe('unified-capability HelperBuddyRunner integration', () => {
         justification: 'A person must handle the challenge before work can continue.',
       },
     },
-  ])('rejects a precomputed click after $firstName returns a new observation', async (fixture) => {
-    const driver = fakeDriver();
-    const deps = browserDeps(driver);
-    const backend = scriptedBackend((_request, round) =>
-      round === 1
-        ? success([
-            {
-              callId: 'observation-boundary',
-              name: fixture.firstName,
-              args: fixture.firstArgs,
-            },
-            {
-              callId: 'stale-precomputed-click',
-              name: 'browser_click',
-              args: {
-                x: 200,
-                y: 150,
-                label: 'Continue',
-                justification: 'Click the target from before the new observation.',
+  ])(
+    'starts $firstName alongside a click without borrowing its pending observation',
+    async (fixture) => {
+      const driver = fakeDriver();
+      const deps = browserDeps(driver);
+      const backend = scriptedBackend((_request, round) =>
+        round === 1
+          ? success([
+              {
+                callId: 'observation-boundary',
+                name: fixture.firstName,
+                args: fixture.firstArgs,
               },
-            },
-          ])
-        : success([], 'stopped before the stale click'),
-    );
+              {
+                callId: 'stale-precomputed-click',
+                name: 'browser_click',
+                args: {
+                  x: 200,
+                  y: 150,
+                  label: 'Continue',
+                  justification: 'Click the target from before the new observation.',
+                },
+              },
+            ])
+          : success([], 'stopped before the stale click'),
+      );
 
-    const result = await new HelperBuddyRunner({
-      memory,
-      filesystem,
-      brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
-      backend,
-      browser: deps,
-      onUpdate: () => undefined,
-    }).run();
+      const result = await new HelperBuddyRunner({
+        memory,
+        filesystem,
+        brief: brief('browser-helper-buddy', 'open example.com and inspect it'),
+        backend,
+        browser: deps,
+        onUpdate: () => undefined,
+      }).run();
 
-    expect(result.status).toBe('done');
-    expect(inputJson(backend.requests[1]!)).toContain(
-      'only one action is allowed per screen observation',
-    );
-    expect(deps.gate.execute).not.toHaveBeenCalled();
-    expect(driver.click).not.toHaveBeenCalled();
-  });
+      expect(result.status).toBe('done');
+      expect(inputJson(backend.requests[1]!)).toContain(
+        'take a browser_screenshot before acting on a visible page element',
+      );
+      expect(deps.gate.execute).not.toHaveBeenCalled();
+      expect(driver.click).not.toHaveBeenCalled();
+    },
+  );
 
-  it('executes only one action per observation, returns a fresh capture, and disposes', async () => {
+  it('starts same-round browser calls independently and returns each available result', async () => {
     const driver = fakeDriver();
     const deps = browserDeps(driver);
     const backend = scriptedBackend((_request, round) =>
@@ -468,11 +473,11 @@ describe('unified-capability HelperBuddyRunner integration', () => {
     expect(driver.navigate).toHaveBeenCalledOnce();
     expect(driver.navigate).toHaveBeenCalledWith('https://example.com');
     expect(driver.scroll).not.toHaveBeenCalled();
-    // Capability approval is task-scoped and does not depend on an unpainted
-    // about:blank capture. The single capture is mandatory after navigation.
+    // The scroll starts in the same round and cannot borrow the navigation's
+    // still-pending capture as its required input.
     expect(driver.capture).toHaveBeenCalledOnce();
     expect(inputJson(backend.requests[1]!)).toContain(
-      'only one action is allowed per screen observation',
+      'take a browser_screenshot before acting on a visible page element',
     );
     expect(inputJson(backend.requests[1]!)).toContain('data:image/jpeg;base64,fresh-1');
     expect(driver.dispose).toHaveBeenCalledOnce();

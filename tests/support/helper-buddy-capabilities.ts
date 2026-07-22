@@ -11,6 +11,12 @@ export function createTestHelperBuddyFilesystem(): HelperBuddyFilesystemToolPort
     stagePaths: async () => JSON.stringify({ ok: true }),
     runStagedShell: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
     describeChanges: async () => JSON.stringify({ changes: [] }),
+    viewImage: async (_taskId, path) => ({
+      path,
+      mimeType: 'image/png',
+      base64: 'iVBORw0KGgo=',
+      bytes: 8,
+    }),
     presentFile: async () => JSON.stringify({ ok: true }),
   };
 }

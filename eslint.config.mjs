@@ -73,6 +73,12 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser } },
   },
 
+  // Browser-side developer tools.
+  {
+    files: ['tools/helper-prompt-editor/main.js'],
+    languageOptions: { globals: { ...globals.browser } },
+  },
+
   // Tests may reach into internals.
   {
     files: ['tests/**/*.ts'],

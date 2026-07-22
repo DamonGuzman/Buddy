@@ -6,7 +6,7 @@ import type {
   FilesystemSelection,
   FilesystemTaskView,
 } from '../../shared/types';
-import type { HelperBuddyFilesystemToolPort } from '../agents/types';
+import type { HelperBuddyFilesystemToolPort, HelperBuddyModelImage } from '../agents/types';
 import { isCanonicalHelperBuddyId, requireCanonicalHelperBuddyId } from '../helper-buddy-id';
 import { hostFs, hostFsPromises } from './host-fs';
 import {
@@ -23,12 +23,14 @@ import {
 import { HostShellRunner, type HostShellPaths, type ShellRunResult } from './host-shell-runner';
 
 const { constants } = hostFs;
-const { access, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } = hostFsPromises;
+const { access, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } =
+  hostFsPromises;
 
 const MAX_PUBLISH_CHANGES = 5_000;
 const MAX_STAGED_ROOTS = 200;
 const MAX_STAGED_ENTRIES = 20_000;
 const MAX_STAGED_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_MODEL_IMAGE_BYTES = 20 * 1024 * 1024;
 
 interface TaskRecord {
   version: 4;
@@ -350,6 +352,58 @@ export class FilesystemTaskService implements HelperBuddyFilesystemToolPort {
           `${change.before === null ? 'created' : change.after === null ? 'deleted' : 'modified'}: ${change.path}`,
       )
       .join('\n');
+  }
+
+  async viewImage(taskId: string, path: string): Promise<HelperBuddyModelImage> {
+    const record = this.requireRunningTask(taskId);
+    const relativePath = validateRelativePath(path);
+    // Once a path is staged, the private transaction is authoritative. This
+    // lets a helper inspect generated/edited output and prevents a deleted
+    // staged image from silently falling back to the stale source version.
+    const root = isAuthorizedStagedKey(record.stagedRoots, relativePath, false)
+      ? record.workspacePath
+      : record.rootPath;
+    const absolutePath = resolveInside(root, relativePath);
+    const entry = await lstat(absolutePath).catch((error: unknown) => {
+      if (isMissingFilesystemEntry(error))
+        throw new Error(`image file does not exist: ${relativePath}`);
+      throw error;
+    });
+    if (!entry.isFile()) throw new Error(`image path is not a regular file: ${relativePath}`);
+    if (entry.size === 0) throw new Error(`image file is empty: ${relativePath}`);
+    if (entry.size > MAX_MODEL_IMAGE_BYTES)
+      throw new Error(`image exceeds the ${MAX_MODEL_IMAGE_BYTES / 1024 / 1024} MB model limit`);
+
+    const canonicalPath = await realpath(absolutePath);
+    const canonicalRoot = await realpath(root);
+    if (!contains(canonicalRoot, canonicalPath))
+      throw new Error(`image path escapes the selected folder: ${relativePath}`);
+    const handle = await open(canonicalPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    let bytes: Buffer;
+    try {
+      const opened = await handle.stat();
+      if (!opened.isFile() || opened.dev !== entry.dev || opened.ino !== entry.ino)
+        throw new Error(`image changed before Buddy could read it: ${relativePath}`);
+      if (opened.size === 0) throw new Error(`image file is empty: ${relativePath}`);
+      if (opened.size > MAX_MODEL_IMAGE_BYTES)
+        throw new Error(`image exceeds the ${MAX_MODEL_IMAGE_BYTES / 1024 / 1024} MB model limit`);
+      bytes = Buffer.allocUnsafe(opened.size);
+      const read = await handle.read(bytes, 0, bytes.length, 0);
+      const trailing = await handle.read(Buffer.allocUnsafe(1), 0, 1, bytes.length);
+      if (read.bytesRead !== bytes.length || trailing.bytesRead !== 0)
+        throw new Error(`image changed while Buddy was reading it: ${relativePath}`);
+    } finally {
+      await handle.close();
+    }
+    const mimeType = detectModelImageMimeType(bytes);
+    if (!mimeType)
+      throw new Error(`unsupported image format for ${relativePath}; use PNG, JPEG, WebP, or GIF`);
+    return {
+      path: relativePath,
+      mimeType,
+      base64: bytes.toString('base64'),
+      bytes: bytes.length,
+    };
   }
 
   async presentFile(taskId: string, path: string): Promise<string> {
@@ -773,14 +827,46 @@ function assertTaskRecord(raw: TaskRecord, taskId: string): void {
 }
 
 function validateRelativePath(value: string): string {
-  if (typeof value !== 'string') throw new Error('staged paths must be strings');
+  if (typeof value !== 'string') throw new Error('paths must be strings');
   const trimmed = value.trim();
   if (!trimmed || trimmed === '.' || isAbsolute(trimmed) || trimmed.includes('\0'))
-    throw new Error('stage a specific folder-relative path, not the entire selected folder');
+    throw new Error('choose a specific folder-relative path, not the entire selected folder');
   const normalized = normalize(trimmed).replaceAll('\\', '/').replace(/^\.\//, '');
   if (normalized === '..' || normalized.startsWith('../'))
     throw new Error(`path escapes the selected folder: ${value}`);
   return normalized;
+}
+
+function detectModelImageMimeType(
+  bytes: Buffer,
+): 'image/gif' | 'image/jpeg' | 'image/png' | 'image/webp' | null {
+  if (
+    bytes.length >= 8 &&
+    bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  )
+    return 'image/png';
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
+    return 'image/jpeg';
+  if (bytes.length >= 6) {
+    const header = bytes.toString('ascii', 0, 6);
+    if (header === 'GIF87a' || header === 'GIF89a') return 'image/gif';
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes.toString('ascii', 0, 4) === 'RIFF' &&
+    bytes.toString('ascii', 8, 12) === 'WEBP'
+  )
+    return 'image/webp';
+  return null;
+}
+
+function isMissingFilesystemEntry(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ENOENT'
+  );
 }
 
 function minimalRelativeRoots(values: readonly string[]): string[] {

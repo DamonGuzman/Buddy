@@ -48,10 +48,13 @@ typed action** and is always signposted by a visible indicator.
 - Helper buddies: the foreground Buddy delegates substantive background work through
   `spawn_helper_buddy`, checks progress with `check_helper_buddies`, and synthesizes completion
   results. Every helper buddy uses the same full capability surface: the ChatGPT subscription
-  backend, Firecrawl, durable memory, picker-authorized transactional filesystem tools, and Buddy's
-  persistent browser profile through the shared ActionGate. While a helper has an active browser,
+  backend, Firecrawl, durable memory, picker-authorized transactional filesystem tools (including
+  model-visible `view_image` for a selected relative image path), and Buddy's persistent browser
+  profile through the shared ActionGate. While a helper has an active browser,
   its latest exact observation appears in a detached 16:9 picture-in-picture companion beside that
-  helper's hover or click-expanded overlay card. See `docs/HELPER-BUDDY-MODE.md` and
+  helper's hover or click-expanded overlay card. Every function call a helper emits in one model
+  response starts concurrently, without tool-type serialization or same-round action rejection;
+  outputs remain correlated and replay in call order. See `docs/HELPER-BUDDY-MODE.md` and
   `docs/HELPER-BUDDY-EXECUTION.md`. Because the filesystem workspace is a mandatory admission
   dependency and its host shell is currently macOS-only, helper buddy mode fails closed on Windows.
 - Native live-desktop computer use is implemented on both platforms behind the same opt-in and
@@ -127,6 +130,9 @@ typed action** and is always signposted by a visible indicator.
   and content to the sender-bound sandboxed preload. React renders GFM with raw HTML and arbitrary
   image loading disabled; the window stays hidden until the rich tree commits. Rendering failures
   fail closed and never fall back to an OS source editor. Other output types keep their native app.
+  Packaged macOS and installed Windows builds also register Buddy as an alternate Markdown viewer;
+  Finder `open-file` events and Explorer first/second-instance arguments feed the same validated
+  renderer, including events delivered before application services finish starting.
 - IPC is **typed**: all channels + payload types live in `src/shared/ipc.ts`. Renderers get a
   narrow `window.clicky` API from `preload`. No `remote`, contextIsolation on everywhere.
 
@@ -320,6 +326,8 @@ model call does not silently proceed without observability.
 - Commit per milestone with clear messages.
 - `npm run dev` (electron-vite dev), `npm run build`, `npm test`, `npm run mock` (mock server),
   `npm run dist` (electron-builder, DMG + ZIP on macOS or portable + NSIS on Windows). Windows
-  artifacts are currently unsigned. macOS artifacts require a stable signing identity unless the
-  developer explicitly opts into a disposable ad-hoc QA build with `BUDDY_ALLOW_ADHOC=1`; production
-  release builds additionally require notarization credentials.
+  artifacts are currently unsigned; the NSIS installer is per-machine so Windows can register
+  Buddy's Markdown file associations (the portable executable does not mutate file associations).
+  macOS artifacts require a stable signing identity unless the developer explicitly opts into a
+  disposable ad-hoc QA build with `BUDDY_ALLOW_ADHOC=1`; production release builds additionally
+  require notarization credentials.

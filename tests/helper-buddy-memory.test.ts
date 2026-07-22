@@ -2,10 +2,8 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS,
-  HelperBuddyRunner,
-} from '../src/main/agents/helper-buddy';
+import { HelperBuddyRunner } from '../src/main/agents/helper-buddy';
+import { HELPER_BUDDY_INSTRUCTIONS } from '../src/main/agents/helper-buddy-instructions';
 import { HelperBuddyMemoryStore } from '../src/main/agents/helper-buddy-memory-store';
 import { helperBuddyToolDefinitions, findHelperBuddyTool } from '../src/main/agents/tools';
 import type {
@@ -48,24 +46,18 @@ function brief(): HelperBuddyBrief {
 
 describe('helper buddy memory', () => {
   it('gives helper buddies an explicitly named durable-memory save and exclusion policy', () => {
-    expect(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS).toContain('helper-buddy memory policy');
-    expect(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS).toContain('future helper buddies');
-    expect(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS).toContain('explicit user preferences');
-    expect(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS).toContain(
+    expect(HELPER_BUDDY_INSTRUCTIONS).toContain('helper-buddy memory policy');
+    expect(HELPER_BUDDY_INSTRUCTIONS).toContain('future helper buddies');
+    expect(HELPER_BUDDY_INSTRUCTIONS).toContain('explicit user preferences');
+    expect(HELPER_BUDDY_INSTRUCTIONS).toContain(
       'exact names, terminology, capitalization, or framing',
     );
-    expect(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS).toContain('user corrections and guidance');
-    expect(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS).toContain('decisions the user has made');
-    expect(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS).toContain('recently completed work');
-    expect(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS).toContain(
-      'do not call memory_save after every task',
-    );
-    expect(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS).toContain(
-      'do not save secrets, passwords, api keys, tokens',
-    );
-    expect(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS).toContain(
-      'update the existing memory with the same purpose',
-    );
+    expect(HELPER_BUDDY_INSTRUCTIONS).toContain('user corrections and guidance');
+    expect(HELPER_BUDDY_INSTRUCTIONS).toContain('decisions the user has made');
+    expect(HELPER_BUDDY_INSTRUCTIONS).toContain('recently completed work');
+    expect(HELPER_BUDDY_INSTRUCTIONS).toContain('do not call `memory_save` after every task');
+    expect(HELPER_BUDDY_INSTRUCTIONS).toContain('do not save secrets, passwords, api keys, tokens');
+    expect(HELPER_BUDDY_INSTRUCTIONS).toContain('update the existing memory with the same purpose');
   });
 
   it('atomically saves standalone Markdown, lists metadata, loads content, replaces, and deletes', async () => {
@@ -239,7 +231,7 @@ describe('helper buddy memory', () => {
     }).run();
 
     const initialInput = JSON.stringify(requests[0]!.input);
-    expect(requests[0]!.instructions).toContain(HELPER_BUDDY_MEMORY_POLICY_INSTRUCTIONS);
+    expect(requests[0]!.instructions).toBe(HELPER_BUDDY_INSTRUCTIONS);
     expect(initialInput).toContain('<memory_name>Release checklist</memory_name>');
     expect(initialInput).toContain('<memory_usage>Load before release work.</memory_usage>');
     expect(initialInput).toContain(`<memory_directory>${memory.directory}</memory_directory>`);

@@ -82,7 +82,9 @@ read-only **`check_helper_buddies`** reports current progress. The flow:
    `web_batch_scrape`, and `web_research`, plus `scratchpad_write` and `read_screen`. Firecrawl
    crawl and batch tools expose their start/status/errors/cancel lifecycle so Buddy's own helper buddy
    loop remains the orchestrator. Browser and transactional filesystem tools are registered in the
-   same request for every helper; there are no research, browser, or filesystem helper profiles.
+   same request for every helper; filesystem access includes `view_image`, which turns one selected
+   relative image path into model-visible image input on the following loop round. There are no
+   research, browser, or filesystem helper profiles.
 4. **Delivery**: completion becomes an automated user-role foreground turn containing a trusted
    `<system_reminder>` plus an escaped `<helper_buddy_result>` data block. The originating voice or text
    session runs it immediately when idle, or after the active turn settles; overlay status and the
@@ -311,7 +313,7 @@ class HelperBuddyRunner {
         // model produced final text → that's the answer
         return this.finish('done', resp.outputText());
       }
-      const outputs = await this.executeTools(calls); // parallel where safe, each timeboxed
+      const outputs = await this.executeTools(calls); // all start concurrently, each timeboxed
       this.recordStep(calls, outputs); // → overlay activity log
       resp = await this.backend.request(this.compactedHistory(outputs));
     }
@@ -324,8 +326,10 @@ class HelperBuddyRunner {
 - **Unbounded by design**: there is no tool-round or elapsed-time ceiling. The loop ends only when
   the model returns a final answer, the user cancels it, a classified failure stops it, or Buddy
   shuts down.
-- **Tool execution** is `executeTools(calls)`: look each call up in the registry, run its executor
-  with an `AbortSignal` and a per-tool timeout (§3), collect `{call_id, output}`.
+- **Tool execution** is `executeTools(calls)`: look each call up in the registry, start every
+  executor in the model response concurrently with an `AbortSignal` and a per-tool timeout (§3),
+  then collect `{call_id, output}` in the model's original call order. There is no tool-type
+  serialization or same-round browser-action rejection.
 - **Readable activity is mandatory**: the registry adds a required `description` argument to every
   helper function tool. It asks for 3–12 simple, non-technical words about the current action; the
   runner validates it before executing the tool, and the helper card displays it verbatim. The

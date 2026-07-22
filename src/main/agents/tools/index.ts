@@ -24,4 +24,4 @@ export function findHelperBuddyTool(name: string): HelperBuddyToolSpec | undefin
   return byName.get(name);
 }
 
-export { isBrowserActionTool, isBrowserTool } from './browser';
+export { isBrowserTool } from './browser';

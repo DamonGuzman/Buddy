@@ -220,11 +220,11 @@ before the browser action reaches the gate:
 | `browser_scroll`     | `x, y, dy`                                                               | never flagged            |
 | `browser_screenshot` | —                                                                        | never flagged            |
 
-Loop discipline copied from the operator: **one action per observation** — after every executed
-action the driver settles (~350ms), captures fresh, and the image goes back with the tool output.
-Extra same-round calls get `{error: 'only one action is allowed per screen observation'}` (same
-wire copy as operator.ts). The buddy's system prompt gains a browser section mirroring
-`OPERATOR_INSTRUCTIONS` (inspect, act once, never invent hidden state, stop when unclear) plus:
+Every browser tool call emitted in one model response starts concurrently, just like every other
+helper tool. After each executed action the driver settles (~350ms), captures fresh, and returns
+that action's image with its correlated tool output. Buddy does not serialize same-round browser
+actions or reject them because another call may update the page. The buddy's system prompt still
+requires it to inspect observations, never invent hidden state, and stop when unclear, plus:
 _your justification is read by a reviewer; describe the action honestly and specifically._
 
 ## 4. The action gate (first line of defense)
@@ -442,7 +442,7 @@ are approving); everything else stays `HelperBuddySummary`-shaped.
   authenticated exact-IP network proxy, and window policy.
 - `src/main/agents/helper-buddy-browser-runtime.ts`, `src/main/agents/tools/browser.ts`, and
   `src/main/agents/helper-buddy-history.ts`:
-  unified helper loop, one action per observation, bounded replay, cancellation, and
+  unified concurrent tool rounds, per-action fresh observations, bounded replay, cancellation, and
   approval parking.
 - `src/main/agents/gate/`: mechanical trigger, independent reviewer, immutable ActionGate,
   redaction, strikes, persistent grants, bounded follow-through, and outcome journal.
@@ -486,8 +486,8 @@ are approving); everything else stays `HelperBuddySummary`-shaped.
    reinspection and exact navigation capabilities prevent one helper from reusing another's
    approval; site sign-out, clear, lock, suspend, and shutdown cancel affected runs first.
 6. No persistent browser surface is created or read before the helper's first browser action passes
-   the browser-capability approval. Every subsequent observation-producing tool starts a new
-   one-action boundary.
+   the browser-capability approval. Observation-producing calls return independently correlated
+   fresh captures and are not serialized within a model response.
 7. Buddy browser traffic resolves and validates every redirect hop, rejects mixed or non-global
    address sets, and connects the exact validated IP while preserving HTTP Host and TLS identity.
    Firecrawl traffic goes only to the fixed `api.firecrawl.dev` v2 origin. The browser's loopback

@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +10,7 @@ import {
   MAX_MARKDOWN_BYTES,
 } from '../src/main/markdown/document';
 import { OutputPresenter } from '../src/main/output-presenter';
+import { SystemMarkdownFileOpenController } from '../src/main/markdown/system-file-open';
 import { normalizeExternalMarkdownUrl } from '../src/renderer/markdown/link-policy';
 
 vi.mock('../src/renderer/markdown/clicky', () => ({
@@ -297,5 +298,67 @@ describe('output presentation routing', () => {
       surface: 'native',
       error: 'no application is registered',
     });
+  });
+});
+
+describe('operating-system Markdown opens', () => {
+  it('queues an early macOS open-file path until the Markdown service is bound', async () => {
+    const path = join(await temporaryDirectory(), 'launch notes.md');
+    const openMarkdown = vi.fn(async (_path: string) => undefined);
+    const reportFailure = vi.fn();
+    const controller = new SystemMarkdownFileOpenController(reportFailure);
+
+    expect(controller.enqueue(path)).toBe(true);
+    expect(openMarkdown).not.toHaveBeenCalled();
+
+    controller.bind(openMarkdown);
+    await vi.waitFor(() => expect(openMarkdown).toHaveBeenCalledWith(path));
+    expect(reportFailure).not.toHaveBeenCalled();
+  });
+
+  it('extracts every registered Markdown family path from Windows launch arguments', async () => {
+    const directory = await temporaryDirectory();
+    const paths = ['report.md', 'notes.MARKDOWN', 'readme.mdown', 'guide.mkd', 'spec.mkdn'].map(
+      (name) => join(directory, name),
+    );
+    const openMarkdown = vi.fn(async (_path: string) => undefined);
+    const controller = new SystemMarkdownFileOpenController(vi.fn());
+    controller.bind(openMarkdown);
+
+    expect(
+      controller.enqueueArguments(['Buddy.exe', '--allow-file-access', ...paths, 'ignored.txt']),
+    ).toBe(true);
+    await vi.waitFor(() => expect(openMarkdown).toHaveBeenCalledTimes(paths.length));
+    expect(openMarkdown.mock.calls.map(([path]) => path)).toEqual(
+      paths.map((path) => resolve(path)),
+    );
+  });
+
+  it('does not consume a normal second launch with no Markdown document', () => {
+    const controller = new SystemMarkdownFileOpenController(vi.fn());
+
+    expect(controller.enqueueArguments(['Buddy.exe', '--hidden'])).toBe(false);
+  });
+
+  it('deduplicates a document while it is queued and reports renderer failures', async () => {
+    const path = join(await temporaryDirectory(), 'broken.md');
+    let rejectOpen: ((error: Error) => void) | undefined;
+    const openMarkdown = vi.fn(
+      (_path: string) =>
+        new Promise<void>((_resolve, reject) => {
+          rejectOpen = reject;
+        }),
+    );
+    const reportFailure = vi.fn();
+    const controller = new SystemMarkdownFileOpenController(reportFailure);
+    controller.bind(openMarkdown);
+
+    expect(controller.enqueue(path)).toBe(true);
+    expect(controller.enqueue(path)).toBe(true);
+    await vi.waitFor(() => expect(openMarkdown).toHaveBeenCalledTimes(1));
+    rejectOpen?.(new Error('render failed'));
+    await vi.waitFor(() =>
+      expect(reportFailure).toHaveBeenCalledWith(resolve(path), expect.any(Error)),
+    );
   });
 });

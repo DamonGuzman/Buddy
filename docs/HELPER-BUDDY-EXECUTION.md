@@ -22,6 +22,12 @@ Every filesystem tool receives the same required `description` argument as the o
 helper-buddy tools: 3–12 simple, non-technical words describing the current action. Buddy validates it
 before running the tool and shows it directly in the helper buddy's activity card.
 
+`view_image` accepts one exact selected-folder-relative path and attaches that file as an
+`input_image` in the helper's next model request. It reads from the sparse staging area when the
+path is staged, otherwise from the selected source folder, so helpers can visually inspect both
+references and generated output. Buddy rejects paths outside the workspace, non-regular files,
+empty or oversized files, and anything whose bytes are not PNG, JPEG, WebP, or GIF.
+
 Every helper buddy also receives the complete Firecrawl tool set: search, scrape, map,
 crawl lifecycle, batch scrape lifecycle, and research. The shell tools remain instructed not to
 make network requests; current web material must go through the typed, abort-aware Firecrawl
@@ -45,16 +51,18 @@ bypass the validated, atomic memory-store contract.
 5. Before an edit, the helper buddy calls `stage_paths` with exact files or small directories. Staging `.`
    or the whole project is rejected, as are excessive path/entry/byte counts.
 6. `run_staged_shell` changes the sparse private area. New paths can be named before they exist.
-7. The helper buddy validates its work, calls `workspace_changes`, and selects one non-executable regular
+7. The helper buddy uses `view_image` whenever visual inspection of an existing or staged image is
+   needed; Buddy places the selected image directly into the next model turn.
+8. The helper buddy validates its work, calls `workspace_changes`, and selects one non-executable regular
    output file with `present_file`. Executable and OS-launcher artifact types are rejected. If the
    helper buddy omits that tool, Buddy opens the only safely presentable changed file or reveals the
    selected folder when the output is genuinely multi-file.
-8. Helper completion automatically conflict-checks only the staged roots, captures their durable
+9. Helper completion automatically conflict-checks only the staged roots, captures their durable
    before-image, publishes, and verifies hashes. Markdown opens as rich content in Buddy's native
    document window; other selected outputs use their OS default app. Buddy receives the result
    continuation whether publication or presentation succeeds or fails.
-9. **Undo** proceeds only if Buddy's published paths still match. It restores the path-scoped
-   before-image and never overwrites newer edits.
+10. **Undo** proceeds only if Buddy's published paths still match. It restores the path-scoped
+    before-image and never overwrites newer edits.
 
 ## Parallel helpers
 

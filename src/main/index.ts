@@ -76,6 +76,7 @@ import { NativeReceiverLiveDesktopEvidence } from './computer/live-desktop-evide
 import { FilesystemTaskService } from './filesystem/service';
 import { OutputPresenter } from './output-presenter';
 import { MarkdownWindowManager } from './windows/markdown';
+import { SystemMarkdownFileOpenController } from './markdown/system-file-open';
 import type { MainToPanelChannel, MainToPanelEvents } from '../shared/ipc';
 import type {
   AssistantState,
@@ -115,7 +116,32 @@ if (fakeMicWav) {
 
 if (process.platform === 'darwin') app.setActivationPolicy('accessory');
 
-// Single instance: a second launch just pops the panel of the first.
+const systemMarkdownFileOpen = new SystemMarkdownFileOpenController((path, error) => {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.error(`[markdown] could not open system document ${path}: ${detail}`);
+  dialog.showErrorBox(`Buddy couldn't open ${basename(path) || 'the Markdown file'}`, detail);
+});
+
+// Finder may deliver this before app.ready, so registration must precede the
+// single-instance gate and all asynchronous service construction.
+app.on('open-file', (event, path) => {
+  event.preventDefault();
+  systemMarkdownFileOpen.enqueue(path);
+});
+
+let showWhisperForSecondLaunch: (() => void) | null = null;
+let pendingPlainSecondLaunch = false;
+app.on('second-instance', (_event, argv) => {
+  if (systemMarkdownFileOpen.enqueueArguments(argv)) return;
+  if (showWhisperForSecondLaunch === null) {
+    pendingPlainSecondLaunch = true;
+  } else {
+    showWhisperForSecondLaunch();
+  }
+});
+
+// Single instance: document launches are forwarded above; a plain second
+// launch summons the primary process's whisper composer.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
@@ -160,6 +186,11 @@ async function main(): Promise<void> {
 
   const tray: TrayRef = { current: null };
   const services = createServices(tray);
+  systemMarkdownFileOpen.bind((path) => services.markdown.open(path));
+
+  // Explorer starts the registered executable with the document path. macOS
+  // uses the open-file event above and must not parse its application argv.
+  if (process.platform === 'win32') systemMarkdownFileOpen.enqueueArguments(process.argv);
 
   installLastResortHandlers(services, tray);
 
@@ -214,8 +245,11 @@ async function main(): Promise<void> {
   permissionPoll.unref?.();
   wirePowerMonitor(services);
 
-  // M21: a second launch summons the whisper (the panel is settings-only now).
-  app.on('second-instance', () => services.whisper.show());
+  showWhisperForSecondLaunch = () => services.whisper.show();
+  if (pendingPlainSecondLaunch) {
+    pendingPlainSecondLaunch = false;
+    showWhisperForSecondLaunch();
+  }
   app.on('activate', () => {
     services.panel.show();
     services.permissions.refresh();

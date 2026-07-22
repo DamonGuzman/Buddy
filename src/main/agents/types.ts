@@ -72,8 +72,17 @@ export interface HelperBuddyFilesystemToolPort {
     signal: AbortSignal,
   ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   describeChanges(taskId: string): Promise<string>;
+  /** Read one selected-folder-relative image for multimodal model inspection. */
+  viewImage(taskId: string, path: string): Promise<HelperBuddyModelImage>;
   /** Select the finished regular file Buddy should present after the transaction commits. */
   presentFile(taskId: string, path: string): Promise<string>;
+}
+
+export interface HelperBuddyModelImage {
+  path: string;
+  mimeType: 'image/gif' | 'image/jpeg' | 'image/png' | 'image/webp';
+  base64: string;
+  bytes: number;
 }
 
 export interface HelperBuddyMemoryMetadata {
@@ -213,15 +222,19 @@ export interface HelperBuddyToolContext {
   filesystem: HelperBuddyFilesystemToolPort;
 }
 
-export interface HelperBuddyBrowserToolResult {
+/** A tool result plus optional model-visible content for the next loop round. */
+export interface HelperBuddyToolResult {
   output: string;
+  /** Fresh browser screenshots represented in Buddy's capture contract. */
   observation?: CaptureResult[];
+  /** Filesystem images selected explicitly by the helper. */
+  modelImages?: HelperBuddyModelImage[];
   halt?: boolean;
 }
 
 export interface HelperBuddyBrowserToolPort {
-  execute(name: string, args: Record<string, unknown>): Promise<HelperBuddyBrowserToolResult>;
-  requestUser(args: Record<string, unknown>): Promise<HelperBuddyBrowserToolResult>;
+  execute(name: string, args: Record<string, unknown>): Promise<HelperBuddyToolResult>;
+  requestUser(args: Record<string, unknown>): Promise<HelperBuddyToolResult>;
   dispose(): Promise<void>;
 }
 export interface HelperBuddyToolSpec {
@@ -229,8 +242,11 @@ export interface HelperBuddyToolSpec {
   /** Omitted for locally parked tools such as needs_user; runner cancellation still applies. */
   timeoutMs?: number;
   stepKind: HelperBuddyStep['kind']; // activity-log kind for this tool
-  /** Returns the function_call_output string handed back to the model. Throws/rejects → the loop wraps as {error}. */
-  execute(args: Record<string, unknown>, ctx: HelperBuddyToolContext): Promise<string>;
+  /** Returns the function output and, when needed, model-visible image content for the next round. */
+  execute(
+    args: Record<string, unknown>,
+    ctx: HelperBuddyToolContext,
+  ): Promise<string | HelperBuddyToolResult>;
 }
 
 // --- manager surfaces (implemented by agents/helper-buddy-manager.ts; consumed by index.ts/conversation.ts) ---

@@ -19,7 +19,7 @@ import type {
   HelperBuddyBrowserAction,
   HelperBuddyBrowserDeps,
   HelperBuddyBrowserToolPort,
-  HelperBuddyBrowserToolResult,
+  HelperBuddyToolResult,
   HelperBuddyBrief,
   HelperBuddyApprovalResolution,
 } from './types';
@@ -67,10 +67,7 @@ export class HelperBuddyBrowserRuntime implements HelperBuddyBrowserToolPort {
     this.settleMs = options.deps.settleMs ?? HELPER_BUDDY_BROWSER_SETTLE_MS;
   }
 
-  async execute(
-    name: string,
-    args: Record<string, unknown>,
-  ): Promise<HelperBuddyBrowserToolResult> {
+  async execute(name: string, args: Record<string, unknown>): Promise<HelperBuddyToolResult> {
     this.assertUsable();
     const required = requiredJustification(args);
     if (!required.ok) return outputError(required.error);
@@ -125,7 +122,7 @@ export class HelperBuddyBrowserRuntime implements HelperBuddyBrowserToolPort {
     }
   }
 
-  async requestUser(args: Record<string, unknown>): Promise<HelperBuddyBrowserToolResult> {
+  async requestUser(args: Record<string, unknown>): Promise<HelperBuddyToolResult> {
     this.assertUsable();
     const justification = requiredJustification(args);
     if (!justification.ok) return outputError(justification.error);
@@ -222,7 +219,7 @@ export class HelperBuddyBrowserRuntime implements HelperBuddyBrowserToolPort {
     return this.disposePromise;
   }
 
-  private async ensureCapability(): Promise<HelperBuddyBrowserToolResult | null> {
+  private async ensureCapability(): Promise<HelperBuddyToolResult | null> {
     if (this.capabilityGranted) return null;
     if (!this.options.brief.userRequest.trim()) {
       return outputError('browser use requires the exact user request as its authority anchor');
@@ -265,7 +262,7 @@ export class HelperBuddyBrowserRuntime implements HelperBuddyBrowserToolPort {
     initial: GateExecutionResult<void>,
     action: HelperBuddyBrowserAction,
     actionController: AbortController,
-  ): Promise<HelperBuddyBrowserToolResult> {
+  ): Promise<HelperBuddyToolResult> {
     let result = initial;
     let delivered: HelperBuddyApprovalResolution | null = null;
     let replacements = 0;
@@ -639,7 +636,7 @@ function point(screenIndex: number, x: number, y: number): DriverPoint {
   return { screenIndex, x, y };
 }
 
-function outputError(error: string): HelperBuddyBrowserToolResult {
+function outputError(error: string): HelperBuddyToolResult {
   return { output: JSON.stringify({ error }) };
 }
 

@@ -12,6 +12,15 @@ files:
 asarUnpack:
   - '**/node_modules/uiohook-napi/**'
 win:
+  fileAssociations:
+    - ext:
+        - md
+        - markdown
+        - mdown
+        - mkd
+        - mkdn
+      name: Buddy.Markdown
+      description: Markdown document
   target:
     - portable
     - nsis
@@ -36,6 +45,16 @@ win:
     - from: node_modules/ws
       to: phone-audio-bridge/node_modules/ws
 mac:
+  fileAssociations:
+    - ext:
+        - md
+        - markdown
+        - mdown
+        - mkd
+        - mkdn
+      name: Markdown document
+      role: Viewer
+      rank: Alternate
   target:
     - dmg
     - zip
@@ -68,7 +87,9 @@ dmg:
   sign: false
 nsis:
   oneClick: true
-  perMachine: false
+  # electron-builder's Windows file-association support requires a
+  # per-machine NSIS install so Explorer can register Buddy reliably.
+  perMachine: true
   deleteAppDataOnUninstall: false
 electronLanguages:
   - en-US

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { shouldRetry } from '../src/main/agents/helper-buddy';
+import { HelperBuddyRunner, shouldRetry } from '../src/main/agents/helper-buddy';
 import { HelperBuddyManager } from '../src/main/agents/helper-buddy-manager';
 import { MockHelperBuddyBackend } from '../src/main/agents/mock-helper-buddy-backend';
 import { CodexHelperBuddyBackend } from '../src/main/agents/helper-buddy-backend';
@@ -10,6 +10,7 @@ import type {
   HelperBuddyBackendResult,
   HelperBuddyBrief,
   HelperBuddyBrowserDeps,
+  HelperBuddyFilesystemToolPort,
   HelperBuddyPersistencePort,
   HelperBuddyToolContext,
   HelperBuddyToolDefinition,
@@ -68,6 +69,82 @@ describe('Helper buddy runtime', () => {
     expect(record.sources).toEqual(['https://example.com/mock-source']);
     expect(record.steps.map((step) => step.kind)).toEqual(['search', 'note']);
     expect(updates.length).toBeGreaterThan(2);
+  });
+
+  it('starts every tool call from one model response concurrently', async () => {
+    let releaseTools!: () => void;
+    const toolRelease = new Promise<void>((resolve) => {
+      releaseTools = resolve;
+    });
+    const started: string[] = [];
+    const filesystem: HelperBuddyFilesystemToolPort = {
+      ...capabilities.filesystem,
+      runShell: async (_taskId, script) => {
+        started.push(script);
+        await toolRelease;
+        return { exitCode: 0, stdout: script, stderr: '' };
+      },
+    };
+    const requests: HelperBuddyBackendRequest[] = [];
+    const backend: HelperBuddyBackend = {
+      isReady: () => true,
+      async request(request): Promise<HelperBuddyBackendResult> {
+        requests.push(request);
+        if (requests.length === 1) {
+          const calls = ['first inspection', 'second inspection'].map((script, index) => ({
+            callId: `shell_${index + 1}`,
+            name: 'run_shell',
+            argsJson: JSON.stringify({
+              description: `checking project area ${index + 1}`,
+              script,
+            }),
+          }));
+          return {
+            ok: true,
+            outputItems: calls.map((call) => ({
+              type: 'function_call',
+              call_id: call.callId,
+              name: call.name,
+              arguments: call.argsJson,
+            })),
+            text: '',
+            functionCalls: calls,
+            searchQueries: [],
+            citations: [],
+            usedPercent: null,
+          };
+        }
+        return {
+          ok: true,
+          outputItems: [],
+          text: 'both inspections finished',
+          functionCalls: [],
+          searchQueries: [],
+          citations: [],
+          usedPercent: null,
+        };
+      },
+    };
+    const running = new HelperBuddyRunner({
+      brief: brief('concurrent-tools'),
+      backend,
+      browser: capabilities.browser,
+      filesystem,
+      memory,
+      onUpdate: () => undefined,
+    }).run();
+
+    try {
+      await vi.waitFor(() => expect(started).toEqual(['first inspection', 'second inspection']));
+    } finally {
+      releaseTools();
+    }
+
+    await expect(running).resolves.toMatchObject({ status: 'done' });
+    const outputOrder = requests[1]!.input
+      .filter((item) => item['type'] === 'function_call_output')
+      .map((item) => item['call_id']);
+    expect(outputOrder).toEqual(['shell_1', 'shell_2']);
   });
 
   it('continues past twelve tool rounds until the backend finishes', async () => {
@@ -259,6 +336,85 @@ describe('Helper buddy runtime', () => {
     }
   });
 
+  it('attaches a helper-selected workspace image to the next model turn', async () => {
+    const requests: HelperBuddyBackendRequest[] = [];
+    const backend: HelperBuddyBackend = {
+      isReady: () => true,
+      async request(req): Promise<HelperBuddyBackendResult> {
+        requests.push(req);
+        if (requests.length === 1) {
+          const args = JSON.stringify({
+            description: 'inspecting the generated image',
+            path: 'art/result.png',
+          });
+          return {
+            ok: true,
+            outputItems: [
+              {
+                type: 'function_call',
+                call_id: 'view_1',
+                name: 'view_image',
+                arguments: args,
+              },
+            ],
+            text: '',
+            functionCalls: [{ callId: 'view_1', name: 'view_image', argsJson: args }],
+            searchQueries: [],
+            citations: [],
+            usedPercent: null,
+          };
+        }
+        return {
+          ok: true,
+          outputItems: [],
+          text: 'the selected image was inspected',
+          functionCalls: [],
+          searchQueries: [],
+          citations: [],
+          usedPercent: null,
+        };
+      },
+    };
+    let finished = false;
+    const manager = new HelperBuddyManager({
+      ...capabilities,
+      backend,
+      memory,
+      isReady: () => true,
+      onHelperBuddiesChanged: () => {},
+      onFinished: () => {
+        finished = true;
+      },
+    });
+
+    expect(manager.spawn(brief('helper_buddy_view_image'))).toEqual({
+      ok: true,
+      helperBuddyId: 'helper_buddy_view_image',
+    });
+    await vi.waitFor(() => expect(finished).toBe(true));
+
+    const replay = requests[1]?.input ?? [];
+    expect(replay).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'function_call_output',
+          call_id: 'view_1',
+          output: expect.stringContaining('attached as visual input'),
+        }),
+        expect.objectContaining({
+          type: 'message',
+          role: 'user',
+          content: expect.arrayContaining([
+            expect.objectContaining({
+              type: 'input_image',
+              image_url: 'data:image/png;base64,iVBORw0KGgo=',
+            }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
   it('requires a short plain-language description on every helper function tool', () => {
     const definitions = helperBuddyToolDefinitions().filter(
       (tool): tool is Extract<HelperBuddyToolDefinition, { type: 'function' }> =>
@@ -282,6 +438,7 @@ describe('Helper buddy runtime', () => {
       'run_staged_shell',
       'scratchpad_write',
       'stage_paths',
+      'view_image',
       'web_batch_scrape',
       'web_crawl',
       'web_map',

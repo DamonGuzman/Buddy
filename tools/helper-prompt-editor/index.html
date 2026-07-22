@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Helper Buddy Prompt Editor</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">Developer tool</p>
+          <h1>Helper Buddy prompt</h1>
+          <p class="subtitle">
+            Edit the model instructions visually. Saving updates the checked-in Markdown source.
+          </p>
+        </div>
+        <div class="save-area">
+          <span id="status" class="status" role="status" aria-live="polite">Loading…</span>
+          <button id="reload" class="button button-secondary" type="button">Reload</button>
+          <button id="save" class="button button-primary" type="button" disabled>
+            Save prompt
+          </button>
+        </div>
+      </header>
+
+      <section class="editor-card" aria-label="Prompt editor">
+        <div id="toolbar" class="toolbar" role="toolbar" aria-label="Text formatting">
+          <select id="block-style" class="toolbar-select" aria-label="Block style" disabled>
+            <option value="paragraph">Paragraph</option>
+            <option value="heading-1">Heading 1</option>
+            <option value="heading-2">Heading 2</option>
+            <option value="heading-3">Heading 3</option>
+          </select>
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <button type="button" data-command="bold" aria-label="Bold" title="Bold (⌘B)" disabled>
+            <strong>B</strong>
+          </button>
+          <button
+            type="button"
+            data-command="italic"
+            aria-label="Italic"
+            title="Italic (⌘I)"
+            disabled
+          >
+            <em>I</em>
+          </button>
+          <button
+            type="button"
+            data-command="strike"
+            aria-label="Strikethrough"
+            title="Strikethrough"
+            disabled
+          >
+            <s>S</s>
+          </button>
+          <button
+            type="button"
+            data-command="code"
+            aria-label="Inline code"
+            title="Inline code"
+            disabled
+          >
+            &lt;/&gt;
+          </button>
+          <button
+            type="button"
+            data-command="link"
+            aria-label="Link"
+            title="Add or edit link"
+            disabled
+          >
+            Link
+          </button>
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <button
+            type="button"
+            data-command="bullet-list"
+            aria-label="Bulleted list"
+            title="Bulleted list"
+            disabled
+          >
+            • List
+          </button>
+          <button
+            type="button"
+            data-command="ordered-list"
+            aria-label="Numbered list"
+            title="Numbered list"
+            disabled
+          >
+            1. List
+          </button>
+          <button
+            type="button"
+            data-command="blockquote"
+            aria-label="Block quote"
+            title="Block quote"
+            disabled
+          >
+            Quote
+          </button>
+          <button
+            type="button"
+            data-command="code-block"
+            aria-label="Code block"
+            title="Code block"
+            disabled
+          >
+            Code block
+          </button>
+          <button
+            type="button"
+            data-command="divider"
+            aria-label="Divider"
+            title="Horizontal divider"
+            disabled
+          >
+            Divider
+          </button>
+          <span class="toolbar-spacer"></span>
+          <button type="button" data-command="undo" aria-label="Undo" title="Undo (⌘Z)" disabled>
+            Undo
+          </button>
+          <button type="button" data-command="redo" aria-label="Redo" title="Redo (⇧⌘Z)" disabled>
+            Redo
+          </button>
+        </div>
+        <div id="editor" class="editor" aria-label="Helper Buddy system prompt"></div>
+      </section>
+
+      <footer>
+        <span>No end-user setting is created.</span>
+        <span><kbd>⌘</kbd><kbd>S</kbd> saves</span>
+      </footer>
+    </main>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

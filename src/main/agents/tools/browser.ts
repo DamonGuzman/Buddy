@@ -130,18 +130,7 @@ export const browserTools: HelperBuddyToolSpec[] = [
   needsUserTool,
 ];
 
-export const BROWSER_ACTION_TOOL_NAMES = new Set([
-  'browser_navigate',
-  'browser_click',
-  'browser_type',
-  'browser_press_keys',
-  'browser_scroll',
-]);
 const BROWSER_TOOL_NAMES = new Set(browserTools.map((tool) => tool.definition.name));
-
-export function isBrowserActionTool(name: string): boolean {
-  return BROWSER_ACTION_TOOL_NAMES.has(name);
-}
 
 export function isBrowserTool(name: string): boolean {
   return BROWSER_TOOL_NAMES.has(name);

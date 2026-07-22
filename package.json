@@ -17,6 +17,7 @@
   "scripts": {
     "dev": "node tools/dev.mjs",
     "dev:raw": "electron-vite dev --watch",
+    "prompt:edit": "node tools/helper-prompt-editor/server.mjs",
     "typecheck": "node node_modules/build-typescript/lib/tsc.js --noEmit -p tsconfig.node.json --composite false && node node_modules/build-typescript/lib/tsc.js --noEmit -p tsconfig.web.json --composite false",
     "build": "node build/build-mac-native.mjs && npm run typecheck && electron-vite build",
     "test": "vitest run",
@@ -60,6 +61,9 @@
     "@radix-ui/react-switch": "^1.3.3",
     "@radix-ui/react-tooltip": "^1.2.12",
     "@tailwindcss/vite": "^4.3.2",
+    "@tiptap/core": "^3.28.0",
+    "@tiptap/markdown": "^3.28.0",
+    "@tiptap/starter-kit": "^3.28.0",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
